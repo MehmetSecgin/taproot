@@ -1,0 +1,14 @@
+{
+  "defaults": {
+    "profile": "default",
+    "json": false,
+    "noColor": false,
+    "noAnimations": true,
+    "learning": {
+      "enabled": true,
+      "sampleRowsMax": 20,
+      "sampleCellMax": 256,
+      "ttlHours": 168
+    }
+  }
+}

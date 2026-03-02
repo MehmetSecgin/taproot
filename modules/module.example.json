@@ -1,0 +1,8 @@
+{
+  "name": "loki",
+  "version": "0.1.0",
+  "kind": "executor",
+  "capabilities": ["doctor", "executeRead"],
+  "priority": 50,
+  "entry": "dist/loki-plugin.js"
+}

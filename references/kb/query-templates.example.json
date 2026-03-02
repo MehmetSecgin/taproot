@@ -1,0 +1,12 @@
+[
+  {
+    "id": "orders.latest_by_customer",
+    "service": "orders",
+    "intent": "latest orders by customer",
+    "nativeQueryTemplate": "SELECT id, status, created_at FROM orders WHERE customer_id = :customer_id ORDER BY created_at DESC LIMIT :limit",
+    "params": ["customer_id", "limit"],
+    "resultShape": "table",
+    "tags": ["orders", "customer"],
+    "status": "active"
+  }
+]
