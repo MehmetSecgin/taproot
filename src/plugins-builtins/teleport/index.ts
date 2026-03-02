@@ -13,6 +13,7 @@ export const teleportPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
+    accessMethods: ['tsh'],
     priority: 90,
   },
 

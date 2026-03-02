@@ -4,11 +4,11 @@ import { nowIso } from '../../core/time.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
   return {
-    host: ds.connection.host || creds.host || '127.0.0.1',
-    port: Number(ds.connection.port || creds.port || 3306),
+    host: ds.connection.host || '127.0.0.1',
+    port: Number(ds.connection.port || 3306),
     user: creds.user,
     password: creds.password,
-    database: ds.connection.database || creds.database,
+    database: ds.connection.database,
     ssl: ds.connection.ssl ? {} : undefined,
   };
 }
@@ -19,6 +19,7 @@ export const mysqlPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
+    accessMethods: ['native', 'qa-portforward'],
     priority: 100,
   },
 

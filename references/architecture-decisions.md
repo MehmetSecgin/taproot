@@ -32,3 +32,8 @@ For each capability:
 - Deterministic local caches only (`resolution-cache`, `query-library`, `query-stats`).
 - Upsert by stable keys; avoid append-only duplicates.
 - Normalize SQL to placeholder templates (`:num`, `:str`, `:bool`) for cross-param reuse.
+
+## Config boundaries
+- Datasource profiles own connection topology (`host`, `port`, `database`, `target`).
+- Credential refs own authentication and connector command material.
+- Query template params are derived from SQL placeholders to avoid drift.

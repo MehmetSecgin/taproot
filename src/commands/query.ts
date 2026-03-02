@@ -50,9 +50,6 @@ async function autoBootstrapDatasource(ctx: AppContext, env: string, service: st
 
     await ensureCredentialDefaults(ctx, credentialRef, {
       user: dbUser || 'root',
-      host: '127.0.0.1',
-      port: String(localPort),
-      database,
     });
     await ensureCredentialDefaults(ctx, 'vpn:work', {
       statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
@@ -94,8 +91,6 @@ async function autoBootstrapDatasource(ctx: AppContext, env: string, service: st
   if (accessMethod === 'tsh') {
     await ensureCredentialDefaults(ctx, credentialRef, {
       dbUser,
-      database,
-      target,
     });
     await ensureCredentialDefaults(ctx, 'vpn:work', {
       statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',

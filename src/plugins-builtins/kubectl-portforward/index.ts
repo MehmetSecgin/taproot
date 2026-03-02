@@ -13,6 +13,7 @@ export const kubectlPortforwardPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
+    accessMethods: ['qa-portforward'],
     priority: 85,
   },
 
@@ -43,4 +44,3 @@ export const kubectlPortforwardPlugin: TelequeryPlugin = {
     return [{ check: 'kubectl-portforward disconnect', status: r.ok ? 'ok' : 'fail', detail: r.detail }];
   },
 };
-

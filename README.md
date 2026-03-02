@@ -31,7 +31,7 @@ npm ci
 npm run build
 
 # store credentials under a reference key
-node dist/index.js creds set --ref prod:orders --user sample_reader --password '***' --host db.internal.example --database orders
+node dist/index.js creds set --ref prod:orders --user sample_reader --password '***'
 
 # create datasource profile
 node dist/index.js datasource add --name prod-orders --kind mysql --env prod --service orders --credential-ref prod:orders --host db.internal.example --port 3306 --database orders
@@ -48,7 +48,7 @@ node dist/index.js query --datasource prod-orders --query \"SELECT 1 AS ok\"
 # connector credential refs (local encrypted state, not repository files)
 node dist/index.js creds set --ref vpn:work --status-command "openvpn3 sessions-list" --connect-command "openvpn3 session-start --config /absolute/path/to/profile.ovpn"
 node dist/index.js creds set --ref tsh:work --status-command "tsh status" --login-command "tsh login --proxy your.teleport.proxy --auth your-sso"
-node dist/index.js creds set --ref prod:events --db-user analytics_reader --database events --target primary-tidb
+node dist/index.js creds set --ref prod:events --db-user analytics_reader
 
 # datasource using teleport mysql executor + connectors
 node dist/index.js datasource add \
@@ -91,5 +91,6 @@ Expected structure:
 - Secrets are never printed and are redacted from JSON output envelopes.
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
+- Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`

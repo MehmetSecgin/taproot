@@ -15,6 +15,7 @@ export interface PluginManifest {
   version: string;
   kind: PluginKind;
   capabilities: Capability[];
+  accessMethods?: string[];
   configSchema?: Record<string, unknown>;
   priority?: number;
 }
@@ -51,6 +52,7 @@ export interface QueryTemplate {
   datasourceKind?: string;
   datasourceName?: string;
   intent: string;
+  aliases?: string[];
   nativeQueryTemplate: string;
   params: string[];
   resultShape: 'table' | 'json' | 'summary';

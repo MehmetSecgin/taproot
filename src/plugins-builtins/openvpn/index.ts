@@ -13,6 +13,7 @@ export const openvpnPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
+    accessMethods: ['native', 'qa-portforward', 'tsh'],
     priority: 80,
   },
 

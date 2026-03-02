@@ -4,11 +4,11 @@ import { nowIso } from '../../core/time.js';
 
 function connConfig(ds: any, creds: Record<string, string>) {
   return {
-    host: ds.connection.host || creds.host || '127.0.0.1',
-    port: Number(ds.connection.port || creds.port || 5432),
+    host: ds.connection.host || '127.0.0.1',
+    port: Number(ds.connection.port || 5432),
     user: creds.user,
     password: creds.password,
-    database: ds.connection.database || creds.database,
+    database: ds.connection.database,
     ssl: ds.connection.ssl ? { rejectUnauthorized: false } : undefined,
   };
 }
@@ -19,6 +19,7 @@ export const postgresPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
+    accessMethods: ['native', 'qa-portforward'],
     priority: 100,
   },
 

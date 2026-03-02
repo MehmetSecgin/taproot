@@ -22,13 +22,14 @@ export const teleportMysqlPlugin: TelequeryPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
+    accessMethods: ['tsh'],
     priority: 100,
   },
 
   async doctor(input) {
-    const target = input.datasource.connection.target || input.credentials.target;
+    const target = input.datasource.connection.target;
     const dbUser = input.credentials.dbUser || input.credentials.user;
-    const dbName = input.datasource.connection.database || input.credentials.database;
+    const dbName = input.datasource.connection.database;
     if (!target || !dbUser || !dbName) {
       return [{ check: 'teleport-mysql doctor', status: 'fail', detail: 'missing target/dbUser/database in datasource+credentials' }];
     }
@@ -46,9 +47,9 @@ export const teleportMysqlPlugin: TelequeryPlugin = {
   async execute(request, creds): Promise<QueryResult> {
     const startedAt = nowIso();
     const start = Date.now();
-    const target = request.datasource.connection.target || creds.target;
+    const target = request.datasource.connection.target;
     const dbUser = creds.dbUser || creds.user;
-    const dbName = request.datasource.connection.database || creds.database;
+    const dbName = request.datasource.connection.database;
     if (!target || !dbUser || !dbName) {
       throw new Error('teleport-mysql requires target, dbUser/user, and database');
     }

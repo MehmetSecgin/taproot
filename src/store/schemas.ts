@@ -32,6 +32,7 @@ export const QueryTemplateSchema = z.object({
   datasourceKind: z.string().optional(),
   datasourceName: z.string().optional(),
   intent: z.string().min(1),
+  aliases: z.array(z.string()).default([]),
   nativeQueryTemplate: z.string().min(1),
   params: z.array(z.string()).default([]),
   resultShape: z.enum(['table', 'json', 'summary']).default('table'),

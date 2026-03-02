@@ -78,6 +78,8 @@ Query path must resolve deterministically:
 3. Learning `resolution-cache`.
 4. KB static resolvers.
 
+KB source-of-truth clarification is documented in `references/kb/README.md`.
+
 Template resolution:
 1. Explicit `--query` / `--template`.
 2. Learning `query-library` exact `service + intentKey`.
@@ -92,4 +94,3 @@ Template resolution:
 - Never store credential values, tokens, passwords, cert/key material.
 - `credentialRef` identifiers are allowed.
 - Any sample payload storage must be explicitly gated and bounded (disabled by default).
-

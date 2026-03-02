@@ -41,10 +41,17 @@ export class KbStore {
       .map((t) => ({
         t,
         exact: Number(String(t.intent || '').toLowerCase() === normalized),
-        contains: Number(String(t.intent || '').toLowerCase().includes(normalized) || normalized.includes(String(t.intent || '').toLowerCase())),
+        aliasExact: Number((Array.isArray(t.aliases) ? t.aliases : []).some((a: string) => String(a).toLowerCase() === normalized)),
+        contains: Number(
+          String(t.intent || '').toLowerCase().includes(normalized) ||
+            normalized.includes(String(t.intent || '').toLowerCase()) ||
+            (Array.isArray(t.aliases) ? t.aliases : []).some(
+              (a: string) => String(a).toLowerCase().includes(normalized) || normalized.includes(String(a).toLowerCase()),
+            ),
+        ),
       }))
-      .sort((a, b) => b.exact - a.exact || b.contains - a.contains || String(a.t.id || '').localeCompare(String(b.t.id || '')));
-    if (!ranked[0].exact && !ranked[0].contains) return null;
+      .sort((a, b) => b.exact - a.exact || b.aliasExact - a.aliasExact || b.contains - a.contains || String(a.t.id || '').localeCompare(String(b.t.id || '')));
+    if (!ranked[0].exact && !ranked[0].aliasExact && !ranked[0].contains) return null;
     return ranked[0].t;
   }
 }

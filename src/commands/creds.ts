@@ -24,10 +24,6 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     .option('--db-user <dbUser>')
     .option('--password <password>')
     .option('--token <token>')
-    .option('--host <host>')
-    .option('--port <port>')
-    .option('--database <database>')
-    .option('--target <target>')
     .option('--status-command <cmd>')
     .option('--connect-command <cmd>')
     .option('--disconnect-command <cmd>')
@@ -41,10 +37,6 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
         'dbUser',
         'password',
         'token',
-        'host',
-        'port',
-        'database',
-        'target',
         'statusCommand',
         'connectCommand',
         'disconnectCommand',

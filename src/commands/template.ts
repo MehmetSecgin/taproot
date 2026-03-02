@@ -16,15 +16,15 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
 
   t.command('validate').requiredOption('--id <id>').action((opts) => {
     const ctx = getCtx();
-    const item = ctx.templateStore.get(opts.id);
-    if (!item) throw new Error(`Template not found: ${opts.id}`);
-    const placeholders = [...item.nativeQueryTemplate.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)].map((m) => m[1]);
-    const missing = item.params.filter((p) => !placeholders.includes(p));
-    const extra = placeholders.filter((p) => !item.params.includes(p));
-    const valid = missing.length === 0;
-    printJson({ valid, missingParams: missing, extraPlaceholders: extra });
-    if (!valid) process.exitCode = 1;
-  });
+      const item = ctx.templateStore.get(opts.id);
+      if (!item) throw new Error(`Template not found: ${opts.id}`);
+      const placeholders = [...item.nativeQueryTemplate.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)].map((m) => m[1]);
+      const missing = item.params.filter((p) => !placeholders.includes(p));
+      const extra = placeholders.filter((p) => !item.params.includes(p));
+      const valid = missing.length === 0 && extra.length === 0;
+      printJson({ valid, missingParams: missing, extraPlaceholders: extra });
+      if (!valid) process.exitCode = 1;
+    });
 
   t.command('run').requiredOption('--id <id>').option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), []).action((opts) => {
     const ctx = getCtx();
@@ -41,14 +41,15 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
     .requiredOption('--query <query>')
     .option('--datasource-name <name>')
     .option('--datasource-kind <kind>')
-    .option('--param <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
+    .option('--alias <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .action((opts) => {
       const ctx = getCtx();
       const saved = ctx.templateStore.save({
         id: opts.id,
         intent: opts.intent,
+        aliases: opts.alias || [],
         nativeQueryTemplate: opts.query,
-        params: opts.param || [],
+        params: [],
         datasourceName: opts.datasourceName,
         datasourceKind: opts.datasourceKind,
         resultShape: 'table',

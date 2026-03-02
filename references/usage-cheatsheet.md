@@ -5,7 +5,7 @@
 - `telequery --json self-check`
 
 ## Credentials
-- `telequery creds set --ref prod:orders --user sample_reader --password '***' --host db.internal.example --database orders`
+- `telequery creds set --ref prod:orders --user sample_reader --password '***'`
 - `telequery creds show --ref prod:orders`
 
 ## Datasources
