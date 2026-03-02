@@ -12,6 +12,12 @@ function runDirFromCtx(ctx: AppContext): string {
   return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.telequery'), 'run');
 }
 
+function shouldPrintPlainSuccess(ctx: AppContext): boolean {
+  if (ctx.jsonMode) return false;
+  if (ctx.verbose) return true;
+  return !process.stderr.isTTY;
+}
+
 export function registerDaemon(program: Command, getCtx: () => AppContext): void {
   const d = program.command('daemon').description('telequery daemon operations');
 
@@ -43,8 +49,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
           if (res.ok) {
             if (ctx.jsonMode) printJson({ started: true, status: res.data });
             else {
-              progress.succeed('telequeryd started');
-              console.log('telequeryd started');
+              if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd started');
+              else progress.succeed('telequeryd started');
             }
             return;
           }
@@ -82,8 +88,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
       if (ctx.jsonMode) printJson(res.data || {});
       else {
-        progress.succeed('telequeryd stopped');
-        console.log('telequeryd stopped');
+        if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd stopped');
+        else progress.succeed('telequeryd stopped');
       }
     } finally {
       progress.stop();
@@ -114,8 +120,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
         stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
       });
       child.unref();
-      progress.succeed('telequeryd restarted');
-      console.log('telequeryd restarted');
+      if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd restarted');
+      else progress.succeed('telequeryd restarted');
     } finally {
       progress.stop();
     }

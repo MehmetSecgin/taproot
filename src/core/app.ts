@@ -86,7 +86,7 @@ export function classifyError(message: string): string {
   if (/access denied|permission denied/.test(text)) return 'ACCESS_DENIED';
   if (/unknown database|does not exist/.test(text)) return 'UNKNOWN_DATABASE';
   if (/getaddrinfo|no such host|target.*not found/.test(text)) return 'UNKNOWN_TARGET';
-  if (/timeout|timed out|connection refused|network/.test(text)) return 'CONNECTIVITY';
+  if (/timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|network/.test(text)) return 'CONNECTIVITY';
   if (/auth|login|expired|unauthorized/.test(text)) return 'AUTH_EXPIRED';
   return 'GENERIC';
 }

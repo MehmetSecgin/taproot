@@ -117,8 +117,13 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           });
         } else {
           const summary = `doctor summary: ok=${okCount} warn=${warnCount} fail=${failCount} total=${checks.length}`;
-          if (!failCount && !warnCount) progress.succeed(summary);
-          else progress.warn(summary);
+          if (ctx.verbose) {
+            console.log(summary);
+          } else if (!failCount && !warnCount) {
+            progress.succeed(summary);
+          } else {
+            progress.warn(summary);
+          }
           if (visibleRows.length) {
             console.log(renderTable(visibleRows));
           } else if (opts.all || ctx.verbose) {
