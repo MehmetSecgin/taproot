@@ -5,10 +5,11 @@
   "type": "module",
   "private": true,
   "bin": {
-    "telequery": "dist/index.js"
+    "telequery": "dist/index.js",
+    "telequeryd": "dist/daemon-main.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --out-dir dist --clean",
+    "build": "tsup src/index.ts src/daemon-main.ts --format esm --dts --out-dir dist --clean",
     "dev": "tsx src/index.ts",
     "check": "tsc --noEmit",
     "test": "npm run build && vitest run",

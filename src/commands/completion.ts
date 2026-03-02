@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 
-const COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'completion'];
+const COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'daemon', 'session', 'completion'];
 
 function zshScript(): string {
   return `#compdef telequery\n_telequery_complete() {\n  _arguments '*: :(${COMMANDS.join(' ')})'\n}\ncompdef _telequery_complete telequery\n`;

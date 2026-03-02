@@ -22,6 +22,8 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 - `telequery cache <show|prune|clear>`
 - `telequery learn <status|compact|replay>`
 - `telequery creds <set|show|unset>`
+- `telequery daemon <start|status|stop|restart>`
+- `telequery session <open|ls|inspect|close|close-all>`
 - `telequery completion <zsh|bash|fish>`
 - `telequery sanitize check-repo`
 
@@ -92,6 +94,7 @@ Expected structure:
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
+- `telequeryd`/`session` commands are available for Phase 1 runtime scaffolding.
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`

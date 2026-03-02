@@ -13,6 +13,8 @@ import { registerLearn } from './commands/learn.js';
 import { registerCompletion } from './commands/completion.js';
 import { registerCreds } from './commands/creds.js';
 import { registerSanitize } from './commands/sanitize.js';
+import { registerDaemon } from './commands/daemon.js';
+import { registerSession } from './commands/session.js';
 
 const program = new Command();
 
@@ -53,6 +55,8 @@ registerLearn(program, context);
 registerCreds(program, context);
 registerCompletion(program);
 registerSanitize(program, context);
+registerDaemon(program, context);
+registerSession(program, context);
 
 program.configureOutput({
   outputError: (str, write) => {
