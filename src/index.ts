@@ -21,7 +21,7 @@ import { cleanupProgress } from './core/progress.js';
 const program = new Command();
 
 program
-  .name('telequery')
+  .name('taproot')
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
   .version('0.1.0')
   .option('--json', 'Output machine-readable JSON envelope', false)
@@ -37,7 +37,7 @@ program.exitOverride((error) => {
 });
 
 if (process.argv.includes('--skill-version')) {
-  process.stdout.write('telequery-skill@0.1.0\n');
+  process.stdout.write('taproot-skill@0.1.0\n');
   process.exit(EXIT_CODES.OK);
 }
 
@@ -89,7 +89,7 @@ function emitError(error: unknown, code: string): void {
   }
   console.error(message);
   if (hasCredsTopologyMisuseHint(message)) {
-    console.error("Hint: connection topology belongs on datasource profiles. Use 'telequery datasource add ... --host --port --database --target'.");
+    console.error("Hint: connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'.");
   }
 }
 
@@ -113,7 +113,7 @@ program.parseAsync(process.argv).catch((error) => {
     cleanupProgress();
     const message = (error as Error)?.message || '';
     if (hasCredsTopologyMisuseHint(message)) {
-      console.error("Hint: connection topology belongs on datasource profiles. Use 'telequery datasource add ... --host --port --database --target'.");
+      console.error("Hint: connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'.");
     } else if (process.argv.includes('--json')) {
       printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
     }

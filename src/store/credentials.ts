@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 
-const SERVICE_NAME = 'telequery';
+const SERVICE_NAME = 'taproot';
 
 interface FallbackFileShape {
   salt: string;
@@ -13,7 +13,7 @@ interface FallbackFileShape {
 }
 
 function getMasterSecret(): string {
-  return process.env.TELEQUERY_MASTER_KEY || `${process.env.USER || 'user'}@${process.platform}`;
+  return process.env.TAPROOT_MASTER_KEY || `${process.env.USER || 'user'}@${process.platform}`;
 }
 
 function encryptJson(payload: Record<string, Record<string, string>>): FallbackFileShape {

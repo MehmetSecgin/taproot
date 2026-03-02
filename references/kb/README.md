@@ -7,8 +7,8 @@
 When fields overlap between datasource profiles and KB entries (`engine`, `host`, `port`, `database`, `target`, `access_method`):
 
 1. Explicit CLI args
-2. Datasource profile store (`~/.telequery/config/datasources.json`)
-3. Learning resolution cache (`~/.telequery/learning/resolution-cache.json`)
+2. Datasource profile store (`~/.taproot/config/datasources.json`)
+3. Learning resolution cache (`~/.taproot/learning/resolution-cache.json`)
 4. KB static files (`references/kb/*.json`)
 
 Practical meaning:
@@ -33,7 +33,7 @@ Rules:
 - Resolver normalization for `intent` and `aliases`: trim + lowercase + collapse inner whitespace.
 
 ## Template Params Contract
-`params` are derived from SQL placeholders (`:param`) by Telequery.
+`params` are derived from SQL placeholders (`:param`) by TapRoot.
 
 Rules:
 - SQL placeholder list is canonical.

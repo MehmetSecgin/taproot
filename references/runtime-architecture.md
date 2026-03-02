@@ -1,14 +1,14 @@
-# Telequery Runtime Architecture
+# TapRoot Runtime Architecture
 
 ## 1) Purpose
-This document defines Telequery's runtime structure end-to-end.
+This document defines TapRoot's runtime structure end-to-end.
 
 Focus:
 - System shape and lifecycle.
 - State ownership and safety boundaries.
 - Failure behavior and recovery.
 - Performance model.
-- Proposed session-based runtime (`telequeryd`) for high-throughput usage.
+- Proposed session-based runtime (`taprootd`) for high-throughput usage.
 
 This document is intentionally implementation-oriented (not a feature checklist).
 
@@ -22,7 +22,7 @@ This document is intentionally implementation-oriented (not a feature checklist)
 ## 3) Current Runtime (As Implemented)
 
 ### 3.1 Process Model
-Current Telequery is a stateless one-shot CLI process:
+Current TapRoot is a stateless one-shot CLI process:
 1. Parse command + flags.
 2. Build fresh context.
 3. Read stores from disk.
@@ -52,7 +52,7 @@ Implication:
 - Run artifacts: `src/core/artifacts.ts`
 
 ### 3.3 Query Lifecycle (Current)
-`telequery query ...`:
+`taproot query ...`:
 1. Resolve datasource from explicit profile, env/service, learning cache, or KB bootstrap.
 2. Resolve query from `--query`, `--template`, or intent resolver.
 3. Enforce mutation policy (`src/core/safety.ts`).
@@ -63,7 +63,7 @@ Implication:
 8. Return table or JSON.
 
 ### 3.4 State Layout (Current)
-Default root: `~/.telequery`
+Default root: `~/.taproot`
 
 Subpaths:
 - `config/datasources.json`
@@ -123,23 +123,23 @@ Consequences under bursty workload:
 - Stateless mode can leave externally spawned helpers if connector scripts are not robust.
 - No global process owner for session-scoped resources.
 
-## 4) Target Runtime (Proposed): Session-Aware `telequeryd`
+## 4) Target Runtime (Proposed): Session-Aware `taprootd`
 
 ### 4.1 Why
 Need higher throughput, lower repeated latency, and strict cleanup semantics for agent-heavy usage.
 
 ### 4.2 High-Level Model
 Introduce a local daemon:
-- `telequery` CLI: user/client front-end.
-- `telequeryd`: long-lived local runtime managing sessions/resources.
+- `taproot` CLI: user/client front-end.
+- `taprootd`: long-lived local runtime managing sessions/resources.
 
 Transport:
-- Unix domain socket (`~/.telequery/run/telequeryd.sock`).
+- Unix domain socket (`~/.taproot/run/taprootd.sock`).
 - 0600 permissions.
 - single-user trust boundary.
 
 Daemon runtime decision (locked for v1):
-- `telequeryd` stays in Node/TypeScript (same ecosystem as CLI/plugins).
+- `taprootd` stays in Node/TypeScript (same ecosystem as CLI/plugins).
 - No sidecar process boundary in v1.
 - If CPU-bound paths appear, isolate with `worker_threads` before considering multi-runtime sidecar design.
 
@@ -300,12 +300,12 @@ Correlation contract:
 - Daemon logs, run artifacts, and JSON responses must carry these IDs.
 
 Persistent logs:
-- bounded rotating logs under `~/.telequery/run/logs/`.
+- bounded rotating logs under `~/.taproot/run/logs/`.
 - run artifacts remain per query for replay/debug.
 
 ### 4.14 Session Persistence Across Daemon Restarts
 Session metadata is checkpointed (no secrets):
-- file: `~/.telequery/run/sessions.json`
+- file: `~/.taproot/run/sessions.json`
 - includes: `sessionId`, fingerprint(+version), state, timestamps, resource descriptors, counters.
 
 Recovery behavior:
@@ -321,7 +321,7 @@ Note:
 - DB credentials and secret values are never serialized in checkpoint files.
 
 ### 4.15 Shutdown Semantics
-`telequeryd` shutdown:
+`taprootd` shutdown:
 1. stop accepting new leases
 2. drain running operations (timeout-bounded)
 3. force close remaining sessions

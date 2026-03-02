@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import type { QueryResult, TelequeryPlugin } from '../../types/core.js';
+import type { QueryResult, TapRootPlugin } from '../../types/core.js';
 import { nowIso } from '../../core/time.js';
 
 const NOISE_PREFIXES = [
@@ -16,7 +16,7 @@ function cleanLines(text: string): string[] {
     .filter((s) => s && !NOISE_PREFIXES.some((p) => s.startsWith(p)));
 }
 
-export const teleportMysqlPlugin: TelequeryPlugin = {
+export const teleportMysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport-mysql',
     version: '0.1.0',

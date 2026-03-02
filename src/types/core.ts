@@ -93,7 +93,7 @@ export interface DoctorCheck {
   detail: string;
 }
 
-export interface TelequeryPlugin {
+export interface TapRootPlugin {
   manifest: PluginManifest;
   doctor?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
   connect?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;

@@ -1,12 +1,12 @@
 {
-  "name": "telequery",
+  "name": "taproot",
   "version": "0.1.0",
   "description": "Universal query orchestration CLI with plugin runtime (DB-first v1)",
   "type": "module",
   "private": true,
   "bin": {
-    "telequery": "dist/index.js",
-    "telequeryd": "dist/daemon-main.js"
+    "taproot": "dist/index.js",
+    "taprootd": "dist/daemon-main.js"
   },
   "scripts": {
     "build": "tsup src/index.ts src/daemon-main.ts --format esm --dts --out-dir dist --clean",

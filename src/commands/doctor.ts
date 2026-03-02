@@ -31,7 +31,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
       const logVerbose = (msg: string): void => {
-        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[telequery] ${msg}\n`);
+        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
 
       try {

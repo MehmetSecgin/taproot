@@ -1,11 +1,11 @@
 # Phase 1 Runtime Contract
 
-This contract is the implementation baseline for the first `telequeryd` PR.
+This contract is the implementation baseline for the first `taprootd` PR.
 
 ## 1) Daemon RPC Contract (Pinned)
 
 Transport:
-- Unix socket: `~/.telequery/run/telequeryd.sock`
+- Unix socket: `~/.taproot/run/taprootd.sock`
 - Request/response: newline-delimited JSON messages (`NDJSON`)
 
 All requests:
@@ -89,7 +89,7 @@ Response failure:
 ## 2) Session Checkpoint Schema (`sessions.json`)
 
 Path:
-- `~/.telequery/run/sessions.json`
+- `~/.taproot/run/sessions.json`
 
 Top-level:
 ```json

@@ -1,5 +1,5 @@
 import mysql from 'mysql2/promise';
-import type { DoctorCheck, QueryRequest, QueryResult, TelequeryPlugin } from '../../types/core.js';
+import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { nowIso } from '../../core/time.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
@@ -13,7 +13,7 @@ function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string
   };
 }
 
-export const mysqlPlugin: TelequeryPlugin = {
+export const mysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'mysql',
     version: '0.1.0',

@@ -6,7 +6,7 @@ import { DatasourceStore } from '../src/store/datasources.js';
 
 describe('datasource resolution', () => {
   it('prefers highest confidence then latest updatedAt', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'telequery-test-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const file = path.join(dir, 'datasources.json');
     const store = new DatasourceStore(file);
 

@@ -59,7 +59,7 @@ class Progress implements ProgressReporter {
     this.stream = opts.stream || process.stderr;
     this.noColor = Boolean(opts.noColor);
     this.plainUpdates = Boolean(opts.plainUpdates || opts.verbose);
-    this.prefix = opts.prefix || 'telequery';
+    this.prefix = opts.prefix || 'taproot';
     const useSpinner = Boolean(opts.enabled && !opts.noAnimations && this.stream.isTTY);
     if (useSpinner) {
       this.spinner = ora({

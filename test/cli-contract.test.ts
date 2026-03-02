@@ -28,13 +28,13 @@ describe('cli contract', () => {
   it('prints skill version', () => {
     const out = runCli(['--skill-version']);
     expect(out.status).toBe(0);
-    expect(out.stdout.trim()).toBe('telequery-skill@0.1.0');
+    expect(out.stdout.trim()).toBe('taproot-skill@0.1.0');
   });
 
   it('completion zsh includes command name', () => {
     const out = runCli(['completion', 'zsh']);
     expect(out.status).toBe(0);
-    expect(out.stdout).toContain('compdef _telequery_complete telequery');
+    expect(out.stdout).toContain('compdef _taproot_complete taproot');
   });
 
   it('self-check json includes checks', () => {

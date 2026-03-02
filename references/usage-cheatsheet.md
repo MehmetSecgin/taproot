@@ -1,35 +1,35 @@
-# Telequery Usage Cheatsheet
+# TapRoot Usage Cheatsheet
 
 ## Boot
-- `telequery self-check`
-- `telequery --json self-check`
+- `taproot self-check`
+- `taproot --json self-check`
 
 ## Credentials
-- `telequery creds set --ref prod:orders --user sample_reader --password '***'`
-- `telequery creds show --ref prod:orders`
+- `taproot creds set --ref prod:orders --user sample_reader --password '***'`
+- `taproot creds show --ref prod:orders`
 
 ## Datasources
-- `telequery datasource add --name prod-orders --kind mysql --env prod --service orders --credential-ref prod:orders --host db.internal.example --port 3306 --database orders`
-- `telequery datasource list`
-- `telequery datasource resolve --env prod --service orders`
+- `taproot datasource add --name prod-orders --kind mysql --env prod --service orders --credential-ref prod:orders --host db.internal.example --port 3306 --database orders`
+- `taproot datasource list`
+- `taproot datasource resolve --env prod --service orders`
 
 ## Doctor + Query
-- `telequery doctor --datasource prod-orders`
-- `telequery query --datasource prod-orders --query "SELECT 1 AS ok"`
-- `telequery query --datasource prod-orders --template orders.latest_by_customer --param customer_id=42 --param limit=20`
+- `taproot doctor --datasource prod-orders`
+- `taproot query --datasource prod-orders --query "SELECT 1 AS ok"`
+- `taproot query --datasource prod-orders --template orders.latest_by_customer --param customer_id=42 --param limit=20`
 
 ## KB
-- `telequery kb resolve-connection --service orders --env prod`
-- `telequery kb resolve-credentials --service orders --env prod`
-- `telequery kb resolve-database-name --service orders --env prod`
-- `telequery kb resolve-query --service orders --intent "latest orders by customer"`
+- `taproot kb resolve-connection --service orders --env prod`
+- `taproot kb resolve-credentials --service orders --env prod`
+- `taproot kb resolve-database-name --service orders --env prod`
+- `taproot kb resolve-query --service orders --intent "latest orders by customer"`
 
 ## Learning + Cache
-- `telequery learn status`
-- `telequery learn compact`
+- `taproot learn status`
+- `taproot learn compact`
 - Learning contract: `references/learning-contract.md`
-- `telequery cache show`
-- `telequery cache prune --ttl-hours 168`
+- `taproot cache show`
+- `taproot cache prune --ttl-hours 168`
 
 ## Completion
-- `eval "$(telequery completion zsh)"`
+- `eval "$(taproot completion zsh)"`

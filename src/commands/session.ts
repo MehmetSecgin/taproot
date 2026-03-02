@@ -4,7 +4,7 @@ import { printJson, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 
 export function registerSession(program: Command, getCtx: () => AppContext): void {
-  const s = program.command('session').description('Session operations via telequeryd');
+  const s = program.command('session').description('Session operations via taprootd');
 
   s.command('open')
     .requiredOption('--datasource <name>')

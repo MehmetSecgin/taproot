@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import type { DoctorCheck, QueryResult, TelequeryPlugin } from '../../types/core.js';
+import type { DoctorCheck, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { nowIso } from '../../core/time.js';
 
 function connConfig(ds: any, creds: Record<string, string>) {
@@ -13,7 +13,7 @@ function connConfig(ds: any, creds: Record<string, string>) {
   };
 }
 
-export const postgresPlugin: TelequeryPlugin = {
+export const postgresPlugin: TapRootPlugin = {
   manifest: {
     name: 'postgres',
     version: '0.1.0',

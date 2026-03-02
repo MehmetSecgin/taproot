@@ -1,4 +1,4 @@
-# Telequery
+# TapRoot
 
 Extensive Node/TypeScript CLI for deterministic querying across plugin-backed datasources.
 
@@ -13,19 +13,19 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 - Reuse-first: prefer preexisting tools/libs over custom reinvention.
 
 ## Commands
-- `telequery self-check`
-- `telequery doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
-- `telequery query --datasource <name> [--query | --template | --intent] [--param k=v]`
-- `telequery datasource <list|show|add|remove|resolve>`
-- `telequery template <list|save|validate|run>`
-- `telequery kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related>`
-- `telequery cache <show|prune|clear>`
-- `telequery learn <status|compact|replay>`
-- `telequery creds <set|show|unset>`
-- `telequery daemon <start|status|stop|restart>`
-- `telequery session <open|ls|inspect|close|close-all>`
-- `telequery completion <zsh|bash|fish>`
-- `telequery sanitize check-repo`
+- `taproot self-check`
+- `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
+- `taproot query --datasource <name> [--query | --template | --intent] [--param k=v]`
+- `taproot datasource <list|show|add|remove|resolve>`
+- `taproot template <list|save|validate|run>`
+- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related>`
+- `taproot cache <show|prune|clear>`
+- `taproot learn <status|compact|replay>`
+- `taproot creds <set|show|unset>`
+- `taproot daemon <start|status|stop|restart>`
+- `taproot session <open|ls|inspect|close|close-all>`
+- `taproot completion <zsh|bash|fish>`
+- `taproot sanitize check-repo`
 
 ## Quickstart
 ```bash
@@ -79,7 +79,7 @@ npm test
 
 ## State
 Default runtime state path:
-- `~/.telequery/`
+- `~/.taproot/`
 
 Expected structure:
 - `config/` (datasources/templates/credentials)
@@ -94,7 +94,7 @@ Expected structure:
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
-- `telequeryd`/`session` commands are available for Phase 1 runtime scaffolding.
+- `taprootd`/`session` commands are available for Phase 1 runtime scaffolding.
 - Human mode uses compact progress on stderr; structured data stays on stdout.
 - Use global `--verbose` for step-by-step diagnostics (also on stderr).
 - Learning contract: `references/learning-contract.md`

@@ -1,25 +1,25 @@
-import type { Capability, TelequeryPlugin } from '../types/core.js';
+import type { Capability, TapRootPlugin } from '../types/core.js';
 
 export class PluginRegistry {
-  private readonly byName = new Map<string, TelequeryPlugin>();
+  private readonly byName = new Map<string, TapRootPlugin>();
 
-  register(plugin: TelequeryPlugin): void {
+  register(plugin: TapRootPlugin): void {
     this.byName.set(plugin.manifest.name, plugin);
   }
 
-  get(name: string): TelequeryPlugin | undefined {
+  get(name: string): TapRootPlugin | undefined {
     return this.byName.get(name);
   }
 
-  list(): TelequeryPlugin[] {
+  list(): TapRootPlugin[] {
     return [...this.byName.values()].sort((a, b) => (b.manifest.priority || 0) - (a.manifest.priority || 0));
   }
 
-  resolveByKind(kind: string): TelequeryPlugin | undefined {
+  resolveByKind(kind: string): TapRootPlugin | undefined {
     return this.list().find((p) => p.manifest.name === kind || p.manifest.kind === kind);
   }
 
-  resolveByCapability(capability: Capability): TelequeryPlugin[] {
+  resolveByCapability(capability: Capability): TapRootPlugin[] {
     return this.list().filter((p) => p.manifest.capabilities.includes(capability));
   }
 }

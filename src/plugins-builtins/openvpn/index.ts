@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import type { DoctorCheck, TelequeryPlugin } from '../../types/core.js';
+import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 function run(command: string): { ok: boolean; detail: string } {
   const proc = spawnSync('/bin/zsh', ['-lc', command], { encoding: 'utf8' });
@@ -7,7 +7,7 @@ function run(command: string): { ok: boolean; detail: string } {
   return { ok: false, detail: ((proc.stderr || proc.stdout || '').trim() || `exit=${proc.status}`).slice(0, 400) };
 }
 
-export const openvpnPlugin: TelequeryPlugin = {
+export const openvpnPlugin: TapRootPlugin = {
   manifest: {
     name: 'openvpn',
     version: '0.1.0',

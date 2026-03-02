@@ -72,9 +72,9 @@ async function autoBootstrapDatasource(ctx: AppContext, env: string, service: st
 
   if (accessMethod === 'qa-portforward') {
     const namespace = String(kb.namespace || 'develop');
-    const context = String(process.env.TELEQUERY_QA_CONTEXT || kb.k8s_context || env || namespace);
-    const localPort = Number(process.env.TELEQUERY_QA_LOCAL_PORT || 4406);
-    const logFile = `/tmp/telequery-pf-${env}-${service}.log`;
+    const context = String(process.env.TAPROOT_QA_CONTEXT || kb.k8s_context || env || namespace);
+    const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
+    const logFile = `/tmp/taproot-pf-${env}-${service}.log`;
     const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
     const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${namespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${namespace} port-forward svc/${target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
 
@@ -186,9 +186,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
       const logVerbose = (msg: string): void => {
-        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[telequery] ${msg}\n`);
+        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
-      const forceDirect = process.env.TELEQUERY_FORCE_DIRECT === '1';
+      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1';
       try {
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
         if (!forceDirect) {

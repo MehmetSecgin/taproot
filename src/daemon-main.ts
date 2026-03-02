@@ -15,7 +15,7 @@ process.on('uncaughtException', (error) => fatal(error, 'UNCAUGHT_EXCEPTION'));
 
 async function main() {
   const instance = await startDaemon();
-  process.stdout.write(`telequeryd started on ${instance.socketPath}\n`);
+  process.stdout.write(`taprootd started on ${instance.socketPath}\n`);
 }
 
 main().catch((error) => {

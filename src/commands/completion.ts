@@ -3,15 +3,15 @@ import { Command } from 'commander';
 const COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'daemon', 'session', 'completion'];
 
 function zshScript(): string {
-  return `#compdef telequery\n_telequery_complete() {\n  _arguments '*: :(${COMMANDS.join(' ')})'\n}\ncompdef _telequery_complete telequery\n`;
+  return `#compdef taproot\n_taproot_complete() {\n  _arguments '*: :(${COMMANDS.join(' ')})'\n}\ncompdef _taproot_complete taproot\n`;
 }
 
 function bashScript(): string {
-  return `telequery_complete() {\n  COMPREPLY=( $(compgen -W "${COMMANDS.join(' ')}" -- "${'${COMP_WORDS[1]}'}") )\n}\ncomplete -F telequery_complete telequery\n`;
+  return `taproot_complete() {\n  COMPREPLY=( $(compgen -W "${COMMANDS.join(' ')}" -- "${'${COMP_WORDS[1]}'}") )\n}\ncomplete -F taproot_complete taproot\n`;
 }
 
 function fishScript(): string {
-  return COMMANDS.map((c) => `complete -c telequery -f -a \"${c}\"`).join('\n') + '\n';
+  return COMMANDS.map((c) => `complete -c taproot -f -a \"${c}\"`).join('\n') + '\n';
 }
 
 export function registerCompletion(program: Command): void {

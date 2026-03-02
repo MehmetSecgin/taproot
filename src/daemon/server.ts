@@ -18,7 +18,7 @@ export interface DaemonOptions {
 }
 
 function defaultRunDir(stateRoot?: string): string {
-  return path.join(stateRoot || path.join(os.homedir(), '.telequery'), 'run');
+  return path.join(stateRoot || path.join(os.homedir(), '.taproot'), 'run');
 }
 
 function responseBase(req: RpcRequest): RpcResponse {
@@ -51,8 +51,8 @@ function parseQueryParams(params: Record<string, unknown>): Record<string, strin
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
   const runDir = defaultRunDir(opts.stateRoot);
-  const socketPath = opts.socketPath || path.join(runDir, 'telequeryd.sock');
-  const lockFile = path.join(runDir, 'telequeryd.pid');
+  const socketPath = opts.socketPath || path.join(runDir, 'taprootd.sock');
+  const lockFile = path.join(runDir, 'taprootd.pid');
   fs.mkdirSync(runDir, { recursive: true });
 
   if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });

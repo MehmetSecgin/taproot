@@ -23,8 +23,8 @@ export function resolveMemoryRoot(explicit?: string): string {
 }
 
 export function resolvePaths(memoryRoot?: string): Paths {
-  const explicitStateRoot = (process.env.TELEQUERY_STATE_ROOT || '').trim();
-  const stateRoot = explicitStateRoot || path.join(os.homedir(), '.telequery');
+  const explicitStateRoot = (process.env.TAPROOT_STATE_ROOT || '').trim();
+  const stateRoot = explicitStateRoot || path.join(os.homedir(), '.taproot');
   const configDir = path.join(stateRoot, 'config');
   const kbDir = path.join(memoryRoot || resolveMemoryRoot(), 'domains', 'engineering', 'references', 'db-kb');
   return {
@@ -45,7 +45,7 @@ export function ensurePaths(paths: Paths): void {
 }
 
 export function resolveFallbackPaths(memoryRoot?: string): Paths {
-  const stateRoot = path.join(process.cwd(), '.telequery-state');
+  const stateRoot = path.join(process.cwd(), '.taproot-state');
   const configDir = path.join(stateRoot, 'config');
   const kbDir = path.join(memoryRoot || resolveMemoryRoot(), 'domains', 'engineering', 'references', 'db-kb');
   return {

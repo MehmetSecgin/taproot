@@ -9,7 +9,7 @@ It must:
 - Avoid secret leakage.
 
 ## Files
-All files are local under `~/.telequery/learning/`:
+All files are local under `~/.taproot/learning/`:
 - `resolution-cache.json`
 - `query-library.json`
 - `query-stats.json`

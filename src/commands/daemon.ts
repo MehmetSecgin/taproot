@@ -9,7 +9,7 @@ import { createProgress } from '../core/progress.js';
 import { rpcCall } from '../daemon/client.js';
 
 function runDirFromCtx(ctx: AppContext): string {
-  return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.telequery'), 'run');
+  return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.taproot'), 'run');
 }
 
 function shouldPrintPlainSuccess(ctx: AppContext): boolean {
@@ -19,7 +19,7 @@ function shouldPrintPlainSuccess(ctx: AppContext): boolean {
 }
 
 export function registerDaemon(program: Command, getCtx: () => AppContext): void {
-  const d = program.command('daemon').description('telequery daemon operations');
+  const d = program.command('daemon').description('taproot daemon operations');
 
   d.command('start').action(async () => {
     const ctx = getCtx();
@@ -33,8 +33,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
     try {
       const runDir = runDirFromCtx(ctx);
       fs.mkdirSync(runDir, { recursive: true });
-      const logPath = path.join(runDir, 'telequeryd.log');
-      progress.update('starting telequeryd');
+      const logPath = path.join(runDir, 'taprootd.log');
+      progress.update('starting taprootd');
       const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
         detached: true,
         stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
@@ -49,8 +49,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
           if (res.ok) {
             if (ctx.jsonMode) printJson({ started: true, status: res.data });
             else {
-              if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd started');
-              else progress.succeed('telequeryd started');
+              if (shouldPrintPlainSuccess(ctx)) console.log('taprootd started');
+              else progress.succeed('taprootd started');
             }
             return;
           }
@@ -59,8 +59,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
         }
         await new Promise((r) => setTimeout(r, 200));
       }
-      progress.fail('telequeryd start timed out');
-      throw new Error(`telequeryd did not become healthy within timeout. Check ${logPath}`);
+      progress.fail('taprootd start timed out');
+      throw new Error(`taprootd did not become healthy within timeout. Check ${logPath}`);
     } finally {
       progress.stop();
     }
@@ -83,13 +83,13 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
     });
     try {
-      progress.update('stopping telequeryd');
+      progress.update('stopping taprootd');
       const res = await rpcCall({ method: 'daemon.stop' });
       if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
       if (ctx.jsonMode) printJson(res.data || {});
       else {
-        if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd stopped');
-        else progress.succeed('telequeryd stopped');
+        if (shouldPrintPlainSuccess(ctx)) console.log('taprootd stopped');
+        else progress.succeed('taprootd stopped');
       }
     } finally {
       progress.stop();
@@ -106,7 +106,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
     });
     try {
-      progress.update('restarting telequeryd');
+      progress.update('restarting taprootd');
       try {
         await rpcCall({ method: 'daemon.stop' });
       } catch {
@@ -114,14 +114,14 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       }
       const runDir = runDirFromCtx(ctx);
       fs.mkdirSync(runDir, { recursive: true });
-      const logPath = path.join(runDir, 'telequeryd.log');
+      const logPath = path.join(runDir, 'taprootd.log');
       const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
         detached: true,
         stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
       });
       child.unref();
-      if (shouldPrintPlainSuccess(ctx)) console.log('telequeryd restarted');
-      else progress.succeed('telequeryd restarted');
+      if (shouldPrintPlainSuccess(ctx)) console.log('taprootd restarted');
+      else progress.succeed('taprootd restarted');
     } finally {
       progress.stop();
     }

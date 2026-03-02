@@ -14,4 +14,4 @@ Manifest fields:
 - `accessMethods` (optional): native|qa-portforward|tsh|... (plugin-declared routing hints)
 - `priority`
 
-Execution output must match Telequery query result envelope.
+Execution output must match TapRoot query result envelope.

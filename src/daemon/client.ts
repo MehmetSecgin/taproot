@@ -6,8 +6,8 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 
 export function defaultSocketPath(stateRoot?: string): string {
-  const root = stateRoot || path.join(os.homedir(), '.telequery');
-  return path.join(root, 'run', 'telequeryd.sock');
+  const root = stateRoot || path.join(os.homedir(), '.taproot');
+  return path.join(root, 'run', 'taprootd.sock');
 }
 
 export async function rpcCall(input: {
