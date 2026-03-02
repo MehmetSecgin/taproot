@@ -1,14 +1,142 @@
 import { Command } from 'commander';
+import { createInterface } from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
 import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { printJson, renderTable } from '../core/output.js';
 import { enforceMutationPolicy } from '../core/safety.js';
+import { nowIso } from '../core/time.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const c of columns) out[c] = row[c];
   return out;
+}
+
+function parseDatasourceAlias(value?: string): { env: string; service: string } | null {
+  const raw = String(value || '').trim().toLowerCase();
+  const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
+  if (!m) return null;
+  return { env: m[1], service: normalizeService(m[2]) };
+}
+
+async function ensureCredentialDefaults(ctx: AppContext, ref: string, defaults: Record<string, string>, overwrite = false): Promise<void> {
+  const current = await ctx.credentialStore.get(ref);
+  const merged = overwrite ? { ...current, ...defaults } : { ...defaults, ...current };
+  const changed = overwrite
+    ? Object.keys(defaults).some((k) => current[k] !== defaults[k])
+    : Object.keys(defaults).some((k) => !current[k] && defaults[k]);
+  if (changed) await ctx.credentialStore.set(ref, merged);
+}
+
+async function autoBootstrapDatasource(ctx: AppContext, env: string, service: string, datasourceName: string): Promise<any | undefined> {
+  const kb = ctx.kbStore.resolveConnection(service, env);
+  if (!kb) return undefined;
+  const accessMethod = String(kb.access_method || '').toLowerCase();
+  const engine = String(kb.engine || 'mysql').toLowerCase();
+  const database = String(kb.database || '');
+  const dbUser = String(kb.db_user || '');
+  const target = String(kb.target || '');
+  const credentialRef = `${env}:${service}`;
+
+  if (accessMethod === 'qa-portforward') {
+    const namespace = String(kb.namespace || 'develop');
+    const context = String(process.env.TELEQUERY_QA_CONTEXT || kb.k8s_context || env || namespace);
+    const localPort = Number(process.env.TELEQUERY_QA_LOCAL_PORT || 4406);
+    const logFile = `/tmp/telequery-pf-${env}-${service}.log`;
+    const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
+    const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${namespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${namespace} port-forward svc/${target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
+
+    await ensureCredentialDefaults(ctx, credentialRef, {
+      user: dbUser || 'root',
+      host: '127.0.0.1',
+      port: String(localPort),
+      database,
+    });
+    await ensureCredentialDefaults(ctx, 'vpn:work', {
+      statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
+    });
+    await ensureCredentialDefaults(
+      ctx,
+      `kpf:${env}:${service}`,
+      {
+      statusCommand,
+      connectCommand,
+      },
+      true,
+    );
+
+    const profile = {
+      name: datasourceName,
+      kind: engine.includes('postgres') ? 'postgres' : 'mysql',
+      env,
+      service,
+      tags: ['auto-bootstrap', 'kb-derived'],
+      connection: {
+        host: '127.0.0.1',
+        port: localPort,
+        database,
+      },
+      credentialRef,
+      connectors: ['openvpn', 'kubectl-portforward'],
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        'kubectl-portforwardCredentialRef': `kpf:${env}:${service}`,
+      },
+      updatedAt: nowIso(),
+      confidence: 0.9,
+    };
+    return ctx.datasourceStore.save(profile as any);
+  }
+
+  if (accessMethod === 'tsh') {
+    await ensureCredentialDefaults(ctx, credentialRef, {
+      dbUser,
+      database,
+      target,
+    });
+    await ensureCredentialDefaults(ctx, 'vpn:work', {
+      statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
+    });
+    await ensureCredentialDefaults(ctx, `tsh:${env}`, {
+      statusCommand: 'tsh status',
+    });
+    const profile = {
+      name: datasourceName,
+      kind: 'teleport-mysql',
+      env,
+      service,
+      tags: ['auto-bootstrap', 'kb-derived'],
+      connection: {
+        database,
+        target,
+      },
+      credentialRef,
+      connectors: ['openvpn', 'teleport'],
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        teleportCredentialRef: `tsh:${env}`,
+      },
+      updatedAt: nowIso(),
+      confidence: 0.9,
+    };
+    return ctx.datasourceStore.save(profile as any);
+  }
+
+  return undefined;
+}
+
+async function promptPassword(ref: string): Promise<string> {
+  const rl = createInterface({ input, output });
+  try {
+    const value = await rl.question(`Password for ${ref}: `);
+    return value.trim();
+  } finally {
+    rl.close();
+  }
 }
 
 export function registerQuery(program: Command, getCtx: () => AppContext): void {
@@ -26,32 +154,27 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .action(async (opts) => {
       const ctx = getCtx();
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-      const service = normalizeService(opts.service);
+      const alias = parseDatasourceAlias(opts.datasource);
+      const env = String(opts.env || alias?.env || '').trim();
+      const service = normalizeService(opts.service || alias?.service || '');
       if (!datasource && opts.env && service) {
         datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
       }
-      if (!datasource && opts.env && service) {
-        const kb = ctx.kbStore.resolveConnection(service, opts.env);
-        if (kb) {
-          datasource = {
-            name: `${opts.env}-${service}`,
-            kind: String(kb.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql',
-            env: opts.env,
-            service,
-            tags: ['kb-derived'],
-            connection: {
-              host: kb.host as string | undefined,
-              port: kb.port as number | undefined,
-              target: kb.target as string | undefined,
-              database: kb.database as string | undefined,
-            },
-            credentialRef: `${opts.env}:${service}`,
-            policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-            updatedAt: new Date().toISOString(),
-            confidence: 0.8,
-          } as any;
-          ctx.datasourceStore.save(datasource as any);
-        }
+      if (!datasource && env && service) {
+        datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+      }
+      if (!datasource && env && service) {
+        datasource = await autoBootstrapDatasource(ctx, env, service, opts.datasource || `${env}-${service}`);
+      }
+      if (
+        datasource &&
+        env &&
+        service &&
+        datasource.name === (opts.datasource || datasource.name) &&
+        Array.isArray((datasource as any).tags) &&
+        (datasource as any).tags.includes('auto-bootstrap')
+      ) {
+        datasource = await autoBootstrapDatasource(ctx, env, service, datasource.name);
       }
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
 
@@ -76,7 +199,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         throw new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`);
       }
 
-      const creds = await ctx.credentialStore.get(datasource.credentialRef);
+      let creds = await ctx.credentialStore.get(datasource.credentialRef);
       const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
@@ -90,14 +213,39 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (connectorChecks.some((c) => c.status === 'fail')) {
           throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
         }
-        const result = await plugin.execute(
-          {
-            datasource: datasource as any,
-            query,
-            capability: capability as any,
-          },
-          creds,
-        );
+        let result;
+        try {
+          result = await plugin.execute(
+            {
+              datasource: datasource as any,
+              query,
+              capability: capability as any,
+            },
+            creds,
+          );
+        } catch (err) {
+          const message = (err as Error).message || '';
+          const code = classifyError(message);
+          const canPromptPassword =
+            code === 'ACCESS_DENIED' &&
+            !creds.password &&
+            !ctx.jsonMode &&
+            input.isTTY &&
+            (datasource.kind === 'mysql' || datasource.kind === 'postgres');
+          if (!canPromptPassword) throw err;
+          const password = await promptPassword(datasource.credentialRef);
+          if (!password) throw err;
+          creds = { ...creds, password };
+          await ctx.credentialStore.set(datasource.credentialRef, creds);
+          result = await plugin.execute(
+            {
+              datasource: datasource as any,
+              query,
+              capability: capability as any,
+            },
+            creds,
+          );
+        }
         result.runId = artifacts.runId;
         writeRunSummary(artifacts.runDir, result);
         appendEvent(artifacts.runDir, 'query succeeded');

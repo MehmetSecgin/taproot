@@ -3,6 +3,12 @@ import type { AppContext } from '../core/app.js';
 import { normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { renderTable, printJson } from '../core/output.js';
 
+function compactDetail(detail: string, max = 160): string {
+  const oneLine = detail.replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= max) return oneLine;
+  return `${oneLine.slice(0, max - 1)}...`;
+}
+
 export function registerDoctor(program: Command, getCtx: () => AppContext): void {
   program
     .command('doctor')
@@ -11,6 +17,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--env <env>')
     .option('--service <service>')
     .option('--connect', 'run connector connect steps during doctor', false)
+    .option('--verbose-detail', 'print full check details in table mode', false)
     .action(async (opts) => {
       const ctx = getCtx();
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
@@ -64,7 +71,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
       }
       checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
       if (ctx.jsonMode) printJson({ datasource: datasource.name, plugin: plugin.manifest.name, checks });
-      else console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
+      else {
+        const rows = checks.map((c) => ({
+          check: c.check,
+          status: c.status,
+          detail: opts.verboseDetail ? c.detail : compactDetail(c.detail),
+        }));
+        console.log(renderTable(rows));
+      }
       if (checks.some((c) => c.status === 'fail')) process.exitCode = 1;
     });
 }
