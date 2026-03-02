@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson } from '../core/output.js';
+import { createProgress } from '../core/progress.js';
 import { rpcCall } from '../daemon/client.js';
 
 function runDirFromCtx(ctx: AppContext): string {
@@ -16,30 +17,47 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
 
   d.command('start').action(async () => {
     const ctx = getCtx();
-    const runDir = runDirFromCtx(ctx);
-    fs.mkdirSync(runDir, { recursive: true });
-    const logPath = path.join(runDir, 'telequeryd.log');
-    const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
-      detached: true,
-      stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
+    const progress = createProgress({
+      enabled: !ctx.jsonMode && !ctx.verbose,
+      noAnimations: ctx.noAnimations,
+      noColor: ctx.noColor,
+      verbose: ctx.verbose,
+      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
     });
-    child.unref();
+    try {
+      const runDir = runDirFromCtx(ctx);
+      fs.mkdirSync(runDir, { recursive: true });
+      const logPath = path.join(runDir, 'telequeryd.log');
+      progress.update('starting telequeryd');
+      const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
+        detached: true,
+        stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
+      });
+      child.unref();
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 5000) {
-      try {
-        const res = await rpcCall({ method: 'daemon.status' });
-        if (res.ok) {
-          if (ctx.jsonMode) printJson({ started: true, status: res.data });
-          else console.log('telequeryd started');
-          return;
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < 5000) {
+        try {
+          progress.update('waiting for daemon health check');
+          const res = await rpcCall({ method: 'daemon.status' });
+          if (res.ok) {
+            if (ctx.jsonMode) printJson({ started: true, status: res.data });
+            else {
+              progress.succeed('telequeryd started');
+              console.log('telequeryd started');
+            }
+            return;
+          }
+        } catch {
+          // wait for daemon
         }
-      } catch {
-        // wait for daemon
+        await new Promise((r) => setTimeout(r, 200));
       }
-      await new Promise((r) => setTimeout(r, 200));
+      progress.fail('telequeryd start timed out');
+      throw new Error(`telequeryd did not become healthy within timeout. Check ${logPath}`);
+    } finally {
+      progress.stop();
     }
-    throw new Error(`telequeryd did not become healthy within timeout. Check ${logPath}`);
   });
 
   d.command('status').action(async () => {
@@ -51,27 +69,55 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
 
   d.command('stop').action(async () => {
     const ctx = getCtx();
-    const res = await rpcCall({ method: 'daemon.stop' });
-    if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
-    if (ctx.jsonMode) printJson(res.data || {});
-    else console.log('telequeryd stopped');
+    const progress = createProgress({
+      enabled: !ctx.jsonMode && !ctx.verbose,
+      noAnimations: ctx.noAnimations,
+      noColor: ctx.noColor,
+      verbose: ctx.verbose,
+      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
+    });
+    try {
+      progress.update('stopping telequeryd');
+      const res = await rpcCall({ method: 'daemon.stop' });
+      if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
+      if (ctx.jsonMode) printJson(res.data || {});
+      else {
+        progress.succeed('telequeryd stopped');
+        console.log('telequeryd stopped');
+      }
+    } finally {
+      progress.stop();
+    }
   });
 
   d.command('restart').action(async () => {
     const ctx = getCtx();
-    try {
-      await rpcCall({ method: 'daemon.stop' });
-    } catch {
-      // ignore if not running
-    }
-    const runDir = runDirFromCtx(ctx);
-    fs.mkdirSync(runDir, { recursive: true });
-    const logPath = path.join(runDir, 'telequeryd.log');
-    const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
-      detached: true,
-      stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
+    const progress = createProgress({
+      enabled: !ctx.jsonMode && !ctx.verbose,
+      noAnimations: ctx.noAnimations,
+      noColor: ctx.noColor,
+      verbose: ctx.verbose,
+      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
     });
-    child.unref();
-    console.log('telequeryd restarted');
+    try {
+      progress.update('restarting telequeryd');
+      try {
+        await rpcCall({ method: 'daemon.stop' });
+      } catch {
+        // ignore if not running
+      }
+      const runDir = runDirFromCtx(ctx);
+      fs.mkdirSync(runDir, { recursive: true });
+      const logPath = path.join(runDir, 'telequeryd.log');
+      const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
+        detached: true,
+        stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
+      });
+      child.unref();
+      progress.succeed('telequeryd restarted');
+      console.log('telequeryd restarted');
+    } finally {
+      progress.stop();
+    }
   });
 }

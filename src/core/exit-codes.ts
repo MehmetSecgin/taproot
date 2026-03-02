@@ -27,3 +27,17 @@ export function classifyExitCode(input: unknown): number {
   return EXIT_CODES.GENERAL_ERROR;
 }
 
+export function exitCodeForClass(code: string): number {
+  switch (code) {
+    case 'CONNECTIVITY':
+      return EXIT_CODES.CONNECTIVITY;
+    case 'AUTH_EXPIRED':
+      return EXIT_CODES.AUTH;
+    case 'ACCESS_DENIED':
+      return EXIT_CODES.ACCESS_DENIED;
+    case 'UNKNOWN_TARGET':
+      return EXIT_CODES.UNKNOWN_TARGET;
+    default:
+      return EXIT_CODES.GENERAL_ERROR;
+  }
+}

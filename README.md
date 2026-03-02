@@ -14,7 +14,7 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 
 ## Commands
 - `telequery self-check`
-- `telequery doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions)
+- `telequery doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
 - `telequery query --datasource <name> [--query | --template | --intent] [--param k=v]`
 - `telequery datasource <list|show|add|remove|resolve>`
 - `telequery template <list|save|validate|run>`
@@ -95,6 +95,8 @@ Expected structure:
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
 - `telequeryd`/`session` commands are available for Phase 1 runtime scaffolding.
+- Human mode uses compact progress on stderr; structured data stays on stdout.
+- Use global `--verbose` for step-by-step diagnostics (also on stderr).
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`
