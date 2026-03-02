@@ -43,16 +43,6 @@ interface QueryStatEntry {
   latencyMsP50: number;
 }
 
-interface LegacyRecord {
-  datasource: string;
-  env?: string;
-  service?: string;
-  resolvedAt?: string;
-  confidence?: number;
-  queryIntent?: string;
-  querySignature?: string;
-}
-
 function normalizeIntent(value?: string): string {
   return String(value || '')
     .trim()
@@ -91,15 +81,12 @@ export class LearningStore {
   private readonly resolutionFile: string;
   private readonly libraryFile: string;
   private readonly statsFile: string;
-  private readonly legacyFile: string;
 
   constructor(private readonly dir: string) {
     fs.mkdirSync(dir, { recursive: true });
     this.resolutionFile = path.join(dir, 'resolution-cache.json');
     this.libraryFile = path.join(dir, 'query-library.json');
     this.statsFile = path.join(dir, 'query-stats.json');
-    this.legacyFile = path.join(dir, 'records.json');
-    this.migrateLegacy();
   }
 
   private loadResolution(): ResolutionEntry[] {
@@ -118,58 +105,6 @@ export class LearningStore {
     if (input.resolution) writeJsonFile(this.resolutionFile, input.resolution);
     if (input.library) writeJsonFile(this.libraryFile, input.library);
     if (input.stats) writeJsonFile(this.statsFile, input.stats);
-  }
-
-  private migrateLegacy(): void {
-    if (!fs.existsSync(this.legacyFile)) return;
-    if (fs.existsSync(this.resolutionFile) || fs.existsSync(this.libraryFile) || fs.existsSync(this.statsFile)) return;
-    const rows = readJsonFile<LegacyRecord[]>(this.legacyFile, []);
-    if (!rows.length) return;
-    const resolution = new Map<string, ResolutionEntry>();
-    const library = new Map<string, QueryLibraryEntry>();
-    for (const row of rows) {
-      const env = String(row.env || '').trim();
-      const service = String(row.service || '').trim();
-      if (env && service) {
-        const key = `${env}|${service}`;
-        resolution.set(key, {
-          key,
-          env,
-          service,
-          datasourceName: String(row.datasource || `${env}-${service}`),
-          kind: 'mysql',
-          connection: {},
-          credentialRef: `${env}:${service}`,
-          connectors: [],
-          resolverHints: {},
-          lastVerifiedAt: String(row.resolvedAt || nowIso()),
-          successCount: 1,
-          failureCount: 0,
-          confidence: Math.max(0, Math.min(1, Number(row.confidence ?? 0.8))),
-        });
-      }
-      const sql = String(row.querySignature || '').trim();
-      if (service && sql) {
-        const intentKey = normalizeIntent(row.queryIntent) || 'auto';
-        const sqlTemplate = normalizeSqlTemplate(sql);
-        const key = `${service}|${intentKey}|${sqlTemplate}`;
-        library.set(key, {
-          id: stableId(key),
-          key,
-          service,
-          intentKey,
-          sqlTemplate,
-          source: 'learned',
-          lastVerifiedAt: String(row.resolvedAt || nowIso()),
-          successCount: 1,
-        });
-      }
-    }
-    this.saveAll({
-      resolution: [...resolution.values()],
-      library: [...library.values()],
-      stats: [],
-    });
   }
 
   status(): { files: Record<string, number>; latest?: string } {
@@ -384,4 +319,3 @@ export class LearningStore {
     this.saveAll({ resolution: [], library: [], stats: [] });
   }
 }
-
