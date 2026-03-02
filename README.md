@@ -94,3 +94,4 @@ Expected structure:
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
+- Phase 1 runtime contract: `references/phase1-runtime-contract.md`
