@@ -138,15 +138,25 @@ Transport:
 - 0600 permissions.
 - single-user trust boundary.
 
+Daemon runtime decision (locked for v1):
+- `telequeryd` stays in Node/TypeScript (same ecosystem as CLI/plugins).
+- No sidecar process boundary in v1.
+- If CPU-bound paths appear, isolate with `worker_threads` before considering multi-runtime sidecar design.
+
 ### 4.3 Session Abstraction
 Session = runtime context for one datasource fingerprint.
 
 Session identity:
 - fingerprint over: `env`, `service`, `kind`, `connection target/database`, `connector plan`.
+- fingerprint is versioned (`fpv1`).
+- fingerprint input is canonicalized JSON with sorted keys and normalized connector order.
+- any structural fingerprint change requires explicit `fingerprintVersion` bump.
+- daemon may keep multiple fingerprint versions concurrently; it must never silently reinterpret old fingerprints.
 
 Session fields:
 - `sessionId`
 - `fingerprint`
+- `fingerprintVersion`
 - `state` (`opening`, `ready`, `degraded`, `closing`, `closed`)
 - `createdAt`, `lastUsedAt`
 - `idleTtlMs`, `hardTtlMs`
@@ -183,7 +193,7 @@ Cleanup contract for Class B:
 States:
 - `opening`: connector checks + resource creation.
 - `ready`: query-capable.
-- `degraded`: partial failure, retries allowed.
+- `degraded`: session exists but health is below query-ready threshold.
 - `closing`: cleanup running.
 - `closed`: terminal.
 
@@ -191,8 +201,24 @@ Transitions:
 - `opening -> ready`: all required resources healthy.
 - `opening -> degraded`: non-fatal connector warnings.
 - `ready -> degraded`: runtime failures.
-- `degraded -> ready`: successful revalidation.
+- `degraded -> ready`: successful revalidation probe (connectors + executor ping).
 - `* -> closing -> closed`: explicit close, idle timeout, hard TTL, shutdown.
+
+Degraded semantics (explicit):
+- Entry triggers:
+  - connector failure during query path,
+  - executor connectivity/auth failures,
+  - repeated timeout threshold breaches.
+- Revalidation triggers:
+  - on next lease acquire when `nextRevalidateAt <= now`,
+  - periodic sweeper probe,
+  - explicit `session inspect --revalidate`.
+- Retry budget:
+  - `maxRevalidateAttempts=3` per degradation window.
+  - backoff: `2s -> 5s -> 15s`.
+- Queue behavior while degraded:
+  - if retry budget remains: first queued request can trigger revalidation.
+  - if budget exhausted: fail fast with classified error and next action.
 
 ### 4.7 Query Path with Daemon
 1. CLI sends request (`datasource`, query, mode).
@@ -241,6 +267,11 @@ Policy:
 - bounded concurrent queries per session.
 - queue with fair scheduling to prevent one agent starvation.
 
+Default TTLs (initial):
+- `idleTtlMs = 45m`
+- `hardTtlMs = 6h`
+- profile-level override allowed, bounded by daemon max policy.
+
 ### 4.11 Failure and Recovery Contracts
 - Connector failure: explicit classified error + suggested next action.
 - Session health failure: auto demote to `degraded`, retry strategy with cap.
@@ -260,12 +291,36 @@ Daemon telemetry per session:
 - query timings
 - connector durations
 - failure classification
+- request/session correlation IDs
+
+Correlation contract:
+- Every request gets `requestId` (uuidv7).
+- Every query run gets `runId`.
+- If session-backed, response includes `sessionId`.
+- Daemon logs, run artifacts, and JSON responses must carry these IDs.
 
 Persistent logs:
 - bounded rotating logs under `~/.telequery/run/logs/`.
 - run artifacts remain per query for replay/debug.
 
-### 4.14 Shutdown Semantics
+### 4.14 Session Persistence Across Daemon Restarts
+Session metadata is checkpointed (no secrets):
+- file: `~/.telequery/run/sessions.json`
+- includes: `sessionId`, fingerprint(+version), state, timestamps, resource descriptors, counters.
+
+Recovery behavior:
+1. load checkpoint on daemon start.
+2. mark loaded sessions as `recovering`.
+3. validate resources and transition to:
+  - `ready` if healthy,
+  - `opening` if recoverable but not ready,
+  - `closed` if irrecoverable/stale.
+4. remove stale checkpoints on confirmed close.
+
+Note:
+- DB credentials and secret values are never serialized in checkpoint files.
+
+### 4.15 Shutdown Semantics
 `telequeryd` shutdown:
 1. stop accepting new leases
 2. drain running operations (timeout-bounded)
@@ -277,7 +332,26 @@ Hard kill recovery on next start:
 - reconcile orphaned children
 - rebuild clean runtime state
 
-## 5) Command Surface Impact (Structural)
+## 5) JSON Envelope Contract (Pinned)
+Even in pre-release, response shape for agents is treated as a contract.
+
+Envelope (v1):
+- `ok: boolean`
+- `data?: object`
+- `error?: { code, message, details? }`
+- `meta:`
+  - `envelopeVersion: 1`
+  - `requestId`
+  - `runId?`
+  - `sessionId?`
+  - `timings?`
+
+Rules:
+- Human progress output never appears in `--json` mode.
+- Correlation IDs are mandatory in JSON mode.
+- Breaking shape changes require `envelopeVersion` bump.
+
+## 6) Command Surface Impact (Structural)
 - Existing `query` remains primary user entry.
 - Add `session` namespace:
   - `session open`
@@ -297,7 +371,7 @@ For casual users:
 For power users/agents:
 - explicit session control for bulk workflows.
 
-## 6) Security Boundaries
+## 7) Security Boundaries
 - Trust boundary: local user account.
 - IPC boundary: Unix socket perms (0600).
 - File boundary: state root owned by user.
@@ -306,8 +380,9 @@ For power users/agents:
   - learning files
   - run summaries/events
   - datasource definitions
+  - session checkpoint files
 
-## 7) Performance Targets (Session Runtime)
+## 8) Performance Targets (Session Runtime)
 Target shape after daemonization:
 - Cold query: includes session open + connector validation.
 - Warm query: no reconnect path, only execute path.
@@ -318,7 +393,7 @@ Suggested internal SLOs:
 - session open p95: bounded and visible with phase heartbeats
 - stuck session count: 0 after sweeper convergence window
 
-## 8) Rollout Plan
+## 9) Rollout Plan
 Phase 1:
 - daemon skeleton, IPC, session registry, sweeper, compact progress UX.
 
@@ -331,18 +406,16 @@ Phase 3:
 Phase 4:
 - operational hardening (metrics, stress tests, chaos tests for orphan cleanup).
 
-## 9) Acceptance Criteria
+## 10) Acceptance Criteria
 - Repeated query runs do not repeat full cold setup when session is warm.
 - No orphaned `kubectl port-forward` processes after idle timeout or daemon stop.
 - Session metadata reflects true lease/resource state.
 - JSON mode remains deterministic and clean.
 - Mutation guardrails enforced identically in daemon and CLI paths.
 - Learning remains deterministic and secret-safe.
+- Correlation IDs (`requestId`, `runId`) are present and traceable end-to-end.
+- Degraded sessions fail fast after retry budget exhaustion.
 
-## 10) Open Design Decisions
-- Daemon language boundary (same Node runtime vs sidecar process model).
-- Session persistence strategy across daemon restart (memory-only vs serialized snapshots).
-- Exact idle/hard TTL defaults.
+## 11) Open Design Decisions
 - Queue fairness policy (global vs per-session weights).
 - Teleport optimization path beyond `tsh db exec` process spawn.
-
