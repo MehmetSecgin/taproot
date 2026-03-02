@@ -110,7 +110,7 @@ Session entry:
   "env": "qa",
   "service": "sample",
   "kind": "mysql",
-  "state": "opening",
+  "state": "recovering",
   "createdAt": "2026-03-02T20:00:00.000Z",
   "lastUsedAt": "2026-03-02T20:00:04.000Z",
   "idleTtlMs": 2700000,
@@ -141,6 +141,14 @@ Session entry:
 }
 ```
 
+Valid `state` values in checkpoint:
+- `recovering`
+- `opening`
+- `ready`
+- `degraded`
+- `closing`
+- `closed`
+
 Rules:
 - No secret values in checkpoint data.
 - Checkpoint writes are atomic (temp file + rename).
@@ -170,6 +178,13 @@ Responsibilities per tick:
 
 Never in sweeper:
 - never disconnect Class A resources (VPN / Teleport global auth)
+
+Lease heartbeat contract:
+- Daemon updates each active lease heartbeat at `leaseHeartbeatIntervalMs`.
+- Sweeper treats lease as stale when `now - heartbeatAt > leaseStaleThresholdMs`.
+- Phase 1 constants:
+  - `leaseHeartbeatIntervalMs = 5000`
+  - `leaseStaleThresholdMs = 20000`
 
 ## 4) Runtime Constants Source-of-Truth
 
