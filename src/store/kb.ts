@@ -1,6 +1,13 @@
 import path from 'node:path';
 import { readJsonFile } from '../core/json.js';
 
+function normalizeText(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 export class KbStore {
   constructor(private readonly kbDir: string) {}
 
@@ -34,19 +41,19 @@ export class KbStore {
   }
 
   resolveQuery(service: string, intent: string): Record<string, unknown> | null {
-    const normalized = intent.toLowerCase();
+    const normalized = normalizeText(intent);
     const cands = this.templates().filter((t) => String(t.service || '').toLowerCase() === service.toLowerCase() && String(t.status || 'active') === 'active');
     if (!cands.length) return null;
     const ranked = cands
       .map((t) => ({
         t,
-        exact: Number(String(t.intent || '').toLowerCase() === normalized),
-        aliasExact: Number((Array.isArray(t.aliases) ? t.aliases : []).some((a: string) => String(a).toLowerCase() === normalized)),
+        exact: Number(normalizeText(String(t.intent || '')) === normalized),
+        aliasExact: Number((Array.isArray(t.aliases) ? t.aliases : []).some((a: string) => normalizeText(String(a)) === normalized)),
         contains: Number(
-          String(t.intent || '').toLowerCase().includes(normalized) ||
-            normalized.includes(String(t.intent || '').toLowerCase()) ||
+          normalizeText(String(t.intent || '')).includes(normalized) ||
+            normalized.includes(normalizeText(String(t.intent || ''))) ||
             (Array.isArray(t.aliases) ? t.aliases : []).some(
-              (a: string) => String(a).toLowerCase().includes(normalized) || normalized.includes(String(a).toLowerCase()),
+              (a: string) => normalizeText(String(a)).includes(normalized) || normalized.includes(normalizeText(String(a))),
             ),
         ),
       }))

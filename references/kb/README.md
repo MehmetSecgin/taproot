@@ -30,6 +30,7 @@ Rules:
 - Prefer one canonical intent per template.
 - Use `aliases` for natural-language variations.
 - Avoid duplicate intents with equivalent SQL shape.
+- Resolver normalization for `intent` and `aliases`: trim + lowercase + collapse inner whitespace.
 
 ## Template Params Contract
 `params` are derived from SQL placeholders (`:param`) by Telequery.
@@ -37,4 +38,3 @@ Rules:
 Rules:
 - SQL placeholder list is canonical.
 - Do not hand-maintain `params` separately.
-
