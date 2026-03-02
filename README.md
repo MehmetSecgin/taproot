@@ -89,5 +89,6 @@ Expected structure:
 - Built-in DB plugins only expose `executeRead` in v1.
 - Mutating queries require `--allow-mutate` **and** datasource policy with `executeMutate`.
 - Secrets are never printed and are redacted from JSON output envelopes.
-- Learning cache stores bounded local samples and excludes secret values.
+- Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
+- Learning contract: `references/learning-contract.md`

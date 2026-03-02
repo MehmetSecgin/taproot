@@ -27,6 +27,7 @@
 ## Learning + Cache
 - `telequery learn status`
 - `telequery learn compact`
+- Learning contract: `references/learning-contract.md`
 - `telequery cache show`
 - `telequery cache prune --ttl-hours 168`
 

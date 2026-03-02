@@ -27,3 +27,8 @@ For each capability:
 - Preferred path: OS keychain via optional `keytar` when available.
 - Fallback: encrypted local credential file (AES-GCM with PBKDF2-derived key).
 - Secret values are redacted in output and excluded from learning/artifacts.
+
+## Learning model
+- Deterministic local caches only (`resolution-cache`, `query-library`, `query-stats`).
+- Upsert by stable keys; avoid append-only duplicates.
+- Normalize SQL to placeholder templates (`:num`, `:str`, `:bool`) for cross-param reuse.

@@ -164,6 +164,25 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         datasource = ctx.datasourceStore.resolveByEnvService(env, service);
       }
       if (!datasource && env && service) {
+        const learned = ctx.learningStore.resolveConnection(env, service);
+        if (learned) {
+          datasource = ctx.datasourceStore.save({
+            name: learned.datasourceName,
+            kind: learned.kind,
+            env: learned.env,
+            service: learned.service,
+            tags: ['learning-derived'],
+            connection: learned.connection,
+            credentialRef: learned.credentialRef,
+            connectors: learned.connectors,
+            policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+            resolverHints: learned.resolverHints || {},
+            updatedAt: new Date().toISOString(),
+            confidence: learned.confidence,
+          } as any);
+        }
+      }
+      if (!datasource && env && service) {
         datasource = await autoBootstrapDatasource(ctx, env, service, opts.datasource || `${env}-${service}`);
       }
       if (
@@ -186,7 +205,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         query = fillTemplate(tpl.nativeQueryTemplate, params);
       }
       if (!query && opts.intent) {
-        const tpl = ctx.kbStore.resolveQuery(service || datasource.service || '', opts.intent) || ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: opts.intent });
+        const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', opts.intent);
+        const tpl =
+          (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
+          ctx.kbStore.resolveQuery(service || datasource.service || '', opts.intent) ||
+          ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: opts.intent });
         if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
       }
       if (!query) throw new Error('No query resolved. Provide --query, --template, or --intent.');
@@ -258,6 +281,12 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         const message = (error as Error).message;
         const code = classifyError(message);
         appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
+        ctx.learningStore.saveFailure({
+          datasource: datasource as any,
+          queryIntent: opts.intent,
+          sql: query,
+          errorClass: code,
+        });
         throw new Error(`${code}: ${message}`);
       }
     });
