@@ -92,3 +92,4 @@ Expected structure:
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Learning contract: `references/learning-contract.md`
+- Runtime architecture: `references/runtime-architecture.md`
