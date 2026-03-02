@@ -7,6 +7,7 @@ import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifa
 import { printJson, renderTable } from '../core/output.js';
 import { enforceMutationPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
+import { rpcCall } from '../daemon/client.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -179,6 +180,44 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const logStep = (msg: string): void => {
         if (!ctx.jsonMode) console.error(`[telequery] ${msg}`);
       };
+      const forceDirect = process.env.TELEQUERY_FORCE_DIRECT === '1';
+      if (!forceDirect) {
+        try {
+          const rpc = await rpcCall({
+            method: 'query.execute',
+            params: {
+              datasource: opts.datasource,
+              env: opts.env,
+              service: opts.service,
+              intent: opts.intent,
+              template: opts.template,
+              query: opts.query,
+              allowMutate: Boolean(opts.allowMutate),
+              param: opts.param || [],
+            },
+          });
+          if (rpc.ok) {
+            const columns = (rpc.data?.columns as string[]) || [];
+            const rows = (rpc.data?.rows as Array<Record<string, unknown>>) || [];
+            if (ctx.jsonMode) {
+              printJson({
+                ok: true,
+                data: rpc.data || {},
+                meta: rpc.meta || {},
+              });
+            } else {
+              logStep(`daemon session ${rpc.meta?.sessionId || 'n/a'} run ${rpc.meta?.runId || 'n/a'}`);
+              console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+            }
+            return;
+          }
+          throw new Error(`${rpc.error?.code || 'GENERIC'}: ${rpc.error?.message || 'daemon query failed'}`);
+        } catch (error) {
+          const msg = String((error as Error).message || '');
+          if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) throw error;
+          logStep('daemon unavailable, falling back to direct query mode');
+        }
+      }
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = parseDatasourceAlias(opts.datasource);
       const env = String(opts.env || alias?.env || '').trim();

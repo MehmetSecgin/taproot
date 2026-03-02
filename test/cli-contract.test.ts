@@ -21,6 +21,8 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('datasource');
     expect(out.stdout).toContain('template');
     expect(out.stdout).toContain('kb');
+    expect(out.stdout).toContain('daemon');
+    expect(out.stdout).toContain('session');
   });
 
   it('prints skill version', () => {
