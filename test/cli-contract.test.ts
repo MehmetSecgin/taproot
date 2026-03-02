@@ -43,4 +43,10 @@ describe('cli contract', () => {
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.checks)).toBe(true);
   });
+
+  it('returns bad-input exit code for unknown option', () => {
+    const out = runCli(['creds', 'set', '--ref', 'x', '--host', 'localhost']);
+    expect(out.status).toBe(2);
+    expect(out.stderr.toLowerCase()).toContain('unknown option');
+  });
 });

@@ -20,6 +20,7 @@ export interface AppContext {
   jsonMode: boolean;
   noColor: boolean;
   noAnimations: boolean;
+  verbose: boolean;
 }
 
 export function buildContext(opts: {
@@ -27,6 +28,7 @@ export function buildContext(opts: {
   jsonMode?: boolean;
   noColor?: boolean;
   noAnimations?: boolean;
+  verbose?: boolean;
 }): AppContext {
   let paths = resolvePaths(opts.memoryRoot);
   try {
@@ -48,6 +50,7 @@ export function buildContext(opts: {
     jsonMode: Boolean(opts.jsonMode),
     noColor: Boolean(opts.noColor),
     noAnimations: Boolean(opts.noAnimations),
+    verbose: Boolean(opts.verbose),
   };
 }
 

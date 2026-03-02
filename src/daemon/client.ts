@@ -14,8 +14,10 @@ export async function rpcCall(input: {
   method: string;
   params?: Record<string, unknown>;
   socketPath?: string;
+  timeoutMs?: number;
 }): Promise<RpcResponse> {
   const socketPath = input.socketPath || defaultSocketPath();
+  const timeoutMs = input.timeoutMs ?? RUNTIME_CONSTANTS.rpc.requestTimeoutMs;
   const req: RpcRequest = {
     protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
     requestId: randomUUID(),
@@ -25,10 +27,19 @@ export async function rpcCall(input: {
 
   return await new Promise<RpcResponse>((resolve, reject) => {
     const socket = net.createConnection(socketPath);
+    const timer = setTimeout(() => {
+      socket.destroy(new Error(`CONNECTIVITY: daemon request timeout (${timeoutMs}ms)`));
+    }, timeoutMs);
+
+    const done = (fn: () => void): void => {
+      clearTimeout(timer);
+      fn();
+    };
+
     let buffer = '';
     socket.setEncoding('utf8');
 
-    socket.on('error', (error) => reject(error));
+    socket.on('error', (error) => done(() => reject(error)));
     socket.on('connect', () => {
       socket.write(`${JSON.stringify(req)}\n`);
     });
@@ -40,7 +51,7 @@ export async function rpcCall(input: {
       if (!line) return;
       const res = JSON.parse(line) as RpcResponse;
       socket.end();
-      resolve(res);
+      done(() => resolve(res));
     });
   });
 }

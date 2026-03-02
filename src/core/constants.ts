@@ -12,4 +12,7 @@ export const RUNTIME_CONSTANTS = {
   sweeper: {
     tickMs: 15 * 1000,
   },
+  rpc: {
+    requestTimeoutMs: 30 * 1000,
+  },
 } as const;

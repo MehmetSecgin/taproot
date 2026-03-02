@@ -5,6 +5,7 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { printJson, renderTable } from '../core/output.js';
+import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
 import { rpcCall } from '../daemon/client.js';
@@ -177,52 +178,68 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--allow-mutate', 'allow mutating query', false)
     .action(async (opts) => {
       const ctx = getCtx();
-      const logStep = (msg: string): void => {
-        if (!ctx.jsonMode) console.error(`[telequery] ${msg}`);
+      const progress = createProgress({
+        enabled: !ctx.jsonMode && !ctx.verbose,
+        noAnimations: ctx.noAnimations,
+        noColor: ctx.noColor,
+        verbose: ctx.verbose,
+        plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
+      });
+      const logVerbose = (msg: string): void => {
+        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[telequery] ${msg}\n`);
       };
       const forceDirect = process.env.TELEQUERY_FORCE_DIRECT === '1';
-      if (!forceDirect) {
-        try {
-          const rpc = await rpcCall({
-            method: 'query.execute',
-            params: {
-              datasource: opts.datasource,
-              env: opts.env,
-              service: opts.service,
-              intent: opts.intent,
-              template: opts.template,
-              query: opts.query,
-              allowMutate: Boolean(opts.allowMutate),
-              param: opts.param || [],
-            },
-          });
-          if (rpc.ok) {
-            const columns = (rpc.data?.columns as string[]) || [];
-            const rows = (rpc.data?.rows as Array<Record<string, unknown>>) || [];
-            if (ctx.jsonMode) {
-              printJson({
-                ok: true,
-                data: rpc.data || {},
-                meta: rpc.meta || {},
-              });
-            } else {
-              logStep(`daemon session ${rpc.meta?.sessionId || 'n/a'} run ${rpc.meta?.runId || 'n/a'}`);
-              console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+      try {
+        progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
+        if (!forceDirect) {
+          try {
+            const rpc = await rpcCall({
+              method: 'query.execute',
+              params: {
+                datasource: opts.datasource,
+                env: opts.env,
+                service: opts.service,
+                intent: opts.intent,
+                template: opts.template,
+                query: opts.query,
+                allowMutate: Boolean(opts.allowMutate),
+                param: opts.param || [],
+              },
+            });
+            if (rpc.ok) {
+              const columns = (rpc.data?.columns as string[]) || [];
+              const rows = (rpc.data?.rows as Array<Record<string, unknown>>) || [];
+              if (ctx.jsonMode) {
+                printJson({
+                  ok: true,
+                  data: rpc.data || {},
+                  meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
+                });
+              } else {
+                progress.succeed(`query complete (${rows.length} rows)`);
+                logVerbose(
+                  `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
+                );
+                console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+              }
+              return;
             }
-            return;
+            throw new Error(`${rpc.error?.code || 'GENERIC'}: ${rpc.error?.message || 'daemon query failed'}`);
+          } catch (error) {
+            const msg = String((error as Error).message || '');
+            if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
+              progress.fail('daemon query failed');
+              throw error;
+            }
+            progress.update('daemon unavailable, falling back to direct mode');
+            logVerbose(`daemon RPC unavailable (${msg})`);
           }
-          throw new Error(`${rpc.error?.code || 'GENERIC'}: ${rpc.error?.message || 'daemon query failed'}`);
-        } catch (error) {
-          const msg = String((error as Error).message || '');
-          if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) throw error;
-          logStep('daemon unavailable, falling back to direct query mode');
         }
-      }
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = parseDatasourceAlias(opts.datasource);
       const env = String(opts.env || alias?.env || '').trim();
       const service = normalizeService(opts.service || alias?.service || '');
-      logStep(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
+      progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
       if (!datasource && opts.env && service) {
         datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
       }
@@ -250,7 +267,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       }
       if (!datasource && env && service) {
         datasource = await autoBootstrapDatasource(ctx, env, service, opts.datasource || `${env}-${service}`);
-        if (datasource) logStep(`auto-bootstrapped datasource from KB (${datasource.name})`);
+        if (datasource) logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
       }
       if (
         datasource &&
@@ -267,10 +284,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         const kb = ctx.kbStore.resolveConnection(service, env);
         if (kb) {
           const conflicts = datasourceKbConflicts(datasource, kb);
-          if (conflicts.length) logStep(`warning: datasource overrides KB (${conflicts.join('; ')})`);
+          if (conflicts.length) logVerbose(`warning: datasource overrides KB (${conflicts.join('; ')})`);
         }
       }
-      logStep(`datasource ready (${datasource.name}, kind=${datasource.kind})`);
+      progress.update(`datasource ready (${datasource.name})`);
 
       let query = (opts.query || '').trim();
       const params = parseParamPairs(opts.param || []);
@@ -288,7 +305,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
       }
       if (!query) throw new Error('No query resolved. Provide --query, --template, or --intent.');
-      logStep('query resolved');
+      progress.update('query resolved');
 
       enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
       const capability = opts.allowMutate ? 'executeMutate' : 'executeRead';
@@ -302,7 +319,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
-        logStep('running connector preflight/connect');
+        progress.update('checking connectors');
         const connectorChecks = await runDatasourceConnectors({
           datasource: datasource as any,
           credentialStore: ctx.credentialStore,
@@ -310,11 +327,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           mode: 'connect',
         });
         for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-        for (const c of connectorChecks) logStep(`connector ${c.check}: ${c.status}`);
+        for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
         if (connectorChecks.some((c) => c.status === 'fail')) {
           throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
         }
-        logStep(`executing query via plugin (${plugin.manifest.name})`);
+        progress.update(`executing query via ${plugin.manifest.name}`);
         let result;
         try {
           result = await plugin.execute(
@@ -333,14 +350,16 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             !creds.password &&
             !ctx.jsonMode &&
             input.isTTY &&
+            !process.env.CI &&
             (datasource.kind === 'mysql' || datasource.kind === 'postgres');
           if (!canPromptPassword) throw err;
-          logStep(`password required for credential ref ${datasource.credentialRef}`);
+          progress.update(`password required for ${datasource.credentialRef}`);
+          progress.stop();
           const password = await promptPassword(datasource.credentialRef);
           if (!password) throw err;
           creds = { ...creds, password };
           await ctx.credentialStore.set(datasource.credentialRef, creds);
-          logStep('retrying query after password capture');
+          progress.update('retrying query');
           result = await plugin.execute(
             {
               datasource: datasource as any,
@@ -355,22 +374,25 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         appendEvent(artifacts.runDir, 'query succeeded');
 
         ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: opts.intent, sql: query, result });
-        logStep(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
+        progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
 
         if (ctx.jsonMode) printJson(result);
         else console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
-      } catch (error) {
-        const message = (error as Error).message;
-        const code = classifyError(message);
-        appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
-        logStep(`query failed (${code})`);
-        ctx.learningStore.saveFailure({
-          datasource: datasource as any,
-          queryIntent: opts.intent,
-          sql: query,
-          errorClass: code,
-        });
-        throw new Error(`${code}: ${message}`);
+        } catch (error) {
+          const message = (error as Error).message;
+          const code = classifyError(message);
+          appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
+          progress.fail(`query failed (${code})`);
+          ctx.learningStore.saveFailure({
+            datasource: datasource as any,
+            queryIntent: opts.intent,
+            sql: query,
+            errorClass: code,
+          });
+          throw new Error(`${code}: ${message}`);
+        }
+      } finally {
+        progress.stop();
       }
     });
 }

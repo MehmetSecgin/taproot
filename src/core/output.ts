@@ -1,4 +1,5 @@
 import type { CliOutputEnvelope } from '../types/core.js';
+import Table from 'cli-table3';
 
 export function printJson(data: unknown): void {
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
@@ -12,17 +13,12 @@ export function printEnvelope(ok: boolean, data: unknown, error?: CliOutputEnvel
 export function renderTable(rows: Array<Record<string, unknown>>): string {
   if (!rows.length) return 'Rows: 0\n(no rows)';
   const columns = Object.keys(rows[0]);
-  const widths = columns.map((c) => c.length);
+  const table = new Table({
+    head: columns,
+    wordWrap: true,
+  });
   for (const row of rows) {
-    columns.forEach((c, i) => {
-      const v = String(row[c] ?? '');
-      widths[i] = Math.max(widths[i], v.length);
-    });
+    table.push(columns.map((column) => String(row[column] ?? '')));
   }
-  const border = `+${widths.map((w) => '-'.repeat(w + 2)).join('+')}+`;
-  const fmt = (vals: string[]) => `|${vals.map((v, i) => ` ${v.padEnd(widths[i], ' ')} `).join('|')}|`;
-  const lines = [`Rows: ${rows.length}`, '', border, fmt(columns), border];
-  for (const row of rows) lines.push(fmt(columns.map((c) => String(row[c] ?? ''))));
-  lines.push(border);
-  return lines.join('\n');
+  return `Rows: ${rows.length}\n\n${table.toString()}`;
 }
