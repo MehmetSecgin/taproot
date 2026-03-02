@@ -24,10 +24,6 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     .option('--db-user <dbUser>')
     .option('--password <password>')
     .option('--token <token>')
-    .option('--host <host>', 'invalid in creds: topology belongs on datasource profiles')
-    .option('--port <port>', 'invalid in creds: topology belongs on datasource profiles')
-    .option('--database <database>', 'invalid in creds: topology belongs on datasource profiles')
-    .option('--target <target>', 'invalid in creds: topology belongs on datasource profiles')
     .option('--status-command <cmd>')
     .option('--connect-command <cmd>')
     .option('--disconnect-command <cmd>')
@@ -35,13 +31,6 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     .option('--kv <key=value>', 'repeatable extra credential value', (v, p: string[]) => (p || []).concat(v), [])
     .action(async (opts) => {
       const ctx = getCtx();
-      const topologyFlags = ['host', 'port', 'database', 'target'].filter((k) => opts[k]);
-      if (topologyFlags.length) {
-        throw new Error(
-          `Topology flags are not accepted in 'creds set' (${topologyFlags.join(', ')}). ` +
-            `Use 'datasource add' or 'datasource update' for host/port/database/target.`,
-        );
-      }
       const value: Record<string, string> = parseKv(opts.kv || []);
       for (const k of [
         'user',
