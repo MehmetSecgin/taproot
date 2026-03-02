@@ -57,7 +57,7 @@ export interface QueryTemplate {
   params: string[];
   resultShape: 'table' | 'json' | 'summary';
   tags: string[];
-  status: 'active' | 'deprecated';
+  status: 'active' | 'inactive';
   verifiedAt?: string;
 }
 

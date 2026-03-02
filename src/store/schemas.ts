@@ -37,7 +37,7 @@ export const QueryTemplateSchema = z.object({
   params: z.array(z.string()).default([]),
   resultShape: z.enum(['table', 'json', 'summary']).default('table'),
   tags: z.array(z.string()).default([]),
-  status: z.enum(['active', 'deprecated']).default('active'),
+  status: z.enum(['active', 'inactive']).default('active'),
   verifiedAt: z.string().optional(),
 });
 
