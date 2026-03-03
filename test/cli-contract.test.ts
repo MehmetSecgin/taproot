@@ -40,6 +40,12 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('compdef _taproot_complete taproot');
   });
 
+  it('completion root suggestions are driven by command tree', () => {
+    const out = runCli(['__complete', 'con']);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain('connector');
+  });
+
   it('provides dynamic datasource/template completion entries', () => {
     const stateRoot = path.join(os.tmpdir(), `taproot-complete-${Date.now()}`);
     const configDir = path.join(stateRoot, 'config');

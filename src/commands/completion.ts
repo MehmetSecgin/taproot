@@ -1,14 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 
-const ROOT_COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'daemon', 'session', 'connector', 'completion'];
-
-const QUERY_OPTS = ['--datasource', '--env', '--service', '--intent', '--template', '--query', '--param', '--allow-discovery', '--allow-mutate'];
-const DOCTOR_OPTS = ['--datasource', '--env', '--service', '--connect', '--verbose-detail', '--all'];
-const DATASOURCE_OPTS = ['list', 'show', 'add', 'update', 'remove', 'resolve'];
-const TEMPLATE_OPTS = ['list', 'validate', 'run', 'save'];
-const CONNECTOR_OPTS = ['status', 'setup'];
-
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
@@ -18,48 +10,74 @@ function withPrefix(values: string[], prefix: string): string[] {
   return values.filter((v) => v.startsWith(prefix));
 }
 
-function resolveSuggestions(tokens: string[], ctx: AppContext): string[] {
-  const args = tokens.filter((t) => t !== undefined);
-  const current = args[args.length - 1] || '';
-  const command = args[0] || '';
+function visibleCommands(command: Command): Command[] {
+  return command.commands.filter((c) => !c.name().startsWith('__'));
+}
 
-  if (!command || command.startsWith('-')) {
-    return withPrefix(ROOT_COMMANDS, current);
-  }
-  if (!ROOT_COMMANDS.includes(command)) {
-    return withPrefix(ROOT_COMMANDS, command);
-  }
+function commandNames(command: Command): string[] {
+  return uniqueSorted(visibleCommands(command).map((c) => c.name()));
+}
 
+function optionNames(command: Command): string[] {
+  return uniqueSorted(
+    command.options
+      .map((o) => o.long)
+      .filter((v): v is string => Boolean(v)),
+  );
+}
+
+function findCommand(command: Command, name: string): Command | undefined {
+  return visibleCommands(command).find((c) => c.name() === name);
+}
+
+function valueSuggestions(prev: string, current: string, ctx: AppContext): string[] {
   const datasourceNames = uniqueSorted(ctx.datasourceStore.list().map((d) => d.name));
   const templateIds = uniqueSorted(ctx.templateStore.list().map((t) => t.id));
   const serviceNames = uniqueSorted(ctx.kbStore.services().map((s: any) => String(s.service || '').trim()).filter(Boolean));
+  const connectorNames = uniqueSorted(ctx.pluginRegistry.list().filter((p) => p.manifest.kind === 'connector').map((p) => p.manifest.name));
 
-  const prev = args[args.length - 2] || '';
-  if (command === 'query') {
-    if (prev === '--datasource') return withPrefix(datasourceNames, current);
-    if (prev === '--template') return withPrefix(templateIds, current);
-    if (prev === '--service') return withPrefix(serviceNames, current);
-    if (current.startsWith('-')) return withPrefix(QUERY_OPTS, current);
-    return withPrefix(QUERY_OPTS, current);
-  }
-  if (command === 'doctor') {
-    if (prev === '--datasource') return withPrefix(datasourceNames, current);
-    if (prev === '--service') return withPrefix(serviceNames, current);
-    if (current.startsWith('-')) return withPrefix(DOCTOR_OPTS, current);
-    return withPrefix(DOCTOR_OPTS, current);
-  }
-  if (command === 'datasource') {
-    return withPrefix(DATASOURCE_OPTS, current);
-  }
-  if (command === 'template') {
-    if (prev === '--id') return withPrefix(templateIds, current);
-    return withPrefix(TEMPLATE_OPTS, current);
-  }
-  if (command === 'connector') {
-    if (prev === '--datasource') return withPrefix(datasourceNames, current);
-    return withPrefix(CONNECTOR_OPTS, current);
-  }
+  if (prev === '--datasource') return withPrefix(datasourceNames, current);
+  if (prev === '--template' || prev === '--id') return withPrefix(templateIds, current);
+  if (prev === '--service') return withPrefix(serviceNames, current);
+  if (prev === '--connector') return withPrefix(connectorNames, current);
   return [];
+}
+
+function resolveSuggestions(tokens: string[], ctx: AppContext, program: Command): string[] {
+  const args = tokens.filter((t) => t !== undefined);
+  const current = args[args.length - 1] || '';
+  const command = args[0] || '';
+  const rootCommands = commandNames(program);
+
+  if (!command || command.startsWith('-')) {
+    return withPrefix(rootCommands, current);
+  }
+  if (!rootCommands.includes(command)) {
+    return withPrefix(rootCommands, command);
+  }
+  const root = findCommand(program, command);
+  if (!root) return [];
+  const prev = args[args.length - 2] || '';
+
+  const valueMatches = valueSuggestions(prev, current, ctx);
+  if (valueMatches.length) return valueMatches;
+
+  const subcommands = commandNames(root);
+  const second = args[1] || '';
+  const hasSubcommands = subcommands.length > 0;
+  if (hasSubcommands) {
+    if (!second || second.startsWith('-')) {
+      return withPrefix(subcommands, current);
+    }
+    const sub = findCommand(root, second);
+    if (!sub) return withPrefix(subcommands, second);
+    const opts = optionNames(sub);
+    if (current.startsWith('-')) return withPrefix(opts, current);
+    return withPrefix(opts, current);
+  }
+  const opts = optionNames(root);
+  if (current.startsWith('-')) return withPrefix(opts, current);
+  return withPrefix(opts, current);
 }
 
 function zshScript(): string {
@@ -115,7 +133,7 @@ export function registerCompletion(program: Command, getCtx: () => AppContext): 
     .allowUnknownOption(true)
     .action((tokens: string[] = []) => {
       const ctx = getCtx();
-      const out = resolveSuggestions(tokens, ctx);
+      const out = resolveSuggestions(tokens, ctx, program);
       process.stdout.write(`${out.join('\n')}\n`);
     });
 }
