@@ -61,7 +61,9 @@ function zshScript(): string {
   return `#compdef taproot
 _taproot_complete() {
   local -a suggestions
-  suggestions=("\${(@f)\$(taproot __complete "\${words[@]:1}")}")
+  local -a args
+  args=("\${words[@]:2:$((CURRENT-1))}")
+  suggestions=("\${(@f)\$(taproot __complete -- "\${args[@]}" "\${PREFIX}")}")
   _describe 'taproot' suggestions
 }
 compdef _taproot_complete taproot
@@ -71,14 +73,14 @@ compdef _taproot_complete taproot
 function bashScript(): string {
   return `taproot_complete() {
   local IFS=$'\\n'
-  COMPREPLY=( $(taproot __complete "\${COMP_WORDS[@]:1}") )
+  COMPREPLY=( $(taproot __complete -- "\${COMP_WORDS[@]:1}") )
 }
 complete -F taproot_complete taproot
 `;
 }
 
 function fishScript(): string {
-  return `complete -c taproot -f -a "(taproot __complete (commandline -opc | string split ' ')[2..-1])"
+  return `complete -c taproot -f -a "(taproot __complete -- (commandline -opc | string split ' ')[2..-1])"
 `;
 }
 
