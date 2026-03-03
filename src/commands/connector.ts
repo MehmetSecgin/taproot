@@ -9,7 +9,18 @@ function compactDetail(detail: string, max = 160): string {
   return `${oneLine.slice(0, max - 1)}...`;
 }
 
-function summarizeTeleportStatus(detail: string): string {
+type TeleportStatusParsed = {
+  profileUrl?: string;
+  user?: string;
+  cluster?: string;
+  roles: string[];
+  kubernetes?: string;
+  databases?: string;
+  validUntil?: string;
+  extensions?: string;
+};
+
+function parseTeleportStatus(detail: string): TeleportStatusParsed {
   const text = detail.replace(/^\>\s*/gm, '').trim();
   const line = (label: string): string => {
     const m = text.match(new RegExp(`${label}:\\s*(.+)`, 'i'));
@@ -17,14 +28,28 @@ function summarizeTeleportStatus(detail: string): string {
   };
   const rolesRaw = line('Roles');
   const roles = rolesRaw ? rolesRaw.split(',').map((r) => r.trim()).filter(Boolean) : [];
-  const rolesPreview = roles.length ? roles.slice(0, 6).join(', ') : '';
-  const rolesSuffix = roles.length > 6 ? `, ... (+${roles.length - 6} more)` : '';
+  return {
+    profileUrl: line('Profile URL') || undefined,
+    user: line('Logged in as') || undefined,
+    cluster: line('Cluster') || undefined,
+    roles,
+    kubernetes: line('Kubernetes') || undefined,
+    databases: line('Databases') || undefined,
+    validUntil: line('Valid until') || undefined,
+    extensions: line('Extensions') || undefined,
+  };
+}
+
+function summarizeTeleportStatus(detail: string): string {
+  const parsed = parseTeleportStatus(detail);
+  const rolesPreview = parsed.roles.length ? parsed.roles.slice(0, 6).join(', ') : '';
+  const rolesSuffix = parsed.roles.length > 6 ? `, ... (+${parsed.roles.length - 6} more)` : '';
   const parts = [
-    line('Logged in as') ? `user=${line('Logged in as')}` : '',
-    line('Cluster') ? `cluster=${line('Cluster')}` : '',
-    line('Databases') ? `databases=${line('Databases')}` : '',
-    line('Valid until') ? `validUntil=${line('Valid until')}` : '',
-    roles.length ? `roles=${roles.length}${rolesPreview ? ` (${rolesPreview}${rolesSuffix})` : ''}` : '',
+    parsed.user ? `user=${parsed.user}` : '',
+    parsed.cluster ? `cluster=${parsed.cluster}` : '',
+    parsed.databases ? `databases=${parsed.databases}` : '',
+    parsed.validUntil ? `validUntil=${parsed.validUntil}` : '',
+    parsed.roles.length ? `roles=${parsed.roles.length}${rolesPreview ? ` (${rolesPreview}${rolesSuffix})` : ''}` : '',
   ].filter(Boolean);
   return parts.join(' | ') || compactDetail(detail, 200);
 }
@@ -33,6 +58,28 @@ function formatDetail(check: string, detail: string, full: boolean): string {
   if (!full) return compactDetail(detail);
   if (check.toLowerCase().startsWith('teleport status')) return summarizeTeleportStatus(detail);
   return detail;
+}
+
+function printNestedChecks(rows: Array<{ check: string; status: string; detail: string }>): void {
+  for (const row of rows) {
+    console.log(`- ${row.check}: ${row.status}`);
+    if (row.check.toLowerCase().startsWith('teleport status')) {
+      const parsed = parseTeleportStatus(row.detail);
+      if (parsed.profileUrl) console.log(`  profile: ${parsed.profileUrl}`);
+      if (parsed.user) console.log(`  user: ${parsed.user}`);
+      if (parsed.cluster) console.log(`  cluster: ${parsed.cluster}`);
+      if (parsed.databases) console.log(`  databases: ${parsed.databases}`);
+      if (parsed.kubernetes) console.log(`  kubernetes: ${parsed.kubernetes}`);
+      if (parsed.validUntil) console.log(`  valid_until: ${parsed.validUntil}`);
+      if (parsed.extensions) console.log(`  extensions: ${parsed.extensions}`);
+      if (parsed.roles.length) {
+        console.log(`  roles (${parsed.roles.length}):`);
+        for (const role of parsed.roles) console.log(`    - ${role}`);
+      }
+    } else {
+      console.log(`  detail: ${row.detail}`);
+    }
+  }
 }
 
 function connectorRefKey(name: string): string {
@@ -84,12 +131,13 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         const rows = checks.map((x) => ({
           check: x.check,
           status: x.status,
-          detail: formatDetail(x.check, x.detail, Boolean(opts.verboseDetail)),
+          detail: opts.verboseDetail ? x.detail : formatDetail(x.check, x.detail, false),
         }));
         const showAll = opts.all || ctx.verbose || opts.verboseDetail;
         const visible = showAll ? rows : rows.filter((r) => r.status !== 'ok');
         if (visible.length) {
-          console.log(renderTable(visible));
+          if (opts.verboseDetail) printNestedChecks(visible);
+          else console.log(renderTable(visible));
         } else {
           const healthy = checks.map((x) => x.check.replace(/\s+status$/i, ''));
           console.log(`All connectors healthy: ${healthy.join(', ')}`);
