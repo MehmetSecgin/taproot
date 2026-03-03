@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson, renderRecord, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 
 export function registerSession(program: Command, getCtx: () => AppContext): void {
@@ -23,7 +23,8 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
         },
       });
       if (!res.ok) throw new Error(res.error?.message || 'session.open failed');
-      printJson(res.data || {});
+      if (ctx.jsonMode) printJson(res.data || {});
+      else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
     });
 
   s.command('ls').action(async () => {
@@ -44,9 +45,11 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
   s.command('inspect')
     .requiredOption('--session-id <id>')
     .action(async (opts) => {
+      const ctx = getCtx();
       const res = await rpcCall({ method: 'session.inspect', params: { sessionId: opts.sessionId } });
       if (!res.ok) throw new Error(res.error?.message || 'session.inspect failed');
-      printJson(res.data || {});
+      if (ctx.jsonMode) printJson(res.data || {});
+      else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
     });
 
   s.command('close')

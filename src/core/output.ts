@@ -22,3 +22,15 @@ export function renderTable(rows: Array<Record<string, unknown>>): string {
   }
   return `Rows: ${rows.length}\n\n${table.toString()}`;
 }
+
+function formatValue(value: unknown): string {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map((v) => String(v)).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+export function renderRecord(record: Record<string, unknown>): string {
+  const rows = Object.entries(record).map(([key, value]) => ({ key, value: formatValue(value) }));
+  return renderTable(rows);
+}

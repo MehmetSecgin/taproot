@@ -3,7 +3,7 @@ import type { AppContext } from '../core/app.js';
 import { fillTemplate, parseParamPairs } from '../core/app.js';
 import { EXIT_CODES } from '../core/exit-codes.js';
 import { nowIso } from '../core/time.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 export function registerTemplate(program: Command, getCtx: () => AppContext): void {
   const t = program.command('template').description('Query template operations');
@@ -23,7 +23,10 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
     const missing = item.params.filter((p) => !placeholders.includes(p));
     const extra = placeholders.filter((p) => !item.params.includes(p));
     const valid = missing.length === 0 && extra.length === 0;
-    printJson({ valid, missingParams: missing, extraPlaceholders: extra });
+    if (ctx.jsonMode) printJson({ valid, missingParams: missing, extraPlaceholders: extra });
+    else {
+      console.log(renderRecord({ id: item.id, valid, missingParams: missing, extraPlaceholders: extra }));
+    }
     if (!valid) process.exitCode = EXIT_CODES.BAD_INPUT;
   });
 
@@ -33,7 +36,11 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
     if (!item) throw new Error(`Template not found: ${opts.id}`);
     const params = parseParamPairs(opts.param || []);
     const query = fillTemplate(item.nativeQueryTemplate, params);
-    printJson({ id: item.id, query });
+    if (ctx.jsonMode) printJson({ id: item.id, query });
+    else {
+      console.log(`template: ${item.id}`);
+      console.log(query);
+    }
   });
 
   t.command('save')
@@ -58,6 +65,7 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
         status: 'active',
         verifiedAt: nowIso(),
       } as any);
-      printJson(saved);
+      if (ctx.jsonMode) printJson(saved);
+      else console.log(`Saved template ${saved.id}`);
     });
 }

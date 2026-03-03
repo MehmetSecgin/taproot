@@ -105,7 +105,7 @@ process.on('uncaughtException', (error) => {
 
 program.parseAsync(process.argv).catch((error) => {
   const commanderCode = String((error as { code?: string })?.code || '');
-  if (commanderCode === 'commander.helpDisplayed') {
+  if (commanderCode === 'commander.helpDisplayed' || commanderCode === 'commander.version') {
     process.exit(EXIT_CODES.OK);
     return;
   }

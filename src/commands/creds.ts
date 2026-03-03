@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson } from '../core/output.js';
+import { printJson, renderRecord } from '../core/output.js';
 
 function parseKv(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -45,7 +45,9 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
         if (opts[k]) value[k] = String(opts[k]);
       }
       await ctx.credentialStore.set(opts.ref, value);
-      printJson({ saved: true, ref: opts.ref, keys: Object.keys(value) });
+      const out = { saved: true, ref: opts.ref, keys: Object.keys(value) };
+      if (ctx.jsonMode) printJson(out);
+      else console.log(`saved credential ref ${out.ref} (${out.keys.length} keys)`);
     });
 
   c.command('show').requiredOption('--ref <ref>').action(async (opts) => {
@@ -54,12 +56,14 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     const redacted = { ...value };
     if (redacted.password) redacted.password = '[REDACTED]';
     if (redacted.token) redacted.token = '[REDACTED]';
-    printJson({ ref: opts.ref, values: redacted });
+    if (ctx.jsonMode) printJson({ ref: opts.ref, values: redacted });
+    else console.log(renderRecord({ ref: opts.ref, ...redacted }));
   });
 
   c.command('unset').requiredOption('--ref <ref>').action(async (opts) => {
     const ctx = getCtx();
     await ctx.credentialStore.remove(opts.ref);
-    printJson({ removed: true, ref: opts.ref });
+    if (ctx.jsonMode) printJson({ removed: true, ref: opts.ref });
+    else console.log(`removed credential ref ${opts.ref}`);
   });
 }

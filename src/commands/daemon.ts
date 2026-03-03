@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson } from '../core/output.js';
+import { printJson, renderRecord } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { rpcCall } from '../daemon/client.js';
 
@@ -70,7 +70,8 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
     const ctx = getCtx();
     const res = await rpcCall({ method: 'daemon.status' });
     if (!res.ok) throw new Error(res.error?.message || 'daemon status failed');
-    printJson(res.data || {});
+    if (ctx.jsonMode) printJson(res.data || {});
+    else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
   });
 
   d.command('stop').action(async () => {

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeService } from '../core/app.js';
 import { nowIso } from '../core/time.js';
-import { renderTable, printJson } from '../core/output.js';
+import { renderRecord, renderTable, printJson } from '../core/output.js';
 
 function parseConnectorRefPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -38,7 +38,26 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     const ctx = getCtx();
     const item = ctx.datasourceStore.get(opts.name);
     if (!item) throw new Error(`Datasource not found: ${opts.name}`);
-    printJson(item);
+    if (ctx.jsonMode) printJson(item);
+    else {
+      console.log(renderRecord({
+        name: item.name,
+        kind: item.kind,
+        env: item.env || '',
+        service: item.service || '',
+        credentialRef: item.credentialRef,
+        connectors: item.connectors || [],
+        host: item.connection?.host || '',
+        port: item.connection?.port || '',
+        database: item.connection?.database || '',
+        target: item.connection?.target || '',
+        allowRead: item.policy?.allowRead,
+        allowMutate: item.policy?.allowMutate,
+        allowedCapabilities: item.policy?.allowedCapabilities || [],
+        confidence: item.confidence,
+        updatedAt: item.updatedAt,
+      }));
+    }
   });
 
   ds.command('remove').requiredOption('--name <name>').action((opts) => {
@@ -107,7 +126,24 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const ctx = getCtx();
       const service = normalizeService(opts.service);
       const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service);
-      if (fromStore) return printJson({ source: 'datasource-store', profile: fromStore });
+      if (fromStore) {
+        if (ctx.jsonMode) printJson({ source: 'datasource-store', profile: fromStore });
+        else {
+          console.log(`source: datasource-store`);
+          console.log(renderRecord({
+            name: fromStore.name,
+            kind: fromStore.kind,
+            env: fromStore.env || '',
+            service: fromStore.service || '',
+            credentialRef: fromStore.credentialRef,
+            host: fromStore.connection?.host || '',
+            port: fromStore.connection?.port || '',
+            database: fromStore.connection?.database || '',
+            target: fromStore.connection?.target || '',
+          }));
+        }
+        return;
+      }
       const kb = ctx.kbStore.resolveConnection(service, opts.env);
       if (!kb) throw new Error(`No datasource profile found for env=${opts.env} service=${service}`);
       const name = defaultDatasourceName(opts.env, service);
@@ -131,6 +167,20 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         confidence: 0.85,
       };
       ctx.datasourceStore.save(profile as any);
-      printJson({ source: 'kb', profile });
+      if (ctx.jsonMode) printJson({ source: 'kb', profile });
+      else {
+        console.log(`source: kb`);
+        console.log(renderRecord({
+          name: profile.name,
+          kind: profile.kind,
+          env: profile.env || '',
+          service: profile.service || '',
+          credentialRef: profile.credentialRef,
+          host: profile.connection?.host || '',
+          port: profile.connection?.port || '',
+          database: profile.connection?.database || '',
+          target: profile.connection?.target || '',
+        }));
+      }
     });
 }
