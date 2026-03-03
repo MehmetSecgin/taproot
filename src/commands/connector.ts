@@ -58,11 +58,17 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         const rows = checks.map((x) => ({
           check: x.check,
           status: x.status,
-          detail: opts.verboseDetail || ctx.verbose ? x.detail : compactDetail(x.detail),
+          detail: opts.verboseDetail ? x.detail : compactDetail(x.detail),
         }));
-        const visible = opts.all || ctx.verbose ? rows : rows.filter((r) => r.status !== 'ok');
-        if (visible.length) console.log(renderTable(visible));
-        else console.log('No checks to display.');
+        const showAll = opts.all || ctx.verbose || opts.verboseDetail;
+        const visible = showAll ? rows : rows.filter((r) => r.status !== 'ok');
+        if (visible.length) {
+          console.log(renderTable(visible));
+        } else {
+          const healthy = checks.map((x) => x.check.replace(/\s+status$/i, ''));
+          console.log(`All connectors healthy: ${healthy.join(', ')}`);
+          console.log('Use --all to print full connector checks.');
+        }
       }
     });
 
