@@ -164,6 +164,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       };
       const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || Boolean(opts.allowDiscovery);
       try {
+        if (opts.allowDiscovery && !ctx.jsonMode) {
+          progress.update('discovery mode enabled, bypassing daemon');
+        }
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
         if (!forceDirect) {
           try {
