@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
 import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { datasourceKbConflicts } from '../core/conflicts.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { printJson, renderTable } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
@@ -21,34 +22,6 @@ function parseDatasourceAlias(value?: string): { env: string; service: string } 
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
   return { env: m[1], service: normalizeService(m[2]) };
-}
-
-function expectedKindFromKb(kb: Record<string, unknown>): string {
-  const accessMethod = String(kb.access_method || '').toLowerCase();
-  const engine = String(kb.engine || 'mysql').toLowerCase();
-  if (accessMethod === 'tsh') return 'teleport-mysql';
-  if (engine.includes('postgres')) return 'postgres';
-  return 'mysql';
-}
-
-function datasourceKbConflicts(datasource: any, kb: Record<string, unknown>): string[] {
-  const conflicts: string[] = [];
-  const expectedKind = expectedKindFromKb(kb);
-  if (String(datasource.kind || '').trim() && datasource.kind !== expectedKind) {
-    conflicts.push(`kind=${datasource.kind} (kb:${expectedKind})`);
-  }
-  const pairs: Array<{ key: string; ds: unknown; kb: unknown }> = [
-    { key: 'host', ds: datasource.connection?.host, kb: kb.host },
-    { key: 'port', ds: datasource.connection?.port, kb: kb.port },
-    { key: 'database', ds: datasource.connection?.database, kb: kb.database },
-    { key: 'target', ds: datasource.connection?.target, kb: kb.target },
-  ];
-  for (const p of pairs) {
-    const dsVal = String(p.ds ?? '').trim();
-    const kbVal = String(p.kb ?? '').trim();
-    if (dsVal && kbVal && dsVal !== kbVal) conflicts.push(`${p.key}=${dsVal} (kb:${kbVal})`);
-  }
-  return conflicts;
 }
 
 async function ensureCredentialDefaults(ctx: AppContext, ref: string, defaults: Record<string, string>, overwrite = false): Promise<void> {
@@ -175,6 +148,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--template <id>')
     .option('--query <native>')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
+    .option('--allow-discovery', 'allow non-deterministic datasource discovery', false)
     .option('--allow-mutate', 'allow mutating query', false)
     .action(async (opts) => {
       const ctx = getCtx();
@@ -188,7 +162,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const logVerbose = (msg: string): void => {
         if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
-      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1';
+      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || Boolean(opts.allowDiscovery);
       try {
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
         if (!forceDirect) {
@@ -202,6 +176,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 intent: opts.intent,
                 template: opts.template,
                 query: opts.query,
+                allowDiscovery: Boolean(opts.allowDiscovery),
                 allowMutate: Boolean(opts.allowMutate),
                 param: opts.param || [],
               },
@@ -209,6 +184,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             if (rpc.ok) {
               const columns = (rpc.data?.columns as string[]) || [];
               const rows = (rpc.data?.rows as Array<Record<string, unknown>>) || [];
+              const warnings = (rpc.data?.warnings as string[]) || [];
               if (ctx.jsonMode) {
                 printJson({
                   ok: true,
@@ -217,6 +193,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 });
               } else {
                 progress.succeed(`query complete (${rows.length} rows)`);
+                if (warnings.length) {
+                  progress.warn(`warnings: ${warnings.join(' | ')}`);
+                }
                 logVerbose(
                   `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
                 );
@@ -238,15 +217,19 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = parseDatasourceAlias(opts.datasource);
       const env = String(opts.env || alias?.env || '').trim();
+      const isProd = env === 'prod';
       const service = normalizeService(opts.service || alias?.service || '');
       progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
+      let resolutionSource: 'explicit' | 'store' | 'learning' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
       if (!datasource && opts.env && service) {
         datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
+        if (datasource) resolutionSource = 'store';
       }
       if (!datasource && env && service) {
         datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+        if (datasource) resolutionSource = 'store';
       }
-      if (!datasource && env && service) {
+      if (!datasource && env && service && (!isProd || Boolean(opts.allowDiscovery))) {
         const learned = ctx.learningStore.resolveConnection(env, service);
         if (learned) {
           datasource = ctx.datasourceStore.save({
@@ -263,11 +246,15 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             updatedAt: new Date().toISOString(),
             confidence: learned.confidence,
           } as any);
+          resolutionSource = 'learning';
         }
       }
       if (!datasource && env && service) {
         datasource = await autoBootstrapDatasource(ctx, env, service, opts.datasource || `${env}-${service}`);
-        if (datasource) logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
+        if (datasource) {
+          resolutionSource = 'kb';
+          logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
+        }
       }
       if (
         datasource &&
@@ -279,12 +266,23 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       ) {
         datasource = await autoBootstrapDatasource(ctx, env, service, datasource.name);
       }
+      if (!datasource && isProd && !opts.allowDiscovery) {
+        throw new Error('DETERMINISTIC_REQUIRED: prod requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.');
+      }
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
+      if (isProd && !opts.allowDiscovery && resolutionSource === 'learning') {
+        throw new Error('DETERMINISTIC_REQUIRED: prod requires KB/profile-backed datasource resolution. Retry without discovery cache or set --allow-discovery.');
+      }
+      const warnings: string[] = [];
       if (env && service) {
         const kb = ctx.kbStore.resolveConnection(service, env);
         if (kb) {
-          const conflicts = datasourceKbConflicts(datasource, kb);
-          if (conflicts.length) logVerbose(`warning: datasource overrides KB (${conflicts.join('; ')})`);
+          const conflicts = datasourceKbConflicts(datasource as any, kb);
+          if (conflicts.length) {
+            const warning = `datasource overrides KB (${conflicts.join('; ')})`;
+            warnings.push(warning);
+            logVerbose(`warning: ${warning}`);
+          }
         }
       }
       progress.update(`datasource ready (${datasource.name})`);
@@ -374,6 +372,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         appendEvent(artifacts.runDir, 'query succeeded');
 
         ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: opts.intent, sql: query, result });
+        if (warnings.length) result.warnings = [...result.warnings, ...warnings];
         progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
 
         if (ctx.jsonMode) printJson(result);

@@ -83,6 +83,8 @@ export function parseParamPairs(values: string[]): Record<string, string> {
 
 export function classifyError(message: string): string {
   const text = message.toLowerCase();
+  if (/deterministic_required|prod requires deterministic/.test(text)) return 'DETERMINISTIC_REQUIRED';
+  if (/discovery_unavailable/.test(text)) return 'DISCOVERY_UNAVAILABLE';
   if (/overloaded|queue limit/.test(text)) return 'OVERLOADED';
   if (/session_busy|session .*active leases/.test(text)) return 'SESSION_BUSY';
   if (/access denied|permission denied/.test(text)) return 'ACCESS_DENIED';
@@ -102,6 +104,8 @@ export function nextAction(errorCode: string): string {
     AUTH_EXPIRED: 'Refresh credentials/session and retry.',
     OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
+    DETERMINISTIC_REQUIRED: 'In prod, provide --datasource or --env+--service with KB/profile-backed resolution; do not rely on discovery.',
+    DISCOVERY_UNAVAILABLE: 'Use direct CLI mode with --allow-discovery (daemon bypassed) if discovery is explicitly required.',
     GENERIC: 'Inspect error details and rerun with --json for envelope details.',
   };
   return mapping[errorCode] || mapping.GENERIC;

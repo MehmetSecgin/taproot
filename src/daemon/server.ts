@@ -5,6 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { buildContext, classifyError, fillTemplate, nextAction, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
+import { datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { enforceMutationPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
@@ -162,19 +163,37 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = true;
               base.data = { closedCount };
             } else if (req.method === 'query.execute') {
+              const allowDiscovery = Boolean(req.params.allowDiscovery);
               const rawDs = String(req.params.datasource || '').trim();
               const alias = rawDs.match(/^([a-z0-9]+)-([a-z0-9-]+)$/i);
               const env = String(req.params.env || alias?.[1] || '').trim();
               const service = normalizeService(String(req.params.service || alias?.[2] || ''));
+              const isProd = env === 'prod';
+              if (isProd && allowDiscovery) {
+                throw new Error('DISCOVERY_UNAVAILABLE: discovery mode is only available in direct CLI mode when daemon is bypassed.');
+              }
               let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
               if (!datasource && env && service) datasource = ctx.datasourceStore.resolveByEnvService(env, service);
-              if (!datasource) throw new Error('Datasource resolution failed.');
+              if (!datasource) {
+                if (isProd && !allowDiscovery) {
+                  throw new Error('DETERMINISTIC_REQUIRED: prod requires datasource profile/KB resolution. Use --datasource or --env+--service.');
+                }
+                throw new Error('Datasource resolution failed.');
+              }
 
               const releaseGlobal = await queryLimiter.acquire();
               let leaseSessionId = '';
               let leaseId = '';
               let heartbeat: NodeJS.Timeout | undefined;
               try {
+                const warnings: string[] = [];
+                if (env && service) {
+                  const kb = ctx.kbStore.resolveConnection(service, env);
+                  if (kb) {
+                    const conflicts = datasourceKbConflicts(datasource as DatasourceProfile, kb);
+                    if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
+                  }
+                }
                 const session = sessions.open({
                   datasourceName: datasource.name,
                   env: datasource.env,
@@ -247,6 +266,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   datasource: datasource.name,
                   plugin: result.plugin,
                   classification: result.classification,
+                  warnings,
                 };
               } finally {
                 if (heartbeat) clearInterval(heartbeat);

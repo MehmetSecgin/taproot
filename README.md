@@ -15,7 +15,7 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 ## Commands
 - `taproot self-check`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
-- `taproot query --datasource <name> [--query | --template | --intent] [--param k=v]`
+- `taproot query --datasource <name> [--query | --template | --intent] [--param k=v] [--allow-discovery]`
 - `taproot datasource <list|show|add|remove|resolve>`
 - `taproot template <list|save|validate|run>`
 - `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related>`
@@ -89,6 +89,7 @@ Expected structure:
 
 ## Notes
 - Built-in DB plugins only expose `executeRead` in v1.
+- `prod` defaults to deterministic no-guess datasource resolution (profile/KB); use `--allow-discovery` only when explicitly needed.
 - Mutating queries require `--allow-mutate` **and** datasource policy with `executeMutate`.
 - Secrets are never printed and are redacted from JSON output envelopes.
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.

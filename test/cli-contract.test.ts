@@ -1,12 +1,14 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import { describe, expect, it } from 'vitest';
 
-function runCli(args: string[]) {
+function runCli(args: string[], env: Record<string, string> = {}) {
   const distCli = path.join(process.cwd(), 'dist', 'index.js');
   return spawnSync(process.execPath, [distCli, ...args], {
     cwd: process.cwd(),
     encoding: 'utf8',
+    env: { ...process.env, ...env },
   });
 }
 
@@ -48,5 +50,15 @@ describe('cli contract', () => {
     const out = runCli(['creds', 'set', '--ref', 'x', '--host', 'localhost']);
     expect(out.status).toBe(2);
     expect(out.stderr.toLowerCase()).toContain('unknown option');
+  });
+
+  it('enforces prod no-guess mode unless discovery is explicit', () => {
+    const stateRoot = path.join(os.tmpdir(), `taproot-cli-${Date.now()}`);
+    const out = runCli(
+      ['query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'],
+      { TAPROOT_FORCE_DIRECT: '1', TAPROOT_STATE_ROOT: stateRoot },
+    );
+    expect(out.status).toBe(2);
+    expect((out.stderr || '').toLowerCase()).toContain('deterministic_required');
   });
 });

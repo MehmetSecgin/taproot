@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { classifyError, normalizeService, runDatasourceConnectors } from '../core/app.js';
+import { datasourceKbConflicts } from '../core/conflicts.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
@@ -37,6 +38,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
       try {
         progress.update('resolving datasource');
         let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
+        const warnings: string[] = [];
         if (!datasource && opts.env && opts.service) {
           const service = normalizeService(opts.service);
           datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
@@ -70,6 +72,13 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           throw new Error('Could not resolve datasource. Use --datasource or --env+--service.');
         }
         progress.update(`checking plugin for ${datasource.name}`);
+        if (datasource.env && datasource.service) {
+          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env);
+          if (kb) {
+            const conflicts = datasourceKbConflicts(datasource as any, kb);
+            if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
+          }
+        }
         const plugin = ctx.pluginRegistry.get(datasource.kind);
         if (!plugin || !plugin.doctor) {
           progress.fail('doctor capability unavailable');
@@ -112,10 +121,12 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           printJson({
             datasource: datasource.name,
             plugin: plugin.manifest.name,
+            warnings,
             checks,
             summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
           });
         } else {
+          if (warnings.length) progress.warn(`warnings: ${warnings.join(' | ')}`);
           const summary = `doctor summary: ok=${okCount} warn=${warnCount} fail=${failCount} total=${checks.length}`;
           if (ctx.verbose) {
             console.log(summary);
