@@ -61,7 +61,7 @@ registerKb(program, context);
 registerCache(program, context);
 registerLearn(program, context);
 registerCreds(program, context);
-registerCompletion(program);
+registerCompletion(program, context);
 registerSanitize(program, context);
 registerDaemon(program, context);
 registerSession(program, context);

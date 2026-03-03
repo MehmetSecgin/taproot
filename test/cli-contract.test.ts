@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -37,6 +38,59 @@ describe('cli contract', () => {
     const out = runCli(['completion', 'zsh']);
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('compdef _taproot_complete taproot');
+  });
+
+  it('provides dynamic datasource/template completion entries', () => {
+    const stateRoot = path.join(os.tmpdir(), `taproot-complete-${Date.now()}`);
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'qa-orders',
+          kind: 'mysql',
+          env: 'qa',
+          service: 'orders',
+          tags: [],
+          connection: {},
+          credentialRef: 'qa:orders',
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          updatedAt: new Date().toISOString(),
+          confidence: 1,
+        },
+      ]),
+    );
+    fs.writeFileSync(
+      path.join(configDir, 'templates.json'),
+      JSON.stringify([
+        {
+          id: 'orders.latest',
+          datasourceKind: 'mysql',
+          intent: 'latest orders',
+          aliases: [],
+          nativeQueryTemplate: 'SELECT 1 AS ok',
+          params: [],
+          resultShape: 'table',
+          tags: [],
+          status: 'active',
+          verifiedAt: new Date().toISOString(),
+        },
+      ]),
+    );
+    const outDs = runCli(['__complete', 'query', '--datasource', 'qa'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+    });
+    expect(outDs.status).toBe(0);
+    expect(outDs.stdout).toContain('qa-orders');
+
+    const outTpl = runCli(['__complete', 'query', '--template', 'orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+    });
+    expect(outTpl.status).toBe(0);
+    expect(outTpl.stdout).toContain('orders.latest');
   });
 
   it('self-check json includes checks', () => {
