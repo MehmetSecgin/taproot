@@ -83,6 +83,8 @@ export function parseParamPairs(values: string[]): Record<string, string> {
 
 export function classifyError(message: string): string {
   const text = message.toLowerCase();
+  if (/overloaded|queue limit/.test(text)) return 'OVERLOADED';
+  if (/session_busy|session .*active leases/.test(text)) return 'SESSION_BUSY';
   if (/access denied|permission denied/.test(text)) return 'ACCESS_DENIED';
   if (/unknown database|does not exist/.test(text)) return 'UNKNOWN_DATABASE';
   if (/getaddrinfo|no such host|target.*not found/.test(text)) return 'UNKNOWN_TARGET';
@@ -98,6 +100,8 @@ export function nextAction(errorCode: string): string {
     UNKNOWN_TARGET: 'Verify host/target in datasource profile and connector module.',
     CONNECTIVITY: 'Check VPN/network and endpoint reachability.',
     AUTH_EXPIRED: 'Refresh credentials/session and retry.',
+    OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
+    SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     GENERIC: 'Inspect error details and rerun with --json for envelope details.',
   };
   return mapping[errorCode] || mapping.GENERIC;

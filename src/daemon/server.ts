@@ -10,6 +10,7 @@ import { enforceMutationPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { RpcRequest, RpcResponse } from './types.js';
+import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 
 export interface DaemonOptions {
@@ -59,6 +60,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
 
   const sessions = new SessionRegistry(runDir);
+  const queryLimiter = new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries);
   const ctx = buildContext({ jsonMode: true });
   const startedAt = Date.now();
 
@@ -111,6 +113,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 uptimeMs: Date.now() - startedAt,
                 socketPath,
                 sessions: sessions.list().length,
+                queryLimiter: queryLimiter.stats(),
               };
             } else if (req.method === 'session.open') {
               const session = sessions.open({
@@ -162,18 +165,26 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               if (!datasource && env && service) datasource = ctx.datasourceStore.resolveByEnvService(env, service);
               if (!datasource) throw new Error('Datasource resolution failed.');
 
-              const session = sessions.open({
-                datasourceName: datasource.name,
-                env: datasource.env,
-                service: datasource.service,
-                kind: datasource.kind,
-                connection: datasource.connection as Record<string, unknown>,
-                connectors: datasource.connectors || [],
-              });
-              const leaseId = sessions.acquireLease(session.sessionId);
-              base.meta.sessionId = session.sessionId;
-              const heartbeat = setInterval(() => sessions.heartbeatLease(session.sessionId, leaseId), RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs);
+              const releaseGlobal = await queryLimiter.acquire();
+              let leaseSessionId = '';
+              let leaseId = '';
+              let heartbeat: NodeJS.Timeout | undefined;
               try {
+                const session = sessions.open({
+                  datasourceName: datasource.name,
+                  env: datasource.env,
+                  service: datasource.service,
+                  kind: datasource.kind,
+                  connection: datasource.connection as Record<string, unknown>,
+                  connectors: datasource.connectors || [],
+                });
+                leaseSessionId = session.sessionId;
+                leaseId = sessions.acquireLease(session.sessionId);
+                base.meta.sessionId = session.sessionId;
+                heartbeat = setInterval(
+                  () => sessions.heartbeatLease(session.sessionId, leaseId),
+                  RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
+                );
                 let query = String(req.params.query || '').trim();
                 const params = parseQueryParams(req.params);
                 if (!query && req.params.template) {
@@ -229,8 +240,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   classification: result.classification,
                 };
               } finally {
-                clearInterval(heartbeat);
-                sessions.releaseLease(session.sessionId, leaseId);
+                if (heartbeat) clearInterval(heartbeat);
+                if (leaseSessionId && leaseId) sessions.releaseLease(leaseSessionId, leaseId);
+                releaseGlobal();
               }
             } else if (req.method === 'daemon.stop') {
               base.ok = true;

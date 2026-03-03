@@ -169,6 +169,11 @@ export class SessionRegistry {
     const leaseId = `lease_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
     const now = Date.now();
     const leases = this.leaseHeartbeats.get(sessionId) || new Map<string, number>();
+    if (leases.size >= RUNTIME_CONSTANTS.session.maxConcurrentLeases) {
+      throw new Error(
+        `SESSION_BUSY: session ${sessionId} has ${leases.size} active leases (max ${RUNTIME_CONSTANTS.session.maxConcurrentLeases})`,
+      );
+    }
     leases.set(leaseId, now);
     this.leaseHeartbeats.set(sessionId, leases);
     session.leaseCount = leases.size;
