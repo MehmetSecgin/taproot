@@ -9,6 +9,32 @@ function compactDetail(detail: string, max = 160): string {
   return `${oneLine.slice(0, max - 1)}...`;
 }
 
+function summarizeTeleportStatus(detail: string): string {
+  const text = detail.replace(/^\>\s*/gm, '').trim();
+  const line = (label: string): string => {
+    const m = text.match(new RegExp(`${label}:\\s*(.+)`, 'i'));
+    return m?.[1]?.trim() || '';
+  };
+  const rolesRaw = line('Roles');
+  const roles = rolesRaw ? rolesRaw.split(',').map((r) => r.trim()).filter(Boolean) : [];
+  const rolesPreview = roles.length ? roles.slice(0, 6).join(', ') : '';
+  const rolesSuffix = roles.length > 6 ? `, ... (+${roles.length - 6} more)` : '';
+  const parts = [
+    line('Logged in as') ? `user=${line('Logged in as')}` : '',
+    line('Cluster') ? `cluster=${line('Cluster')}` : '',
+    line('Databases') ? `databases=${line('Databases')}` : '',
+    line('Valid until') ? `validUntil=${line('Valid until')}` : '',
+    roles.length ? `roles=${roles.length}${rolesPreview ? ` (${rolesPreview}${rolesSuffix})` : ''}` : '',
+  ].filter(Boolean);
+  return parts.join(' | ') || compactDetail(detail, 200);
+}
+
+function formatDetail(check: string, detail: string, full: boolean): string {
+  if (!full) return compactDetail(detail);
+  if (check.toLowerCase().startsWith('teleport status')) return summarizeTeleportStatus(detail);
+  return detail;
+}
+
 function connectorRefKey(name: string): string {
   return `${name}CredentialRef`;
 }
@@ -58,7 +84,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         const rows = checks.map((x) => ({
           check: x.check,
           status: x.status,
-          detail: opts.verboseDetail ? x.detail : compactDetail(x.detail),
+          detail: formatDetail(x.check, x.detail, Boolean(opts.verboseDetail)),
         }));
         const showAll = opts.all || ctx.verbose || opts.verboseDetail;
         const visible = showAll ? rows : rows.filter((r) => r.status !== 'ok');
