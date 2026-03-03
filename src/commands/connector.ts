@@ -60,25 +60,26 @@ function formatDetail(check: string, detail: string, full: boolean): string {
   return detail;
 }
 
-function printNestedChecks(rows: Array<{ check: string; status: string; detail: string }>): void {
-  for (const row of rows) {
-    console.log(`- ${row.check}: ${row.status}`);
-    if (row.check.toLowerCase().startsWith('teleport status')) {
-      const parsed = parseTeleportStatus(row.detail);
-      if (parsed.profileUrl) console.log(`  profile: ${parsed.profileUrl}`);
-      if (parsed.user) console.log(`  user: ${parsed.user}`);
-      if (parsed.cluster) console.log(`  cluster: ${parsed.cluster}`);
-      if (parsed.databases) console.log(`  databases: ${parsed.databases}`);
-      if (parsed.kubernetes) console.log(`  kubernetes: ${parsed.kubernetes}`);
-      if (parsed.validUntil) console.log(`  valid_until: ${parsed.validUntil}`);
-      if (parsed.extensions) console.log(`  extensions: ${parsed.extensions}`);
-      if (parsed.roles.length) {
-        console.log(`  roles (${parsed.roles.length}):`);
-        for (const role of parsed.roles) console.log(`    - ${role}`);
-      }
-    } else {
-      console.log(`  detail: ${row.detail}`);
-    }
+function printTeleportDetailTables(checks: Array<{ check: string; status: string; detail: string }>): void {
+  const tp = checks.find((c) => c.check.toLowerCase().startsWith('teleport status'));
+  if (!tp) return;
+  const parsed = parseTeleportStatus(tp.detail);
+  const metaRows = [
+    { key: 'profile', value: parsed.profileUrl || '' },
+    { key: 'user', value: parsed.user || '' },
+    { key: 'cluster', value: parsed.cluster || '' },
+    { key: 'databases', value: parsed.databases || '' },
+    { key: 'kubernetes', value: parsed.kubernetes || '' },
+    { key: 'valid_until', value: parsed.validUntil || '' },
+    { key: 'extensions', value: parsed.extensions || '' },
+  ].filter((r) => r.value);
+  if (metaRows.length) {
+    console.log('Teleport details:');
+    console.log(renderTable(metaRows));
+  }
+  if (parsed.roles.length) {
+    console.log(`Teleport roles (${parsed.roles.length}):`);
+    console.log(renderTable(parsed.roles.map((role) => ({ role }))));
   }
 }
 
@@ -136,8 +137,8 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         const showAll = opts.all || ctx.verbose || opts.verboseDetail;
         const visible = showAll ? rows : rows.filter((r) => r.status !== 'ok');
         if (visible.length) {
-          if (opts.verboseDetail) printNestedChecks(visible);
-          else console.log(renderTable(visible));
+          console.log(renderTable(visible));
+          if (opts.verboseDetail) printTeleportDetailTables(checks);
         } else {
           const healthy = checks.map((x) => x.check.replace(/\s+status$/i, ''));
           console.log(`All connectors healthy: ${healthy.join(', ')}`);
