@@ -203,10 +203,11 @@ export class SessionRegistry {
     if (!leases.size) this.leaseHeartbeats.delete(sessionId);
   }
 
-  onTick(): { expired: number; staleLeases: number } {
+  onTick(): { expired: number; staleLeases: number; expiredSessionIds: string[] } {
     const now = Date.now();
     let expired = 0;
     let staleLeases = 0;
+    const expiredSessionIds: string[] = [];
     for (const session of [...this.sessionsById.values()]) {
       const leases = this.leaseHeartbeats.get(session.sessionId);
       if (leases) {
@@ -226,10 +227,12 @@ export class SessionRegistry {
       if (hardExpired || idleExpired) {
         this.sessionIdByFingerprint.delete(session.fingerprint);
         this.sessionsById.delete(session.sessionId);
+        this.leaseHeartbeats.delete(session.sessionId);
+        expiredSessionIds.push(session.sessionId);
         expired += 1;
       }
     }
     this.persist();
-    return { expired, staleLeases };
+    return { expired, staleLeases, expiredSessionIds };
   }
 }

@@ -14,6 +14,7 @@ import type { DatasourceProfile } from '../types/core.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
+import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -155,12 +156,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.ok = false;
                 base.error = { code: 'NOT_FOUND', message: `Session not found: ${sessionId}` };
               } else {
+                await closeTeleportMysqlSessionProxies(sessionId);
                 base.ok = true;
                 base.data = { closed: true, sessionId };
                 base.meta.sessionId = sessionId;
               }
             } else if (req.method === 'session.closeAll') {
               const closedCount = sessions.closeAll();
+              await closeAllTeleportMysqlProxies();
               base.ok = true;
               base.data = { closedCount };
             } else if (req.method === 'query.execute') {
@@ -239,6 +242,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 if (!plugin?.execute) throw new Error(`No execute plugin for '${datasource.kind}'.`);
                 if (!plugin.manifest.capabilities.includes(capability as any)) throw new Error(`Plugin '${plugin.manifest.name}' does not support ${capability}.`);
                 const creds = await ctx.credentialStore.get(datasource.credentialRef);
+                const execCreds = { ...creds, __sessionId: session.sessionId };
                 const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
                 base.meta.runId = artifacts.runId;
                 appendEvent(artifacts.runDir, `daemon query started capability=${capability} requestId=${req.requestId}`);
@@ -254,7 +258,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 }
                 const result = await plugin.execute(
                   { datasource: datasource as DatasourceProfile, query, capability: capability as any },
-                  creds,
+                  execCreds,
                 );
                 result.runId = artifacts.runId;
                 writeRunSummary(artifacts.runDir, result);
@@ -319,7 +323,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   fs.chmodSync(socketPath, 0o600);
 
   const interval = setInterval(() => {
-    sessions.onTick();
+    const sweep = sessions.onTick();
+    if (sweep.expiredSessionIds.length) {
+      for (const sessionId of sweep.expiredSessionIds) {
+        void closeTeleportMysqlSessionProxies(sessionId);
+      }
+    }
   }, RUNTIME_CONSTANTS.sweeper.tickMs);
 
   let stopped = false;
@@ -328,6 +337,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     stopped = true;
     clearInterval(interval);
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeAllTeleportMysqlProxies();
     if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
     if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
   };
