@@ -3,6 +3,12 @@ import type { AppContext, AppContext as Ctx } from '../core/app.js';
 import { runDatasourceConnectors } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
+function compactDetail(detail: string, max = 160): string {
+  const oneLine = detail.replace(/\s+/g, ' ').trim();
+  if (oneLine.length <= max) return oneLine;
+  return `${oneLine.slice(0, max - 1)}...`;
+}
+
 function connectorRefKey(name: string): string {
   return `${name}CredentialRef`;
 }
@@ -24,6 +30,8 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
   c.command('status')
     .requiredOption('--datasource <name>')
     .option('--connector <name>')
+    .option('--all', 'print all checks in table mode (default: warnings/failures only)', false)
+    .option('--verbose-detail', 'print full check details in table mode', false)
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = resolveDatasource(ctx, opts.datasource);
@@ -47,7 +55,14 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         });
       } else {
         console.log(`connector summary: ok=${summary.ok} warn=${summary.warn} fail=${summary.fail} total=${summary.total}`);
-        console.log(renderTable(checks.map((x) => ({ check: x.check, status: x.status, detail: x.detail }))));
+        const rows = checks.map((x) => ({
+          check: x.check,
+          status: x.status,
+          detail: opts.verboseDetail || ctx.verbose ? x.detail : compactDetail(x.detail),
+        }));
+        const visible = opts.all || ctx.verbose ? rows : rows.filter((r) => r.status !== 'ok');
+        if (visible.length) console.log(renderTable(visible));
+        else console.log('No checks to display.');
       }
     });
 
