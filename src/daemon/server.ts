@@ -7,6 +7,7 @@ import { buildContext, classifyError, fillTemplate, nextAction, normalizeService
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import { enforceMutationPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
 import type { DatasourceProfile } from '../types/core.js';
@@ -281,7 +282,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 meta: { ...base.meta, timings: { durationMs: Date.now() - begin } },
               });
               socket.end();
-              server.close();
+              void runRegisteredCleanup();
               return;
             } else {
               base.ok = false;
@@ -321,19 +322,28 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     sessions.onTick();
   }, RUNTIME_CONSTANTS.sweeper.tickMs);
 
+  let stopped = false;
   const stop = async (): Promise<void> => {
+    if (stopped) return;
+    stopped = true;
     clearInterval(interval);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
     if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
   };
+  const unregisterStop = registerCleanup(`daemon-stop:${socketPath}`, stop);
 
-  process.on('SIGINT', () => {
-    void stop().finally(() => process.exit(0));
-  });
-  process.on('SIGTERM', () => {
-    void stop().finally(() => process.exit(0));
-  });
+  const onSignal = () => {
+    void runRegisteredCleanup().finally(() => process.exit(0));
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
 
-  return { socketPath, stop };
+  return {
+    socketPath,
+    stop: async () => {
+      unregisterStop();
+      await stop();
+    },
+  };
 }
