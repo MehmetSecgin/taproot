@@ -114,6 +114,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 socketPath,
                 sessions: sessions.list().length,
                 queryLimiter: queryLimiter.stats(),
+                limits: {
+                  maxConcurrentQueries: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries,
+                  maxQueuedQueries: RUNTIME_CONSTANTS.daemon.maxQueuedQueries,
+                  maxConcurrentLeases: RUNTIME_CONSTANTS.session.maxConcurrentLeases,
+                },
               };
             } else if (req.method === 'session.open') {
               const session = sessions.open({
@@ -202,6 +207,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
                 }
                 if (!query) throw new Error('No query resolved.');
+                const testHoldMs = Number(req.params._testHoldMs || 0);
+                if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
+                  await new Promise((r) => setTimeout(r, testHoldMs));
+                }
 
                 const allowMutate = Boolean(req.params.allowMutate);
                 enforceMutationPolicy({ sql: query, allowMutate, datasource: datasource as DatasourceProfile });

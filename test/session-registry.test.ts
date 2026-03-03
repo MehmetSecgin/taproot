@@ -66,4 +66,14 @@ describe('session registry', () => {
     expect(reopened.sessionId).toBe('sess_abc123');
     expect(reopened.state).toBe('ready');
   });
+
+  it('backs up corrupt checkpoint and continues with empty registry', () => {
+    const runDir = tmpRunDir();
+    const file = path.join(runDir, 'sessions.json');
+    fs.writeFileSync(file, '{not-valid-json');
+    const reg = new SessionRegistry(runDir);
+    expect(reg.list()).toEqual([]);
+    const backups = fs.readdirSync(runDir).filter((f) => f.startsWith('sessions.json.corrupt.'));
+    expect(backups.length).toBe(1);
+  });
 });

@@ -58,15 +58,20 @@ export class SessionRegistry {
 
   private loadCheckpoint(): void {
     if (!fs.existsSync(this.checkpointFile)) return;
-    const raw = JSON.parse(fs.readFileSync(this.checkpointFile, 'utf8')) as SessionCheckpoint;
-    if (raw.schemaVersion !== 1) throw new Error(`Unsupported sessions checkpoint schemaVersion=${raw.schemaVersion}`);
-    for (const session of raw.sessions || []) {
-      const recovering: SessionRecord = {
-        ...session,
-        state: 'recovering',
-      };
-      this.sessionsById.set(recovering.sessionId, recovering);
-      this.sessionIdByFingerprint.set(recovering.fingerprint, recovering.sessionId);
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.checkpointFile, 'utf8')) as SessionCheckpoint;
+      if (raw.schemaVersion !== 1) throw new Error(`Unsupported sessions checkpoint schemaVersion=${raw.schemaVersion}`);
+      for (const session of raw.sessions || []) {
+        const recovering: SessionRecord = {
+          ...session,
+          state: 'recovering',
+        };
+        this.sessionsById.set(recovering.sessionId, recovering);
+        this.sessionIdByFingerprint.set(recovering.fingerprint, recovering.sessionId);
+      }
+    } catch {
+      const backup = `${this.checkpointFile}.corrupt.${Date.now()}`;
+      fs.renameSync(this.checkpointFile, backup);
     }
   }
 
