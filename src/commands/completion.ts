@@ -1,12 +1,13 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 
-const ROOT_COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'daemon', 'session', 'completion'];
+const ROOT_COMMANDS = ['self-check', 'doctor', 'query', 'datasource', 'template', 'kb', 'cache', 'learn', 'daemon', 'session', 'connector', 'completion'];
 
 const QUERY_OPTS = ['--datasource', '--env', '--service', '--intent', '--template', '--query', '--param', '--allow-discovery', '--allow-mutate'];
 const DOCTOR_OPTS = ['--datasource', '--env', '--service', '--connect', '--verbose-detail', '--all'];
 const DATASOURCE_OPTS = ['list', 'show', 'add', 'update', 'remove', 'resolve'];
 const TEMPLATE_OPTS = ['list', 'validate', 'run', 'save'];
+const CONNECTOR_OPTS = ['status', 'setup'];
 
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -53,6 +54,10 @@ function resolveSuggestions(tokens: string[], ctx: AppContext): string[] {
   if (command === 'template') {
     if (prev === '--id') return withPrefix(templateIds, current);
     return withPrefix(TEMPLATE_OPTS, current);
+  }
+  if (command === 'connector') {
+    if (prev === '--datasource') return withPrefix(datasourceNames, current);
+    return withPrefix(CONNECTOR_OPTS, current);
   }
   return [];
 }

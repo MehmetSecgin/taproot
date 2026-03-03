@@ -70,7 +70,13 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
     const ctx = getCtx();
     const res = await rpcCall({ method: 'daemon.status' });
     if (!res.ok) throw new Error(res.error?.message || 'daemon status failed');
-    if (ctx.jsonMode) printJson(res.data || {});
+    if (ctx.jsonMode) {
+      printJson({
+        ok: true,
+        data: res.data || {},
+        meta: { ...(res.meta || {}), requestId: res.requestId },
+      });
+    }
     else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
   });
 
@@ -87,7 +93,13 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       progress.update('stopping taprootd');
       const res = await rpcCall({ method: 'daemon.stop' });
       if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
-      if (ctx.jsonMode) printJson(res.data || {});
+      if (ctx.jsonMode) {
+        printJson({
+          ok: true,
+          data: res.data || {},
+          meta: { ...(res.meta || {}), requestId: res.requestId },
+        });
+      }
       else {
         if (shouldPrintPlainSuccess(ctx)) console.log('taprootd stopped');
         else progress.succeed('taprootd stopped');

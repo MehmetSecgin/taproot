@@ -105,6 +105,14 @@ export interface TapRootPlugin {
 export interface CliOutputEnvelope<T = unknown> {
   ok: boolean;
   data?: T;
+  meta?: {
+    requestId?: string;
+    runId?: string;
+    sessionId?: string;
+    timings?: {
+      durationMs: number;
+    };
+  };
   error?: {
     code: string;
     message: string;

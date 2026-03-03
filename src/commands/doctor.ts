@@ -12,6 +12,38 @@ function compactDetail(detail: string, max = 160): string {
   return `${oneLine.slice(0, max - 1)}...`;
 }
 
+function doctorNextActions(datasourceName: string, checks: Array<{ check: string; status: string; detail: string }>): string[] {
+  const actions = new Set<string>();
+  for (const check of checks) {
+    const label = String(check.check || '').toLowerCase();
+    const detail = String(check.detail || '');
+    if (check.status === 'ok') continue;
+
+    if (label.startsWith('openvpn')) {
+      if (/no connectcommand configured/i.test(detail)) {
+        actions.add(`taproot connector setup --datasource ${datasourceName} --connector openvpn --connect-command '<command>' --status-command '<command>'`);
+      } else {
+        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+      }
+    }
+    if (label.startsWith('teleport')) {
+      if (/no logincommand configured/i.test(detail)) {
+        actions.add(`taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`);
+      } else {
+        actions.add(`tsh status || tsh login --proxy <proxy> --auth <auth>`);
+      }
+    }
+    if (label.startsWith('kubectl-portforward')) {
+      if (/no connectcommand configured/i.test(detail) || /no statuscommand configured/i.test(detail)) {
+        actions.add(`taproot connector setup --datasource ${datasourceName} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`);
+      } else {
+        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+      }
+    }
+  }
+  return [...actions];
+}
+
 export function registerDoctor(program: Command, getCtx: () => AppContext): void {
   program
     .command('doctor')
@@ -116,6 +148,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           detail: opts.verboseDetail || ctx.verbose ? c.detail : compactDetail(c.detail),
         }));
         const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== 'ok');
+        const nextActions = doctorNextActions(datasource.name, checks);
 
         if (ctx.jsonMode) {
           printJson({
@@ -123,6 +156,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
             plugin: plugin.manifest.name,
             warnings,
             checks,
+            nextActions,
             summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
           });
         } else {
@@ -139,6 +173,10 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
             console.log(renderTable(visibleRows));
           } else if (opts.all || ctx.verbose) {
             console.log('No checks to display.');
+          }
+          if (nextActions.length) {
+            console.log('Next actions:');
+            for (const action of nextActions) console.log(`- ${action}`);
           }
         }
 

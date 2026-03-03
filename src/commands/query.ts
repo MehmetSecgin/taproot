@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
 import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { datasourceKbConflicts } from '../core/conflicts.js';
+import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { printJson, renderTable } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
@@ -206,7 +207,18 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
               }
               return;
             }
-            throw new Error(`${rpc.error?.code || 'GENERIC'}: ${rpc.error?.message || 'daemon query failed'}`);
+            const code = rpc.error?.code || 'GENERIC';
+            const message = rpc.error?.message || 'daemon query failed';
+            if (ctx.jsonMode) {
+              printJson({
+                ok: false,
+                error: { code, message, details: rpc.error?.details },
+                meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
+              });
+              process.exitCode = exitCodeForClass(code);
+              return;
+            }
+            throw new Error(`${code}: ${message}`);
           } catch (error) {
             const msg = String((error as Error).message || '');
             if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {

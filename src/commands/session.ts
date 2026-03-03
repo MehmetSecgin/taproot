@@ -23,7 +23,13 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
         },
       });
       if (!res.ok) throw new Error(res.error?.message || 'session.open failed');
-      if (ctx.jsonMode) printJson(res.data || {});
+      if (ctx.jsonMode) {
+        printJson({
+          ok: true,
+          data: res.data || {},
+          meta: { ...(res.meta || {}), requestId: res.requestId },
+        });
+      }
       else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
     });
 
@@ -38,7 +44,13 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
       leases: Number(v.leaseCount || 0),
       lastUsedAt: String(v.lastUsedAt || ''),
     }));
-    if (ctx.jsonMode) printJson({ sessions: rows });
+    if (ctx.jsonMode) {
+      printJson({
+        ok: true,
+        data: { sessions: rows },
+        meta: { ...(res.meta || {}), requestId: res.requestId },
+      });
+    }
     else console.log(renderTable(rows));
   });
 
@@ -48,7 +60,13 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
       const ctx = getCtx();
       const res = await rpcCall({ method: 'session.inspect', params: { sessionId: opts.sessionId } });
       if (!res.ok) throw new Error(res.error?.message || 'session.inspect failed');
-      if (ctx.jsonMode) printJson(res.data || {});
+      if (ctx.jsonMode) {
+        printJson({
+          ok: true,
+          data: res.data || {},
+          meta: { ...(res.meta || {}), requestId: res.requestId },
+        });
+      }
       else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
     });
 
@@ -58,7 +76,13 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
       const ctx = getCtx();
       const res = await rpcCall({ method: 'session.close', params: { sessionId: opts.sessionId } });
       if (!res.ok) throw new Error(res.error?.message || 'session.close failed');
-      if (ctx.jsonMode) printJson(res.data || {});
+      if (ctx.jsonMode) {
+        printJson({
+          ok: true,
+          data: res.data || {},
+          meta: { ...(res.meta || {}), requestId: res.requestId },
+        });
+      }
       else console.log(`closed ${opts.sessionId}`);
     });
 
@@ -66,7 +90,13 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
     const ctx = getCtx();
     const res = await rpcCall({ method: 'session.closeAll' });
     if (!res.ok) throw new Error(res.error?.message || 'session.closeAll failed');
-    if (ctx.jsonMode) printJson(res.data || {});
+    if (ctx.jsonMode) {
+      printJson({
+        ok: true,
+        data: res.data || {},
+        meta: { ...(res.meta || {}), requestId: res.requestId },
+      });
+    }
     else console.log(`closed ${(res.data?.closedCount as number) || 0} sessions`);
   });
 }

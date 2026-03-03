@@ -5,8 +5,13 @@ export function printJson(data: unknown): void {
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 }
 
-export function printEnvelope(ok: boolean, data: unknown, error?: CliOutputEnvelope['error']): void {
-  const env: CliOutputEnvelope = { ok, data, error };
+export function printEnvelope(
+  ok: boolean,
+  data: unknown,
+  error?: CliOutputEnvelope['error'],
+  meta?: CliOutputEnvelope['meta'],
+): void {
+  const env: CliOutputEnvelope = { ok, data, error, meta };
   printJson(env);
 }
 
