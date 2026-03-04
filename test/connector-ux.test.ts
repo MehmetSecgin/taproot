@@ -98,10 +98,10 @@ describe('connector UX', () => {
 
   it('doctor emits connector setup next-action hints for missing connector config', () => {
     const { env } = setupStateRoot();
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo', '--connect'], env);
+    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).not.toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.nextActions)).toBe(true);
-    expect(parsed.nextActions.join('\n')).toContain('taproot connector setup --datasource qa-demo --connector openvpn');
+    expect(parsed.nextActions.join('\n')).toContain('taproot doctor --datasource qa-demo --connect');
   });
 });
