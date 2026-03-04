@@ -1,8 +1,10 @@
 import type { DatasourceProfile } from '../types/core.js';
 
 const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
+const READ_PREFIX_RE = /^\s*(select|show|describe|desc|explain|with)\b/i;
 
 export function classifyMutation(sql: string): 'read' | 'mutate' {
+  if (READ_PREFIX_RE.test(sql)) return 'read';
   return MUTATE_RE.test(sql) ? 'mutate' : 'read';
 }
 
