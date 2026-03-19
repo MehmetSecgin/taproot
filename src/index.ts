@@ -16,15 +16,17 @@ import { registerConnector } from './commands/connector.js';
 import { registerSanitize } from './commands/sanitize.js';
 import { registerDaemon } from './commands/daemon.js';
 import { registerSession } from './commands/session.js';
+import { registerInit } from './commands/init.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { cleanupProgress } from './core/progress.js';
+import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
 
 const program = new Command();
 
 program
   .name('taproot')
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
-  .version('0.1.0')
+  .version(TAPROOT_VERSION)
   .option('--json', 'Output machine-readable JSON envelope', false)
   .option('--no-color', 'Disable ANSI colors')
   .option('--no-animations', 'Disable animations')
@@ -38,7 +40,7 @@ program.exitOverride((error) => {
 });
 
 if (process.argv.includes('--skill-version')) {
-  process.stdout.write('taproot-skill@0.1.0\n');
+  process.stdout.write(`taproot-skill@${TAPROOT_SKILL_VERSION}\n`);
   process.exit(EXIT_CODES.OK);
 }
 
@@ -67,6 +69,7 @@ registerCompletion(program, context);
 registerSanitize(program, context);
 registerDaemon(program, context);
 registerSession(program, context);
+registerInit(program, context);
 
 program.configureOutput({
   outputError: () => {

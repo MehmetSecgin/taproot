@@ -32,6 +32,7 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('kb');
     expect(out.stdout).toContain('daemon');
     expect(out.stdout).toContain('session');
+    expect(out.stdout).toContain('init');
   });
 
   it('prints skill version', () => {
@@ -119,7 +120,7 @@ describe('cli contract', () => {
   });
 
   it('enforces prod no-guess mode unless discovery is explicit', () => {
-    const stateRoot = path.join(os.tmpdir(), `taproot-cli-${Date.now()}`);
+    const stateRoot = path.join(os.tmpdir(), `taproot-${Date.now()}`);
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
         prod: {

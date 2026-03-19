@@ -1,0 +1,2 @@
+export const TAPROOT_VERSION = '0.1.0';
+export const TAPROOT_SKILL_VERSION = TAPROOT_VERSION;

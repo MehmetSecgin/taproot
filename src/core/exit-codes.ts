@@ -6,6 +6,7 @@ export const EXIT_CODES = {
   AUTH: 4,
   ACCESS_DENIED: 5,
   UNKNOWN_TARGET: 6,
+  NOT_READY: 7,
 } as const;
 
 function normalizedMessage(input: unknown): string {

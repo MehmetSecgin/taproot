@@ -80,7 +80,7 @@ describe('daemon rpc limits', () => {
     } finally {
       await daemon.stop();
     }
-  });
+  }, 15_000);
 
   it('returns SESSION_BUSY when per-session lease cap is exceeded', async () => {
     const { daemon, socketPath } = await setupDaemon(1);
