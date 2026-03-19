@@ -31,6 +31,13 @@ export class KbStore {
     return readJsonFile<any[]>(this.file('table-catalog.json'), []);
   }
 
+  listServices(): string[] {
+    return this.services()
+      .map((row) => String(row.service || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
   resolveConnection(service: string, env: string): Record<string, unknown> | null {
     const svc = this.services().find((s) => String(s.service || '').trim().toLowerCase() === service.toLowerCase());
     if (!svc) return null;

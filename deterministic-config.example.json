@@ -10,5 +10,22 @@
       "sampleCellMax": 256,
       "ttlHours": 168
     }
+  },
+  "environmentPolicies": {
+    "production": {
+      "deterministicRequired": true,
+      "allowDiscoveryByDefault": false,
+      "preferredAccessMethods": ["tsh"],
+      "targetPreference": ["tidb", "mysql"]
+    },
+    "sandbox": {
+      "deterministicRequired": false,
+      "allowDiscoveryByDefault": true,
+      "preferredAccessMethods": ["qa-portforward", "tsh"],
+      "targetPreference": ["tidb", "mysql"]
+    }
+  },
+  "serviceAliases": {
+    "legacy-service": "sample-service"
   }
 }

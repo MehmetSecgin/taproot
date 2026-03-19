@@ -2,8 +2,9 @@ import { Command } from 'commander';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
-import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { classifyError, environmentPolicy, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { datasourceKbConflicts } from '../core/conflicts.js';
+import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { printJson, renderTable } from '../core/output.js';
@@ -18,11 +19,39 @@ function rowFromArray(columns: string[], row: Record<string, unknown>): Record<s
   return out;
 }
 
-function parseDatasourceAlias(value?: string): { env: string; service: string } | null {
+function parseDatasourceAlias(value: string | undefined, aliases: Record<string, string>): { env: string; service: string } | null {
   const raw = String(value || '').trim().toLowerCase();
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
-  return { env: m[1], service: normalizeService(m[2]) };
+  return { env: m[1], service: normalizeService(m[2], aliases) };
+}
+
+function preferredAccessMethods(ctx: AppContext, env: string, kbAccessMethod?: string): string[] {
+  const policy = environmentPolicy(ctx, env);
+  const out = [...policy.preferredAccessMethods];
+  if (kbAccessMethod && !out.includes(kbAccessMethod)) out.push(kbAccessMethod);
+  return out.filter(Boolean);
+}
+
+function discoverTargets(ctx: AppContext, input: { env: string; service: string; accessMethods: string[]; namespace?: string }): string[] {
+  const policy = environmentPolicy(ctx, input.env);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const method of input.accessMethods) {
+    const current = String(method || '').trim().toLowerCase();
+    let next: string[] = [];
+    if (current === 'qa-portforward') {
+      next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, policy);
+    } else if (current === 'tsh') {
+      next = discoverTeleportTargets(input.service, input.env, policy);
+    }
+    for (const target of next) {
+      if (seen.has(target)) continue;
+      seen.add(target);
+      out.push(target);
+    }
+  }
+  return out;
 }
 
 async function ensureCredentialDefaults(ctx: AppContext, ref: string, defaults: Record<string, string>, overwrite = false): Promise<void> {
@@ -153,6 +182,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--allow-mutate', 'allow mutating query', false)
     .action(async (opts) => {
       const ctx = getCtx();
+      const aliases = ctx.runtimeConfigStore.serviceAliases();
+      const alias = parseDatasourceAlias(opts.datasource, aliases);
+      const env = String(opts.env || alias?.env || '').trim();
+      const policy = environmentPolicy(ctx, env);
+      const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
         enabled: !ctx.jsonMode && !ctx.verbose,
         noAnimations: ctx.noAnimations,
@@ -163,9 +197,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const logVerbose = (msg: string): void => {
         if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
-      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || Boolean(opts.allowDiscovery);
+      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || allowDiscovery;
       try {
-        if (opts.allowDiscovery && !ctx.jsonMode) {
+        if (allowDiscovery && !ctx.jsonMode) {
           progress.update('discovery mode enabled, bypassing daemon');
         }
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
@@ -180,7 +214,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 intent: opts.intent,
                 template: opts.template,
                 query: opts.query,
-                allowDiscovery: Boolean(opts.allowDiscovery),
+                allowDiscovery,
                 allowMutate: Boolean(opts.allowMutate),
                 param: opts.param || [],
               },
@@ -230,12 +264,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           }
         }
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-      const alias = parseDatasourceAlias(opts.datasource);
-      const env = String(opts.env || alias?.env || '').trim();
-      const isProd = env === 'prod';
-      const service = normalizeService(opts.service || alias?.service || '');
+      const service = normalizeService(opts.service || alias?.service || '', aliases);
       progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
       let resolutionSource: 'explicit' | 'store' | 'learning' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
+      const deterministicRequired = policy.deterministicRequired;
       if (!datasource && opts.env && service) {
         datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
         if (datasource) resolutionSource = 'store';
@@ -244,7 +276,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         datasource = ctx.datasourceStore.resolveByEnvService(env, service);
         if (datasource) resolutionSource = 'store';
       }
-      if (!datasource && env && service && (!isProd || Boolean(opts.allowDiscovery))) {
+      if (!datasource && env && service && (!deterministicRequired || allowDiscovery)) {
         const learned = ctx.learningStore.resolveConnection(env, service);
         if (learned) {
           datasource = ctx.datasourceStore.save({
@@ -281,12 +313,67 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       ) {
         datasource = await autoBootstrapDatasource(ctx, env, service, datasource.name);
       }
-      if (!datasource && isProd && !opts.allowDiscovery) {
-        throw new Error('DETERMINISTIC_REQUIRED: prod requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.');
+      if (!datasource && env && service && allowDiscovery) {
+        const kb = ctx.kbStore.resolveConnection(service, env);
+        const kbAccessMethod = String(kb?.access_method || '').trim().toLowerCase();
+        const namespace = String(kb?.namespace || 'develop');
+        const accessMethods = preferredAccessMethods(ctx, env, kbAccessMethod);
+        const targets = discoverTargets(ctx, { env, service, accessMethods, namespace });
+        if (targets.length) {
+          const target = targets[0];
+          const engine = policy.targetPreference.find((item) => target.toLowerCase().includes(item.toLowerCase())) || (String(kb?.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql');
+          const database = String(kb?.database || inferDatabaseCandidates(service)[0] || '');
+          const dbUser = String(kb?.db_user || '');
+          const accessMethod = accessMethods[0] || kbAccessMethod;
+          const credentialRef = `${env}:${service}`;
+          if (accessMethod === 'tsh') {
+            await ensureCredentialDefaults(ctx, credentialRef, { dbUser });
+            await ensureCredentialDefaults(ctx, `tsh:${env}`, { statusCommand: 'tsh status' });
+            datasource = ctx.datasourceStore.save({
+              name: opts.datasource || `${env}-${service}`,
+              kind: 'teleport-mysql',
+              env,
+              service,
+              tags: ['discovery-derived'],
+              connection: { target, database },
+              credentialRef,
+              connectors: ['teleport'],
+              policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+              resolverHints: { teleportCredentialRef: `tsh:${env}` },
+              updatedAt: nowIso(),
+              confidence: 0.6,
+            } as any);
+            resolutionSource = 'kb';
+          } else if (accessMethod === 'qa-portforward') {
+            const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
+            const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
+            const connectCommand = `${statusCommand} || (svc_port=$(kubectl -n ${namespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl -n ${namespace} port-forward svc/${target} ${localPort}:$svc_port >/tmp/taproot-pf-${env}-${service}.log 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
+            await ensureCredentialDefaults(ctx, credentialRef, { user: dbUser || 'root' });
+            await ensureCredentialDefaults(ctx, `kpf:${env}:${service}`, { statusCommand, connectCommand }, true);
+            datasource = ctx.datasourceStore.save({
+              name: opts.datasource || `${env}-${service}`,
+              kind: engine.includes('postgres') ? 'postgres' : 'mysql',
+              env,
+              service,
+              tags: ['discovery-derived'],
+              connection: { host: '127.0.0.1', port: localPort, database },
+              credentialRef,
+              connectors: ['kubectl-portforward'],
+              policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+              resolverHints: { 'kubectl-portforwardCredentialRef': `kpf:${env}:${service}` },
+              updatedAt: nowIso(),
+              confidence: 0.6,
+            } as any);
+            resolutionSource = 'kb';
+          }
+        }
+      }
+      if (!datasource && deterministicRequired && !allowDiscovery) {
+        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
       }
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
-      if (isProd && !opts.allowDiscovery && resolutionSource === 'learning') {
-        throw new Error('DETERMINISTIC_REQUIRED: prod requires KB/profile-backed datasource resolution. Retry without discovery cache or set --allow-discovery.');
+      if (deterministicRequired && !allowDiscovery && resolutionSource === 'learning') {
+        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
       }
       const warnings: string[] = [];
       if (env && service) {
@@ -388,10 +475,22 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
 
         ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: opts.intent, sql: query, result });
         if (warnings.length) result.warnings = [...result.warnings, ...warnings];
+        result.resolved = {
+          source: resolutionSource,
+          env,
+          service,
+          accessMethod: String(ctx.kbStore.resolveConnection(service, env)?.access_method || ''),
+          target: String(datasource.connection.target || ''),
+          database: String(datasource.connection.database || ''),
+          engine: datasource.kind,
+        };
         progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
 
         if (ctx.jsonMode) printJson(result);
-        else console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
+        else {
+          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
+          console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
+        }
         } catch (error) {
           const message = (error as Error).message;
           const code = classifyError(message);

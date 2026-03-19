@@ -1,0 +1,256 @@
+import parserPkg from 'node-sql-parser';
+
+export type ColumnRole = 'select' | 'filter' | 'group' | 'order';
+
+export interface TableObservation {
+  table: string;
+  alias?: string;
+}
+
+export interface JoinObservation {
+  leftTable: string;
+  rightTable: string;
+  conditionRaw: string;
+  conditionNormalized: string;
+  directionHint: 'left-to-right' | 'right-to-left' | 'unknown';
+}
+
+export interface ColumnObservation {
+  table?: string;
+  column: string;
+  role: ColumnRole;
+}
+
+export interface QueryShapeObservation {
+  operation: string;
+  normalizedSql: string;
+  tables: TableObservation[];
+  joins: JoinObservation[];
+  columns: ColumnObservation[];
+  confidence: number;
+}
+
+const { Parser } = parserPkg as unknown as { Parser: new () => { astify: (sql: string) => unknown } };
+const parser = new Parser();
+
+function normalizeText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeSqlShape(sql: string): string {
+  let out = sql.trim().replace(/\s+/g, ' ').toLowerCase();
+  out = out.replace(/'(?:''|[^'])*'/g, ':str');
+  out = out.replace(/"(?:\\"|[^"])*"/g, ':str');
+  out = out.replace(/\b\d+\.\d+\b/g, ':num');
+  out = out.replace(/\b\d+\b/g, ':num');
+  out = out.replace(/\b(true|false)\b/g, ':bool');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+function operationFromSql(sql: string): string {
+  const op = sql.trim().split(/\s+/, 1)[0] || '';
+  return op.toLowerCase();
+}
+
+function safeTableName(node: unknown): string {
+  if (!node || typeof node !== 'object') return '';
+  const obj = node as Record<string, unknown>;
+  const db = typeof obj.db === 'string' ? obj.db : '';
+  const table = typeof obj.table === 'string' ? obj.table : '';
+  if (!table) return '';
+  return db ? `${db}.${table}` : table;
+}
+
+function safeAlias(node: unknown): string | undefined {
+  if (!node || typeof node !== 'object') return undefined;
+  const value = (node as Record<string, unknown>).as;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function emitColumnRef(expr: unknown, role: ColumnRole, out: ColumnObservation[]): void {
+  if (!expr || typeof expr !== 'object') return;
+  const node = expr as Record<string, unknown>;
+  if (node.type === 'column_ref') {
+    const column = typeof node.column === 'string' ? node.column : '';
+    if (!column || column === '*') return;
+    const table = typeof node.table === 'string' && node.table ? node.table : undefined;
+    out.push({ table, column, role });
+    return;
+  }
+
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const item of value) emitColumnRef(item, role, out);
+      continue;
+    }
+    emitColumnRef(value, role, out);
+  }
+}
+
+function expressionToString(expr: unknown): string {
+  if (!expr || typeof expr !== 'object') return '';
+  const node = expr as Record<string, unknown>;
+  const type = typeof node.type === 'string' ? node.type : '';
+
+  if (type === 'column_ref') {
+    const table = typeof node.table === 'string' && node.table ? `${node.table}.` : '';
+    const column = typeof node.column === 'string' ? node.column : '';
+    return `${table}${column}`;
+  }
+
+  if (type === 'binary_expr') {
+    const left = expressionToString(node.left);
+    const right = expressionToString(node.right);
+    const op = typeof node.operator === 'string' ? node.operator : '?';
+    return `${left} ${op} ${right}`.trim();
+  }
+
+  if (type === 'unary_expr') {
+    const op = typeof node.operator === 'string' ? node.operator : '';
+    const value = expressionToString(node.expr);
+    return `${op} ${value}`.trim();
+  }
+
+  if (type === 'number' || type === 'string' || type === 'single_quote_string' || type === 'bool') {
+    return ':lit';
+  }
+
+  if (type === 'expr_list' && Array.isArray(node.value)) {
+    return node.value.map((v) => expressionToString(v)).filter(Boolean).join(', ');
+  }
+
+  if (node.value !== undefined) {
+    if (typeof node.value === 'string') return node.value;
+    if (typeof node.value === 'number' || typeof node.value === 'boolean') return ':lit';
+    return expressionToString(node.value);
+  }
+
+  return '';
+}
+
+function parseSelectLikeAst(ast: Record<string, unknown>): {
+  tables: TableObservation[];
+  joins: JoinObservation[];
+  columns: ColumnObservation[];
+} {
+  const tables: TableObservation[] = [];
+  const joins: JoinObservation[] = [];
+  const columns: ColumnObservation[] = [];
+
+  const aliasToTable = new Map<string, string>();
+  const from = Array.isArray(ast.from) ? ast.from : [];
+  let lastTable = '';
+  for (const item of from) {
+    const tableName = safeTableName(item);
+    if (!tableName) continue;
+    const alias = safeAlias(item);
+    tables.push({ table: tableName, alias });
+    if (alias) aliasToTable.set(alias, tableName);
+
+    const itemObj = item as Record<string, unknown>;
+    const joinToken = typeof itemObj.join === 'string' ? itemObj.join : '';
+    if (lastTable && joinToken) {
+      const raw = expressionToString(itemObj.on);
+      const normalized = normalizeText(raw.replace(/'(?:''|[^'])*'/g, ':str').replace(/\b\d+\b/g, ':num'));
+      joins.push({
+        leftTable: lastTable,
+        rightTable: tableName,
+        conditionRaw: raw,
+        conditionNormalized: normalized,
+        directionHint: joinToken.toUpperCase().includes('RIGHT') ? 'right-to-left' : 'left-to-right',
+      });
+    }
+    lastTable = tableName;
+  }
+
+  const cols = Array.isArray(ast.columns) ? ast.columns : [];
+  for (const col of cols) {
+    if (!col || typeof col !== 'object') continue;
+    emitColumnRef((col as Record<string, unknown>).expr, 'select', columns);
+  }
+
+  emitColumnRef(ast.where, 'filter', columns);
+  if (Array.isArray(ast.groupby)) {
+    for (const g of ast.groupby) emitColumnRef(g, 'group', columns);
+  } else if (ast.groupby && typeof ast.groupby === 'object') {
+    const groupObj = ast.groupby as Record<string, unknown>;
+    if (Array.isArray(groupObj.columns)) {
+      for (const g of groupObj.columns) emitColumnRef(g, 'group', columns);
+    } else {
+      emitColumnRef(ast.groupby, 'group', columns);
+    }
+  }
+  if (Array.isArray(ast.orderby)) {
+    for (const o of ast.orderby) {
+      if (o && typeof o === 'object') emitColumnRef((o as Record<string, unknown>).expr, 'order', columns);
+    }
+  }
+
+  const resolvedColumns = columns.map((c) => {
+    if (!c.table) return c;
+    const table = aliasToTable.get(c.table) || c.table;
+    return { ...c, table };
+  });
+
+  return { tables, joins, columns: resolvedColumns };
+}
+
+function fallbackExtract(sql: string): QueryShapeObservation {
+  const normalizedSql = normalizeSqlShape(sql);
+  const operation = operationFromSql(sql);
+  const tableMatches = Array.from(sql.matchAll(/\b(?:from|join|into|update|table)\s+([a-zA-Z0-9_.`]+)/gi));
+  const tables = tableMatches
+    .map((m) => m[1].replace(/`/g, '').trim())
+    .filter(Boolean)
+    .map((table) => ({ table }));
+
+  return {
+    operation,
+    normalizedSql,
+    tables,
+    joins: [],
+    columns: [],
+    confidence: tables.length ? 0.55 : 0.35,
+  };
+}
+
+export function extractQueryShape(sql: string): QueryShapeObservation {
+  const normalizedSql = normalizeSqlShape(sql);
+  const operation = operationFromSql(sql);
+
+  try {
+    const astRaw = parser.astify(sql);
+    const ast = Array.isArray(astRaw) ? astRaw[0] : astRaw;
+    if (!ast || typeof ast !== 'object') return fallbackExtract(sql);
+
+    const astObj = ast as unknown as Record<string, unknown>;
+    const type = typeof astObj.type === 'string' ? astObj.type.toLowerCase() : operation;
+    if (type === 'select') {
+      const parsed = parseSelectLikeAst(astObj);
+      return {
+        operation: type,
+        normalizedSql,
+        tables: parsed.tables,
+        joins: parsed.joins,
+        columns: parsed.columns,
+        confidence: 0.92,
+      };
+    }
+
+    if (type === 'show' || type === 'describe' || type === 'explain') {
+      const table = safeTableName((astObj.table as unknown) || {});
+      return {
+        operation: type,
+        normalizedSql,
+        tables: table ? [{ table }] : [],
+        joins: [],
+        columns: [],
+        confidence: table ? 0.85 : 0.7,
+      };
+    }
+
+    return fallbackExtract(sql);
+  } catch {
+    return fallbackExtract(sql);
+  }
+}

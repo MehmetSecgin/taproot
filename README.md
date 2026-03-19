@@ -33,16 +33,16 @@ npm ci
 npm run build
 
 # store credentials under a reference key
-node dist/index.js creds set --ref prod:orders --user sample_reader --password '***'
+node dist/index.js creds set --ref production:sample --user sample_reader --password '***'
 
 # create datasource profile
-node dist/index.js datasource add --name prod-orders --kind mysql --env prod --service orders --credential-ref prod:orders --host db.internal.example --port 3306 --database orders
+node dist/index.js datasource add --name production-sample --kind mysql --env production --service sample --credential-ref production:sample --host db.internal.example --port 3306 --database sample_app
 
 # preflight checks
-node dist/index.js doctor --datasource prod-orders
+node dist/index.js doctor --datasource production-sample
 
 # execute read query
-node dist/index.js query --datasource prod-orders --query \"SELECT 1 AS ok\"
+node dist/index.js query --datasource production-sample --query \"SELECT 1 AS ok\"
 ```
 
 ## OpenVPN + Teleport setup
@@ -50,24 +50,24 @@ node dist/index.js query --datasource prod-orders --query \"SELECT 1 AS ok\"
 # connector credential refs (local encrypted state, not repository files)
 node dist/index.js creds set --ref vpn:work --status-command "openvpn3 sessions-list" --connect-command "openvpn3 session-start --config /absolute/path/to/profile.ovpn"
 node dist/index.js creds set --ref tsh:work --status-command "tsh status" --login-command "tsh login --proxy your.teleport.proxy --auth your-sso"
-node dist/index.js creds set --ref prod:events --db-user analytics_reader
+node dist/index.js creds set --ref production:analytics --db-user analytics_reader
 
 # datasource using teleport mysql executor + connectors
 node dist/index.js datasource add \
-  --name prod-events \
+  --name production-analytics \
   --kind teleport-mysql \
-  --env prod \
-  --service events \
-  --credential-ref prod:events \
-  --database events \
+  --env production \
+  --service analytics \
+  --credential-ref production:analytics \
+  --database analytics \
   --target primary-tidb \
   --connector openvpn \
   --connector teleport \
   --connector-ref openvpn=vpn:work \
   --connector-ref teleport=tsh:work
 
-node dist/index.js doctor --datasource prod-events
-node dist/index.js query --datasource prod-events --query "SELECT COUNT(*) AS row_count FROM sample_records WHERE event_id = 12345;"
+node dist/index.js doctor --datasource production-analytics
+node dist/index.js query --datasource production-analytics --query "SELECT COUNT(*) AS row_count FROM sample_records WHERE record_id = 12345;"
 ```
 
 ## Build

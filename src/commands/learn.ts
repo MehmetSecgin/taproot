@@ -2,7 +2,17 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../core/app.js';
+import { normalizeService } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
+
+function resolveDatasourceName(ctx: AppContext, opts: { datasource?: string; env?: string; service?: string }): string {
+  if (opts.datasource) return String(opts.datasource);
+  const env = String(opts.env || '').trim();
+  const service = normalizeService(String(opts.service || ''), ctx.runtimeConfigStore.serviceAliases());
+  if (!env || !service) return '';
+  const ds = ctx.datasourceStore.resolveByEnvService(env, service);
+  return ds?.name || '';
+}
 
 export function registerLearn(program: Command, getCtx: () => AppContext): void {
   const l = program.command('learn').description('Learning cache operations');
@@ -17,6 +27,9 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         { metric: 'resolution entries', value: status.files.resolution },
         { metric: 'query library entries', value: status.files.queryLibrary },
         { metric: 'query stats entries', value: status.files.queryStats },
+        { metric: 'schema observation entries', value: status.files.schemaObservations },
+        { metric: 'schema join entries', value: status.files.schemaJoins },
+        { metric: 'schema shape entries', value: status.files.schemaShapes },
       ]));
     }
   });
@@ -65,4 +78,98 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       }
     }
   });
+
+  l.command('tables')
+    .option('--datasource <name>')
+    .option('--env <env>')
+    .option('--service <service>')
+    .option('--limit <n>', 'max rows', '200')
+    .action((opts) => {
+      const ctx = getCtx();
+      const datasource = resolveDatasourceName(ctx, opts);
+      const rows = ctx.learningStore.schemaTables(datasource || undefined);
+      const limit = Math.max(1, Number(opts.limit || 200));
+      const sliced = rows
+        .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
+        .slice(0, limit);
+      if (ctx.jsonMode) {
+        printJson({ datasource: datasource || null, rows: sliced });
+      } else {
+        console.log(
+          renderTable(
+            sliced.map((r) => ({
+              datasource: r.datasource,
+              table: r.table,
+              columns: r.columns.length,
+              sightings: r.sightings,
+              confidence: r.confidence.toFixed(2),
+              lastSeenAt: r.lastSeenAt,
+            })),
+          ),
+        );
+      }
+    });
+
+  l.command('joins')
+    .option('--datasource <name>')
+    .option('--env <env>')
+    .option('--service <service>')
+    .option('--limit <n>', 'max rows', '200')
+    .action((opts) => {
+      const ctx = getCtx();
+      const datasource = resolveDatasourceName(ctx, opts);
+      const rows = ctx.learningStore.schemaJoins(datasource || undefined);
+      const limit = Math.max(1, Number(opts.limit || 200));
+      const sliced = rows
+        .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
+        .slice(0, limit);
+      if (ctx.jsonMode) {
+        printJson({ datasource: datasource || null, rows: sliced });
+      } else {
+        console.log(
+          renderTable(
+            sliced.map((r) => ({
+              datasource: r.datasource,
+              edge: `${r.leftTable} -> ${r.rightTable}`,
+              condition: r.conditionNormalized,
+              sightings: r.sightings,
+              confidence: r.confidence.toFixed(2),
+              lastSeenAt: r.lastSeenAt,
+            })),
+          ),
+        );
+      }
+    });
+
+  l.command('shapes')
+    .option('--datasource <name>')
+    .option('--env <env>')
+    .option('--service <service>')
+    .option('--limit <n>', 'max rows', '200')
+    .action((opts) => {
+      const ctx = getCtx();
+      const datasource = resolveDatasourceName(ctx, opts);
+      const rows = ctx.learningStore.schemaQueryShapes(datasource || undefined);
+      const limit = Math.max(1, Number(opts.limit || 200));
+      const sliced = rows
+        .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
+        .slice(0, limit);
+      if (ctx.jsonMode) {
+        printJson({ datasource: datasource || null, rows: sliced });
+      } else {
+        console.log(
+          renderTable(
+            sliced.map((r) => ({
+              datasource: r.datasource,
+              operation: r.operation,
+              tables: r.tables.join(','),
+              joins: r.joins.length,
+              sightings: r.sightings,
+              confidence: r.confidence.toFixed(2),
+              lastSeenAt: r.lastSeenAt,
+            })),
+          ),
+        );
+      }
+    });
 }

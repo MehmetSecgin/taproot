@@ -8,7 +8,7 @@ describe('datasource kb conflicts', () => {
       connection: {
         host: '127.0.0.1',
         port: 4406,
-        database: 'sample',
+        database: 'sample_db',
       },
     };
     const kb = {
@@ -20,6 +20,6 @@ describe('datasource kb conflicts', () => {
     };
     const out = datasourceKbConflicts(datasource, kb);
     expect(out).toContain('port=4406 (kb:5500)');
-    expect(out).toContain('database=sample (kb:app_sample_db)');
+    expect(out).toContain('database=sample_db (kb:app_sample_db)');
   });
 });

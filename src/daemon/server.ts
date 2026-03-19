@@ -3,7 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext, classifyError, fillTemplate, nextAction, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -171,16 +171,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const rawDs = String(req.params.datasource || '').trim();
               const alias = rawDs.match(/^([a-z0-9]+)-([a-z0-9-]+)$/i);
               const env = String(req.params.env || alias?.[1] || '').trim();
-              const service = normalizeService(String(req.params.service || alias?.[2] || ''));
-              const isProd = env === 'prod';
-              if (isProd && allowDiscovery) {
+              const service = normalizeService(String(req.params.service || alias?.[2] || ''), ctx.runtimeConfigStore.serviceAliases());
+              const policy = environmentPolicy(ctx, env);
+              if (allowDiscovery || policy.allowDiscoveryByDefault) {
                 throw new Error('DISCOVERY_UNAVAILABLE: discovery mode is only available in direct CLI mode when daemon is bypassed.');
               }
               let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
               if (!datasource && env && service) datasource = ctx.datasourceStore.resolveByEnvService(env, service);
               if (!datasource) {
-                if (isProd && !allowDiscovery) {
-                  throw new Error('DETERMINISTIC_REQUIRED: prod requires datasource profile/KB resolution. Use --datasource or --env+--service.');
+                if (policy.deterministicRequired) {
+                  throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
                 }
                 throw new Error('Datasource resolution failed.');
               }
@@ -260,6 +260,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   { datasource: datasource as DatasourceProfile, query, capability: capability as any },
                   execCreds,
                 );
+                result.resolved = {
+                  source: rawDs ? 'explicit' : 'store',
+                  env,
+                  service,
+                  accessMethod: String(ctx.kbStore.resolveConnection(service, env)?.access_method || ''),
+                  target: String(datasource.connection.target || ''),
+                  database: String(datasource.connection.database || ''),
+                  engine: datasource.kind,
+                };
                 result.runId = artifacts.runId;
                 writeRunSummary(artifacts.runDir, result);
                 appendEvent(artifacts.runDir, `daemon query succeeded requestId=${req.requestId}`);

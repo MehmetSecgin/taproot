@@ -91,7 +91,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         name: opts.name,
         kind: opts.kind,
         env: opts.env,
-        service: opts.service ? normalizeService(opts.service) : undefined,
+        service: opts.service ? normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()) : undefined,
         tags: [],
         connection: {
           host: opts.host,
@@ -124,7 +124,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .requiredOption('--service <service>')
     .action((opts) => {
       const ctx = getCtx();
-      const service = normalizeService(opts.service);
+      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service);
       if (fromStore) {
         if (ctx.jsonMode) printJson({ source: 'datasource-store', profile: fromStore });

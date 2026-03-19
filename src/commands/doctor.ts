@@ -40,6 +40,9 @@ function doctorNextActions(datasourceName: string, checks: Array<{ check: string
         actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
       }
     }
+    if (/connect/i.test(label)) {
+      actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+    }
   }
   return [...actions];
 }
@@ -72,7 +75,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
         const warnings: string[] = [];
         if (!datasource && opts.env && opts.service) {
-          const service = normalizeService(opts.service);
+          const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
           datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
           if (!datasource) {
             const kb = ctx.kbStore.resolveConnection(service, opts.env);

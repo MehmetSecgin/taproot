@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { DatasourceProfile, QueryResult } from '../types/core.js';
 import { nowIso } from '../core/time.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
 
 interface ResolutionEntry {
   key: string;
@@ -26,9 +27,21 @@ interface QueryLibraryEntry {
   service: string;
   intentKey: string;
   sqlTemplate: string;
-  source: 'learned' | 'kb';
+  source: 'learned' | 'kb' | 'manual';
   lastVerifiedAt: string;
   successCount: number;
+}
+
+interface TargetSelectionEntry {
+  key: string;
+  env: string;
+  service: string;
+  intentKey: string;
+  engine: string;
+  target: string;
+  database: string;
+  updatedAt: string;
+  source: 'learned' | 'kb' | 'manual';
 }
 
 interface QueryStatEntry {
@@ -41,6 +54,67 @@ interface QueryStatEntry {
   successCount: number;
   failureCount: number;
   latencyMsP50: number;
+}
+
+export interface SchemaTableColumnStat {
+  column: string;
+  selectedCount: number;
+  filterCount: number;
+  groupCount: number;
+  orderCount: number;
+  lastSeenAt: string;
+}
+
+export interface SchemaObservationEntry {
+  key: string;
+  datasource: string;
+  env: string;
+  service: string;
+  kind: string;
+  database: string;
+  target: string;
+  table: string;
+  aliases: string[];
+  columns: SchemaTableColumnStat[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sightings: number;
+  confidence: number;
+}
+
+export interface SchemaJoinEntry {
+  key: string;
+  datasource: string;
+  env: string;
+  service: string;
+  kind: string;
+  database: string;
+  leftTable: string;
+  rightTable: string;
+  directionHint: 'left-to-right' | 'right-to-left' | 'unknown';
+  conditionRaw: string;
+  conditionNormalized: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sightings: number;
+  confidence: number;
+}
+
+export interface SchemaQueryShapeEntry {
+  key: string;
+  datasource: string;
+  env: string;
+  service: string;
+  kind: string;
+  database: string;
+  operation: string;
+  normalizedSql: string;
+  tables: string[];
+  joins: string[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sightings: number;
+  confidence: number;
 }
 
 function normalizeIntent(value?: string): string {
@@ -81,12 +155,20 @@ export class LearningStore {
   private readonly resolutionFile: string;
   private readonly libraryFile: string;
   private readonly statsFile: string;
+  private readonly targetSelectionFile: string;
+  private readonly schemaObservationFile: string;
+  private readonly schemaJoinFile: string;
+  private readonly schemaShapeFile: string;
 
   constructor(private readonly dir: string) {
     fs.mkdirSync(dir, { recursive: true });
     this.resolutionFile = path.join(dir, 'resolution-cache.json');
     this.libraryFile = path.join(dir, 'query-library.json');
     this.statsFile = path.join(dir, 'query-stats.json');
+    this.targetSelectionFile = path.join(dir, 'target-selections.json');
+    this.schemaObservationFile = path.join(dir, 'schema-observations.json');
+    this.schemaJoinFile = path.join(dir, 'schema-joins.json');
+    this.schemaShapeFile = path.join(dir, 'schema-query-shapes.json');
   }
 
   private loadResolution(): ResolutionEntry[] {
@@ -101,17 +183,196 @@ export class LearningStore {
     return readJsonFile<QueryStatEntry[]>(this.statsFile, []);
   }
 
-  private saveAll(input: { resolution?: ResolutionEntry[]; library?: QueryLibraryEntry[]; stats?: QueryStatEntry[] }): void {
+  private loadTargetSelections(): TargetSelectionEntry[] {
+    return readJsonFile<TargetSelectionEntry[]>(this.targetSelectionFile, []);
+  }
+
+  private loadSchemaObservations(): SchemaObservationEntry[] {
+    return readJsonFile<SchemaObservationEntry[]>(this.schemaObservationFile, []);
+  }
+
+  private loadSchemaJoins(): SchemaJoinEntry[] {
+    return readJsonFile<SchemaJoinEntry[]>(this.schemaJoinFile, []);
+  }
+
+  private loadSchemaShapes(): SchemaQueryShapeEntry[] {
+    return readJsonFile<SchemaQueryShapeEntry[]>(this.schemaShapeFile, []);
+  }
+
+  private saveAll(input: {
+    resolution?: ResolutionEntry[];
+    library?: QueryLibraryEntry[];
+    stats?: QueryStatEntry[];
+    targetSelections?: TargetSelectionEntry[];
+    schemaObservations?: SchemaObservationEntry[];
+    schemaJoins?: SchemaJoinEntry[];
+    schemaShapes?: SchemaQueryShapeEntry[];
+  }): void {
     if (input.resolution) writeJsonFile(this.resolutionFile, input.resolution);
     if (input.library) writeJsonFile(this.libraryFile, input.library);
     if (input.stats) writeJsonFile(this.statsFile, input.stats);
+    if (input.targetSelections) writeJsonFile(this.targetSelectionFile, input.targetSelections);
+    if (input.schemaObservations) writeJsonFile(this.schemaObservationFile, input.schemaObservations);
+    if (input.schemaJoins) writeJsonFile(this.schemaJoinFile, input.schemaJoins);
+    if (input.schemaShapes) writeJsonFile(this.schemaShapeFile, input.schemaShapes);
+  }
+
+  private upsertColumnStat(columns: SchemaTableColumnStat[], column: string, role: ColumnRole, now: string): SchemaTableColumnStat[] {
+    const idx = columns.findIndex((c) => c.column === column);
+    const prev = idx >= 0
+      ? columns[idx]
+      : { column, selectedCount: 0, filterCount: 0, groupCount: 0, orderCount: 0, lastSeenAt: now };
+    const next: SchemaTableColumnStat = {
+      ...prev,
+      lastSeenAt: now,
+      selectedCount: prev.selectedCount + (role === 'select' ? 1 : 0),
+      filterCount: prev.filterCount + (role === 'filter' ? 1 : 0),
+      groupCount: prev.groupCount + (role === 'group' ? 1 : 0),
+      orderCount: prev.orderCount + (role === 'order' ? 1 : 0),
+    };
+    if (idx >= 0) columns[idx] = next;
+    else columns.push(next);
+    return columns;
+  }
+
+  private observeSchema(input: { datasource: DatasourceProfile; sql: string; now: string }): void {
+    const schema = extractQueryShape(input.sql);
+    const observations = this.loadSchemaObservations();
+    const joins = this.loadSchemaJoins();
+    const shapes = this.loadSchemaShapes();
+    const datasource = input.datasource;
+    const env = String(datasource.env || '');
+    const service = String(datasource.service || '');
+    const database = String(datasource.connection.database || '');
+    const target = String(datasource.connection.target || '');
+
+    const aliasesByTable = new Map<string, string[]>();
+    for (const t of schema.tables) {
+      const key = t.table;
+      if (!aliasesByTable.has(key)) aliasesByTable.set(key, []);
+      if (t.alias && !aliasesByTable.get(key)?.includes(t.alias)) aliasesByTable.get(key)?.push(t.alias);
+    }
+
+    const columnTableFallback = schema.tables.length === 1 ? schema.tables[0].table : '';
+    for (const [table, aliases] of aliasesByTable.entries()) {
+      const key = [datasource.name, database, table].join('|');
+      const idx = observations.findIndex((o) => o.key === key);
+      const prev = idx >= 0 ? observations[idx] : undefined;
+      const nextColumns = [...(prev?.columns || [])];
+      for (const c of schema.columns) {
+        const colTable = c.table || columnTableFallback;
+        if (!colTable || colTable !== table) continue;
+        this.upsertColumnStat(nextColumns, c.column, c.role, input.now);
+      }
+      const next: SchemaObservationEntry = {
+        key,
+        datasource: datasource.name,
+        env,
+        service,
+        kind: datasource.kind,
+        database,
+        target,
+        table,
+        aliases: Array.from(new Set([...(prev?.aliases || []), ...aliases])).sort(),
+        columns: nextColumns.sort((a, b) => a.column.localeCompare(b.column)),
+        firstSeenAt: prev?.firstSeenAt || input.now,
+        lastSeenAt: input.now,
+        sightings: (prev?.sightings || 0) + 1,
+        confidence: Math.min(1, Math.max(0.35, (prev?.confidence || 0.65) + 0.03)),
+      };
+      if (idx >= 0) observations[idx] = next;
+      else observations.push(next);
+    }
+
+    for (const j of schema.joins) {
+      const key = [datasource.name, database, j.leftTable, j.rightTable, j.conditionNormalized].join('|');
+      const idx = joins.findIndex((o) => o.key === key);
+      const prev = idx >= 0 ? joins[idx] : undefined;
+      const next: SchemaJoinEntry = {
+        key,
+        datasource: datasource.name,
+        env,
+        service,
+        kind: datasource.kind,
+        database,
+        leftTable: j.leftTable,
+        rightTable: j.rightTable,
+        directionHint: j.directionHint,
+        conditionRaw: j.conditionRaw,
+        conditionNormalized: j.conditionNormalized,
+        firstSeenAt: prev?.firstSeenAt || input.now,
+        lastSeenAt: input.now,
+        sightings: (prev?.sightings || 0) + 1,
+        confidence: Math.min(1, Math.max(0.4, (prev?.confidence || schema.confidence) + 0.03)),
+      };
+      if (idx >= 0) joins[idx] = next;
+      else joins.push(next);
+    }
+
+    const shapeKey = [datasource.name, database, schema.operation, schema.normalizedSql].join('|');
+    const shapeIdx = shapes.findIndex((o) => o.key === shapeKey);
+    const prevShape = shapeIdx >= 0 ? shapes[shapeIdx] : undefined;
+    const nextShape: SchemaQueryShapeEntry = {
+      key: shapeKey,
+      datasource: datasource.name,
+      env,
+      service,
+      kind: datasource.kind,
+      database,
+      operation: schema.operation,
+      normalizedSql: schema.normalizedSql,
+      tables: Array.from(new Set(schema.tables.map((t) => t.table))).sort(),
+      joins: Array.from(new Set(schema.joins.map((j) => `${j.leftTable}->${j.rightTable}`))).sort(),
+      firstSeenAt: prevShape?.firstSeenAt || input.now,
+      lastSeenAt: input.now,
+      sightings: (prevShape?.sightings || 0) + 1,
+      confidence: Math.min(1, Math.max(0.35, (prevShape?.confidence || schema.confidence) + 0.02)),
+    };
+    if (shapeIdx >= 0) shapes[shapeIdx] = nextShape;
+    else shapes.push(nextShape);
+
+    this.saveAll({
+      schemaObservations: observations,
+      schemaJoins: joins,
+      schemaShapes: shapes,
+    });
+  }
+
+  schemaTables(datasourceName?: string): SchemaObservationEntry[] {
+    const rows = this.loadSchemaObservations();
+    if (!datasourceName) return rows;
+    return rows.filter((r) => r.datasource === datasourceName);
+  }
+
+  schemaJoins(datasourceName?: string): SchemaJoinEntry[] {
+    const rows = this.loadSchemaJoins();
+    if (!datasourceName) return rows;
+    return rows.filter((r) => r.datasource === datasourceName);
+  }
+
+  schemaQueryShapes(datasourceName?: string): SchemaQueryShapeEntry[] {
+    const rows = this.loadSchemaShapes();
+    if (!datasourceName) return rows;
+    return rows.filter((r) => r.datasource === datasourceName);
   }
 
   status(): { files: Record<string, number>; latest?: string } {
     const resolution = this.loadResolution();
     const library = this.loadLibrary();
     const stats = this.loadStats();
-    const latest = [resolution.at(-1)?.lastVerifiedAt, library.at(-1)?.lastVerifiedAt, stats.at(-1)?.lastRunAt]
+    const targetSelections = this.loadTargetSelections();
+    const schemaObservations = this.loadSchemaObservations();
+    const schemaJoins = this.loadSchemaJoins();
+    const schemaShapes = this.loadSchemaShapes();
+    const latest = [
+      resolution.at(-1)?.lastVerifiedAt,
+      library.at(-1)?.lastVerifiedAt,
+      stats.at(-1)?.lastRunAt,
+      targetSelections.at(-1)?.updatedAt,
+      schemaObservations.at(-1)?.lastSeenAt,
+      schemaJoins.at(-1)?.lastSeenAt,
+      schemaShapes.at(-1)?.lastSeenAt,
+    ]
       .filter(Boolean)
       .sort()
       .at(-1);
@@ -120,6 +381,10 @@ export class LearningStore {
         resolution: resolution.length,
         queryLibrary: library.length,
         queryStats: stats.length,
+        targetSelections: targetSelections.length,
+        schemaObservations: schemaObservations.length,
+        schemaJoins: schemaJoins.length,
+        schemaShapes: schemaShapes.length,
       },
       latest,
     };
@@ -138,6 +403,76 @@ export class LearningStore {
     return this.loadLibrary()
       .filter((q) => q.service === service && q.intentKey === intentKey)
       .sort((a, b) => b.successCount - a.successCount || String(b.lastVerifiedAt).localeCompare(String(a.lastVerifiedAt)))[0];
+  }
+
+  resolveTargetSelection(env: string, service: string, intent: string): TargetSelectionEntry | undefined {
+    const intentKey = normalizeIntent(intent);
+    if (!intentKey) return undefined;
+    return this.loadTargetSelections()
+      .filter((row) => row.env === env && row.service === service && row.intentKey === intentKey)
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
+  }
+
+  saveTargetSelection(input: {
+    env: string;
+    service: string;
+    intent: string;
+    engine: string;
+    target: string;
+    database: string;
+    source?: 'learned' | 'kb' | 'manual';
+  }): TargetSelectionEntry {
+    const rows = this.loadTargetSelections();
+    const env = String(input.env || '').trim();
+    const service = String(input.service || '').trim();
+    const intentKey = normalizeIntent(input.intent);
+    const key = `${env}|${service}|${intentKey}`;
+    const next: TargetSelectionEntry = {
+      key,
+      env,
+      service,
+      intentKey,
+      engine: String(input.engine || '').trim(),
+      target: String(input.target || '').trim(),
+      database: String(input.database || '').trim(),
+      updatedAt: nowIso(),
+      source: input.source || 'manual',
+    };
+    const idx = rows.findIndex((row) => row.key === key);
+    if (idx >= 0) rows[idx] = next;
+    else rows.push(next);
+    this.saveAll({ targetSelections: rows });
+    return next;
+  }
+
+  saveQueryTemplate(input: {
+    service: string;
+    intent: string;
+    sqlTemplate: string;
+    source?: 'learned' | 'kb' | 'manual';
+  }): QueryLibraryEntry {
+    const library = this.loadLibrary();
+    const service = String(input.service || '').trim();
+    const intentKey = normalizeIntent(input.intent);
+    const sqlTemplate = normalizeSqlTemplate(input.sqlTemplate);
+    const key = `${service}|${intentKey}|${sqlTemplate}`;
+    const id = stableId(key);
+    const idx = library.findIndex((row) => row.key === key);
+    const prev = idx >= 0 ? library[idx] : undefined;
+    const next: QueryLibraryEntry = {
+      id,
+      key,
+      service,
+      intentKey,
+      sqlTemplate,
+      source: input.source || 'manual',
+      lastVerifiedAt: nowIso(),
+      successCount: prev?.successCount || 0,
+    };
+    if (idx >= 0) library[idx] = next;
+    else library.push(next);
+    this.saveAll({ library });
+    return next;
   }
 
   saveSuccess(input: {
@@ -174,6 +509,17 @@ export class LearningStore {
       };
       if (idx >= 0) resolution[idx] = next;
       else resolution.push(next);
+    }
+    if (env && service && input.queryIntent && input.result.resolved?.target && input.result.resolved?.database) {
+      this.saveTargetSelection({
+        env,
+        service,
+        intent: input.queryIntent,
+        engine: String(input.result.resolved.engine || input.datasource.kind || ''),
+        target: String(input.result.resolved.target || ''),
+        database: String(input.result.resolved.database || ''),
+        source: 'learned',
+      });
     }
 
     const intentKey = normalizeIntent(input.queryIntent) || 'auto';
@@ -214,6 +560,7 @@ export class LearningStore {
       else stats.push(nextStat);
     }
 
+    this.observeSchema({ datasource: input.datasource, sql: input.sql, now });
     this.saveAll({ resolution, library, stats });
   }
 
@@ -228,6 +575,7 @@ export class LearningStore {
     const resolution = this.loadResolution();
     const library = this.loadLibrary();
     const stats = this.loadStats();
+    const targetSelections = this.loadTargetSelections();
     const now = nowIso();
     const env = String(input.datasource.env || '').trim();
     const service = String(input.datasource.service || '').trim();
@@ -275,7 +623,12 @@ export class LearningStore {
     const resolution = this.loadResolution();
     const library = this.loadLibrary();
     const stats = this.loadStats();
-    const before = resolution.length + library.length + stats.length;
+    const targetSelections = this.loadTargetSelections();
+    const schemaObservations = this.loadSchemaObservations();
+    const schemaJoins = this.loadSchemaJoins();
+    const schemaShapes = this.loadSchemaShapes();
+    const before =
+      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length;
 
     const resolutionMap = new Map<string, ResolutionEntry>();
     for (const row of resolution) {
@@ -296,8 +649,46 @@ export class LearningStore {
     const compactedResolution = [...resolutionMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const compactedLibrary = [...libraryMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const compactedStats = [...statMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const after = compactedResolution.length + compactedLibrary.length + compactedStats.length;
-    this.saveAll({ resolution: compactedResolution, library: compactedLibrary, stats: compactedStats });
+    const targetSelectionMap = new Map<string, TargetSelectionEntry>();
+    for (const row of targetSelections) {
+      const cur = targetSelectionMap.get(row.key);
+      if (!cur || row.updatedAt > cur.updatedAt) targetSelectionMap.set(row.key, row);
+    }
+    const schemaObservationMap = new Map<string, SchemaObservationEntry>();
+    for (const row of schemaObservations) {
+      const cur = schemaObservationMap.get(row.key);
+      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaObservationMap.set(row.key, row);
+    }
+    const schemaJoinMap = new Map<string, SchemaJoinEntry>();
+    for (const row of schemaJoins) {
+      const cur = schemaJoinMap.get(row.key);
+      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaJoinMap.set(row.key, row);
+    }
+    const schemaShapeMap = new Map<string, SchemaQueryShapeEntry>();
+    for (const row of schemaShapes) {
+      const cur = schemaShapeMap.get(row.key);
+      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaShapeMap.set(row.key, row);
+    }
+    const compactedSchemaObservations = [...schemaObservationMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+    const compactedSchemaJoins = [...schemaJoinMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+    const compactedSchemaShapes = [...schemaShapeMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+    const after =
+      compactedResolution.length +
+      compactedLibrary.length +
+      compactedStats.length +
+      targetSelectionMap.size +
+      compactedSchemaObservations.length +
+      compactedSchemaJoins.length +
+      compactedSchemaShapes.length;
+    this.saveAll({
+      resolution: compactedResolution,
+      library: compactedLibrary,
+      stats: compactedStats,
+      targetSelections: [...targetSelectionMap.values()].sort((a, b) => a.key.localeCompare(b.key)),
+      schemaObservations: compactedSchemaObservations,
+      schemaJoins: compactedSchemaJoins,
+      schemaShapes: compactedSchemaShapes,
+    });
     return { before, after };
   }
 
@@ -305,17 +696,41 @@ export class LearningStore {
     const resolution = this.loadResolution();
     const library = this.loadLibrary();
     const stats = this.loadStats();
+    const targetSelections = this.loadTargetSelections();
+    const schemaObservations = this.loadSchemaObservations();
+    const schemaJoins = this.loadSchemaJoins();
+    const schemaShapes = this.loadSchemaShapes();
     const cutoff = Date.now() - ttlHours * 3600 * 1000;
     const keepResolution = resolution.filter((r) => new Date(r.lastVerifiedAt).getTime() >= cutoff);
     const keepLibrary = library.filter((r) => new Date(r.lastVerifiedAt).getTime() >= cutoff);
     const keepStats = stats.filter((r) => new Date(r.lastRunAt).getTime() >= cutoff);
-    this.saveAll({ resolution: keepResolution, library: keepLibrary, stats: keepStats });
-    const before = resolution.length + library.length + stats.length;
-    const after = keepResolution.length + keepLibrary.length + keepStats.length;
+    const keepTargetSelections = targetSelections.filter((r) => new Date(r.updatedAt).getTime() >= cutoff);
+    const keepSchemaObservations = schemaObservations.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
+    const keepSchemaJoins = schemaJoins.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
+    const keepSchemaShapes = schemaShapes.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
+    this.saveAll({
+      resolution: keepResolution,
+      library: keepLibrary,
+      stats: keepStats,
+      targetSelections: keepTargetSelections,
+      schemaObservations: keepSchemaObservations,
+      schemaJoins: keepSchemaJoins,
+      schemaShapes: keepSchemaShapes,
+    });
+    const before =
+      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length;
+    const after =
+      keepResolution.length +
+      keepLibrary.length +
+      keepStats.length +
+      keepTargetSelections.length +
+      keepSchemaObservations.length +
+      keepSchemaJoins.length +
+      keepSchemaShapes.length;
     return { before, after };
   }
 
   clear(): void {
-    this.saveAll({ resolution: [], library: [], stats: [] });
+    this.saveAll({ resolution: [], library: [], stats: [], targetSelections: [], schemaObservations: [], schemaJoins: [], schemaShapes: [] });
   }
 }

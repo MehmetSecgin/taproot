@@ -4,7 +4,7 @@ import { classifyMutation, enforceMutationPolicy } from '../src/core/safety.js';
 describe('safety', () => {
   it('classifies mutate vs read', () => {
     expect(classifyMutation('SELECT 1')).toBe('read');
-    expect(classifyMutation('SHOW CREATE TABLE sample_records')).toBe('read');
+    expect(classifyMutation('SHOW CREATE TABLE sample_table')).toBe('read');
     expect(classifyMutation('UPDATE x SET a=1')).toBe('mutate');
   });
 

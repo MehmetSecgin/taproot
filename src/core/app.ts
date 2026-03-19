@@ -5,9 +5,10 @@ import { TemplateStore } from '../store/templates.js';
 import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { LearningStore } from '../store/learning.js';
+import { RuntimeConfigStore } from '../store/runtime-config.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
-import type { DatasourceProfile, DoctorCheck } from '../types/core.js';
+import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
 
 export interface AppContext {
   paths: ReturnType<typeof resolvePaths>;
@@ -16,6 +17,7 @@ export interface AppContext {
   credentialStore: CredentialStore;
   kbStore: KbStore;
   learningStore: LearningStore;
+  runtimeConfigStore: RuntimeConfigStore;
   pluginRegistry: PluginRegistry;
   jsonMode: boolean;
   noColor: boolean;
@@ -46,6 +48,7 @@ export function buildContext(opts: {
     credentialStore: new CredentialStore(paths.credentialFile),
     kbStore: new KbStore(paths.kbDir),
     learningStore: new LearningStore(paths.learningDir),
+    runtimeConfigStore: new RuntimeConfigStore(paths.runtimeConfigFile),
     pluginRegistry,
     jsonMode: Boolean(opts.jsonMode),
     noColor: Boolean(opts.noColor),
@@ -54,10 +57,16 @@ export function buildContext(opts: {
   };
 }
 
-export function normalizeService(value?: string): string {
+export function normalizeService(value?: string, aliases?: Record<string, string>): string {
   const v = (value || '').trim();
   if (!v) return '';
-  return v.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
+  const normalized = v.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
+  const aliasMap = aliases || {};
+  return aliasMap[normalized] || normalized;
+}
+
+export function environmentPolicy(ctx: Pick<AppContext, 'runtimeConfigStore'>, env?: string): EnvironmentPolicy {
+  return ctx.runtimeConfigStore.environmentPolicy(env);
 }
 
 export function fillTemplate(template: string, params: Record<string, string>): string {
@@ -104,7 +113,7 @@ export function nextAction(errorCode: string): string {
     AUTH_EXPIRED: 'Refresh credentials/session and retry.',
     OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
-    DETERMINISTIC_REQUIRED: 'In prod, provide --datasource or --env+--service with KB/profile-backed resolution; do not rely on discovery.',
+    DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
     DISCOVERY_UNAVAILABLE: 'Use direct CLI mode with --allow-discovery (daemon bypassed) if discovery is explicitly required.',
     GENERIC: 'Inspect error details and rerun with --json for envelope details.',
   };

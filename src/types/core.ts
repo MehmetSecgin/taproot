@@ -47,6 +47,30 @@ export interface DatasourceProfile {
   confidence: number;
 }
 
+export interface EnvironmentPolicy {
+  deterministicRequired: boolean;
+  allowDiscoveryByDefault: boolean;
+  preferredAccessMethods: string[];
+  targetPreference: string[];
+}
+
+export interface RuntimeConfig {
+  defaults?: {
+    profile?: string;
+    json?: boolean;
+    noColor?: boolean;
+    noAnimations?: boolean;
+    learning?: {
+      enabled?: boolean;
+      sampleRowsMax?: number;
+      sampleCellMax?: number;
+      ttlHours?: number;
+    };
+  };
+  environmentPolicies?: Record<string, Partial<EnvironmentPolicy>>;
+  serviceAliases?: Record<string, string>;
+}
+
 export interface QueryTemplate {
   id: string;
   datasourceKind?: string;
@@ -85,6 +109,15 @@ export interface QueryResult {
   };
   warnings: string[];
   classification: 'success' | 'error';
+  resolved?: {
+    source?: string;
+    env?: string;
+    service?: string;
+    accessMethod?: string;
+    target?: string;
+    database?: string;
+    engine?: string;
+  };
 }
 
 export interface DoctorCheck {

@@ -5,6 +5,7 @@ import path from 'node:path';
 export interface Paths {
   stateRoot: string;
   configDir: string;
+  runtimeConfigFile: string;
   datasourceFile: string;
   credentialFile: string;
   templatesFile: string;
@@ -30,6 +31,7 @@ export function resolvePaths(memoryRoot?: string): Paths {
   return {
     stateRoot,
     configDir,
+    runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),
     templatesFile: path.join(configDir, 'templates.json'),
@@ -51,6 +53,7 @@ export function resolveFallbackPaths(memoryRoot?: string): Paths {
   return {
     stateRoot,
     configDir,
+    runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),
     templatesFile: path.join(configDir, 'templates.json'),

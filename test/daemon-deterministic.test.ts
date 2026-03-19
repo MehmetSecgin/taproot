@@ -14,6 +14,12 @@ function makeStateRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'trd-'));
 }
 
+function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>): void {
+  const configDir = path.join(stateRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+}
+
 afterEach(() => {
   process.env.TAPROOT_STATE_ROOT = previousEnv.TAPROOT_STATE_ROOT;
   process.env.TAPROOT_MASTER_KEY = previousEnv.TAPROOT_MASTER_KEY;
@@ -22,6 +28,14 @@ afterEach(() => {
 describe('daemon deterministic resolution', () => {
   it('returns DETERMINISTIC_REQUIRED in prod when datasource is unresolved', async () => {
     const stateRoot = makeStateRoot();
+    writeRuntimeConfig(stateRoot, {
+      environmentPolicies: {
+        prod: {
+          deterministicRequired: true,
+          allowDiscoveryByDefault: false,
+        },
+      },
+    });
     process.env.TAPROOT_STATE_ROOT = stateRoot;
     process.env.TAPROOT_MASTER_KEY = 'test-master-key';
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
@@ -45,6 +59,14 @@ describe('daemon deterministic resolution', () => {
 
   it('returns DISCOVERY_UNAVAILABLE in daemon path when allowDiscovery is requested', async () => {
     const stateRoot = makeStateRoot();
+    writeRuntimeConfig(stateRoot, {
+      environmentPolicies: {
+        prod: {
+          deterministicRequired: true,
+          allowDiscoveryByDefault: false,
+        },
+      },
+    });
     process.env.TAPROOT_STATE_ROOT = stateRoot;
     process.env.TAPROOT_MASTER_KEY = 'test-master-key';
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');

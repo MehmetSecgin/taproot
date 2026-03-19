@@ -1,14 +1,14 @@
 [
   {
-    "service": "orders",
+    "service": "sample",
     "owner_team": "platform",
     "connections": [
       {
-        "env": "prod",
+        "env": "production",
         "engine": "mysql",
         "host": "db.internal.example",
         "port": 3306,
-        "database": "orders",
+        "database": "sample_app",
         "db_user": "sample_reader",
         "access_method": "native",
         "status": "active",

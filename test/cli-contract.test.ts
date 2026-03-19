@@ -13,6 +13,12 @@ function runCli(args: string[], env: Record<string, string> = {}) {
   });
 }
 
+function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
+  const configDir = path.join(stateRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+}
+
 describe('cli contract', () => {
   it('prints root help with stable commands', () => {
     const out = runCli(['--help']);
@@ -114,11 +120,67 @@ describe('cli contract', () => {
 
   it('enforces prod no-guess mode unless discovery is explicit', () => {
     const stateRoot = path.join(os.tmpdir(), `taproot-cli-${Date.now()}`);
+    writeRuntimeConfig(stateRoot, {
+      environmentPolicies: {
+        prod: {
+          deterministicRequired: true,
+          allowDiscoveryByDefault: false,
+        },
+      },
+    });
     const out = runCli(
       ['query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'],
       { TAPROOT_FORCE_DIRECT: '1', TAPROOT_STATE_ROOT: stateRoot },
     );
     expect(out.status).toBe(2);
     expect((out.stderr || '').toLowerCase()).toContain('deterministic_required');
+  });
+
+  it('resolves service aliases from runtime config in cache and kb commands', () => {
+    const stateRoot = path.join(os.tmpdir(), `taproot-alias-${Date.now()}`);
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    writeRuntimeConfig(stateRoot, {
+      serviceAliases: {
+        legacyservice: 'sample-service',
+      },
+    });
+    fs.writeFileSync(
+      path.join(configDir, 'deterministic-config.json'),
+      JSON.stringify({
+        serviceAliases: {
+          legacyservice: 'sample-service',
+        },
+      }),
+    );
+    const memoryRoot = path.join(stateRoot, 'memory-root');
+    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    fs.mkdirSync(kbDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(kbDir, 'services.json'),
+      JSON.stringify([
+        {
+          service: 'sample-service',
+          connections: [
+            {
+              env: 'sandbox',
+              engine: 'mysql',
+              database: 'orders',
+              db_user: 'sample_reader',
+              access_method: 'native',
+              status: 'active',
+              verified_at_utc: '2026-03-01T00:00:00Z',
+            },
+          ],
+        },
+      ]),
+    );
+    const kbOut = runCli(['--json', 'kb', 'resolve-database-name', '--service', 'legacyservice', '--env', 'sandbox'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(kbOut.status).toBe(0);
+    expect(JSON.parse(kbOut.stdout).service).toBe('sample-service');
   });
 });

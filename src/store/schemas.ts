@@ -44,5 +44,30 @@ export const QueryTemplateSchema = z.object({
 export const DatasourceProfileListSchema = z.array(DatasourceProfileSchema);
 export const QueryTemplateListSchema = z.array(QueryTemplateSchema);
 
+export const EnvironmentPolicySchema = z.object({
+  deterministicRequired: z.boolean().default(false),
+  allowDiscoveryByDefault: z.boolean().default(false),
+  preferredAccessMethods: z.array(z.string()).default([]),
+  targetPreference: z.array(z.string()).default([]),
+});
+
+export const RuntimeConfigSchema = z.object({
+  defaults: z.object({
+    profile: z.string().optional(),
+    json: z.boolean().optional(),
+    noColor: z.boolean().optional(),
+    noAnimations: z.boolean().optional(),
+    learning: z.object({
+      enabled: z.boolean().optional(),
+      sampleRowsMax: z.number().int().positive().optional(),
+      sampleCellMax: z.number().int().positive().optional(),
+      ttlHours: z.number().int().positive().optional(),
+    }).optional(),
+  }).optional(),
+  environmentPolicies: z.record(z.string(), EnvironmentPolicySchema.partial()).optional(),
+  serviceAliases: z.record(z.string(), z.string()).optional(),
+});
+
 export type DatasourceProfileInput = z.infer<typeof DatasourceProfileSchema>;
 export type QueryTemplateInput = z.infer<typeof QueryTemplateSchema>;
+export type RuntimeConfigInput = z.infer<typeof RuntimeConfigSchema>;

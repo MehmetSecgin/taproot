@@ -18,6 +18,12 @@ function makeStateRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-contract-'));
 }
 
+function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
+  const configDir = path.join(stateRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+}
+
 const envelopeMetaSchema = z.object({
   requestId: z.string().min(1),
   runId: z.string().min(1).optional(),
@@ -81,6 +87,14 @@ describe('agent JSON contract', () => {
 
   it('query JSON error keeps request correlation metadata when daemon responds with error', async () => {
     const stateRoot = makeStateRoot();
+    writeRuntimeConfig(stateRoot, {
+      environmentPolicies: {
+        prod: {
+          deterministicRequired: true,
+          allowDiscoveryByDefault: false,
+        },
+      },
+    });
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
     const startOut = runCli(['daemon', 'start'], env);
     expect(startOut.status).toBe(0);
