@@ -53,6 +53,7 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
   c.command('show').requiredOption('--ref <ref>').action(async (opts) => {
     const ctx = getCtx();
     const value = await ctx.credentialStore.get(opts.ref);
+    if (!Object.keys(value).length) throw new Error(`Credential ref not found: ${opts.ref}`);
     const redacted = { ...value };
     if (redacted.password) redacted.password = '[REDACTED]';
     if (redacted.token) redacted.token = '[REDACTED]';

@@ -32,10 +32,13 @@ export class KbStore {
   }
 
   listServices(): string[] {
-    return this.services()
-      .map((row) => String(row.service || '').trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
+    return Array.from(
+      new Set(
+        this.services()
+          .map((row) => String(row.service || '').trim())
+          .filter(Boolean),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
   }
 
   resolveConnection(service: string, env: string): Record<string, unknown> | null {

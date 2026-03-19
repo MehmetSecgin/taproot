@@ -71,5 +71,5 @@ export function discoverTeleportTargets(service: string, env: string, policy: En
 export function inferDatabaseCandidates(service: string, explicit?: string): string[] {
   if (explicit) return [explicit];
   const base = service.replace(/-/g, '_');
-  return [...new Set([`agi_${base}`, base].filter(Boolean))];
+  return [...new Set([base].filter(Boolean))];
 }

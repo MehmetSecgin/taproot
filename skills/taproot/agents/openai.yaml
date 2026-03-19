@@ -1,0 +1,7 @@
+interface:
+  display_name: "TapRoot"
+  short_description: "Operate TapRoot for DB queries, doctor checks, template management, credential setup, and schema inspection."
+  default_prompt: "Use $taproot to run a TapRoot doctor or query workflow and explain the result."
+
+policy:
+  allow_implicit_invocation: true

@@ -72,7 +72,7 @@ function emitColumnRef(expr: unknown, role: ColumnRole, out: ColumnObservation[]
   const node = expr as Record<string, unknown>;
   if (node.type === 'column_ref') {
     const column = typeof node.column === 'string' ? node.column : '';
-    if (!column || column === '*') return;
+    if (!column) return;
     const table = typeof node.table === 'string' && node.table ? node.table : undefined;
     out.push({ table, column, role });
     return;
@@ -192,7 +192,44 @@ function parseSelectLikeAst(ast: Record<string, unknown>): {
     return { ...c, table };
   });
 
-  return { tables, joins, columns: resolvedColumns };
+  function collectNestedSelects(node: unknown, out: Record<string, unknown>[]): void {
+    if (!node || typeof node !== 'object') return;
+    const current = node as Record<string, unknown>;
+    if (current !== ast && typeof current.type === 'string' && current.type.toLowerCase() === 'select') {
+      out.push(current);
+    }
+    if (current.ast && typeof current.ast === 'object') {
+      collectNestedSelects(current.ast, out);
+    }
+    for (const value of Object.values(current)) {
+      if (Array.isArray(value)) {
+        for (const item of value) collectNestedSelects(item, out);
+      } else if (value && typeof value === 'object') {
+        collectNestedSelects(value, out);
+      }
+    }
+  }
+
+  const nestedSelects: Record<string, unknown>[] = [];
+  collectNestedSelects(ast, nestedSelects);
+  for (const nested of nestedSelects) {
+    const parsed = parseSelectLikeAst(nested);
+    tables.push(...parsed.tables);
+    joins.push(...parsed.joins);
+    resolvedColumns.push(...parsed.columns);
+  }
+
+  const dedupedTables = Array.from(
+    new Map(tables.map((row) => [`${row.table}|${row.alias || ''}`, row])),
+  ).map(([, row]) => row);
+  const dedupedJoins = Array.from(
+    new Map(joins.map((row) => [`${row.leftTable}|${row.rightTable}|${row.conditionNormalized}`, row])),
+  ).map(([, row]) => row);
+  const dedupedColumns = Array.from(
+    new Map(resolvedColumns.map((row) => [`${row.table || ''}|${row.column}|${row.role}`, row])),
+  ).map(([, row]) => row);
+
+  return { tables: dedupedTables, joins: dedupedJoins, columns: dedupedColumns };
 }
 
 function fallbackExtract(sql: string): QueryShapeObservation {

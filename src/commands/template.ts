@@ -5,6 +5,18 @@ import { EXIT_CODES } from '../core/exit-codes.js';
 import { nowIso } from '../core/time.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
+function extractTemplateParams(sql: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of sql.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)) {
+    const key = m[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+}
+
 export function registerTemplate(program: Command, getCtx: () => AppContext): void {
   const t = program.command('template').description('Query template operations');
 
@@ -27,7 +39,7 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
     else {
       console.log(renderRecord({ id: item.id, valid, missingParams: missing, extraPlaceholders: extra }));
     }
-    if (!valid) process.exitCode = EXIT_CODES.BAD_INPUT;
+    if (!valid) process.exit(EXIT_CODES.BAD_INPUT);
   });
 
   t.command('run').requiredOption('--id <id>').option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), []).action((opts) => {
@@ -35,6 +47,8 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
     const item = ctx.templateStore.get(opts.id);
     if (!item) throw new Error(`Template not found: ${opts.id}`);
     const params = parseParamPairs(opts.param || []);
+    const unknownParams = Object.keys(params).filter((key) => !item.params.includes(key));
+    if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for template ${item.id}: ${unknownParams.join(', ')}`);
     const query = fillTemplate(item.nativeQueryTemplate, params);
     if (ctx.jsonMode) printJson({ id: item.id, query });
     else {
@@ -57,7 +71,7 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
         intent: opts.intent,
         aliases: opts.alias || [],
         nativeQueryTemplate: opts.query,
-        params: [],
+        params: extractTemplateParams(opts.query),
         datasourceName: opts.datasourceName,
         datasourceKind: opts.datasourceKind,
         resultShape: 'table',

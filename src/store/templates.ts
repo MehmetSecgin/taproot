@@ -16,7 +16,7 @@ function extractTemplateParams(sql: string): string[] {
 
 function normalizeTemplate(input: QueryTemplate): QueryTemplate {
   const aliases = Array.from(new Set((input.aliases || []).map((a) => a.trim()).filter(Boolean)));
-  const params = extractTemplateParams(input.nativeQueryTemplate);
+  const params = Array.from(new Set((input.params || []).map((p) => p.trim()).filter(Boolean)));
   return {
     ...input,
     aliases,
@@ -30,10 +30,7 @@ export class TemplateStore {
   list(): QueryTemplate[] {
     const raw = readJsonFile<unknown>(this.file, []);
     const parsed = QueryTemplateListSchema.safeParse(raw);
-    if (!parsed.success) return [];
-    const normalized = (parsed.data as QueryTemplate[]).map((t) => normalizeTemplate(t));
-    if (JSON.stringify(normalized) !== JSON.stringify(parsed.data)) writeJsonFile(this.file, normalized);
-    return normalized;
+    return parsed.success ? (parsed.data as QueryTemplate[]).map((t) => normalizeTemplate(t)) : [];
   }
 
   get(id: string): QueryTemplate | undefined {
