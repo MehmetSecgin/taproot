@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
 import { classifyError, environmentPolicy, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
-import { datasourceKbConflicts } from '../core/conflicts.js';
+import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
@@ -53,6 +53,12 @@ function discoverTargets(ctx: AppContext, input: { env: string; service: string;
     }
   }
   return out;
+}
+
+function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
+  return new Error(
+    `MISCONFIGURED_DATASOURCE: datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+  );
 }
 
 async function promptPassword(ref: string): Promise<string> {
@@ -277,6 +283,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       if (env && service) {
         const kb = ctx.kbStore.resolveConnection(service, env);
         if (kb) {
+          const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+          if (critical.length) {
+            throw misconfiguredDatasourceError(datasource.name, env, service, critical);
+          }
           const conflicts = datasourceKbConflicts(datasource as any, kb);
           if (conflicts.length) {
             const warning = `datasource overrides KB (${conflicts.join('; ')})`;

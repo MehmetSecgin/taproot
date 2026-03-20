@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { classifyError, normalizeService, runDatasourceConnectors } from '../core/app.js';
-import { datasourceKbConflicts } from '../core/conflicts.js';
+import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
@@ -30,7 +30,7 @@ function doctorNextActions(datasourceName: string, checks: Array<{ check: string
       if (/no logincommand configured/i.test(detail)) {
         actions.add(`taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`);
       } else {
-        actions.add(`tsh status || tsh login --proxy <proxy> --auth <auth>`);
+        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
       }
     }
     if (label.startsWith('kubectl-portforward')) {
@@ -107,17 +107,48 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           throw new Error('Could not resolve datasource. Use --datasource or --env+--service.');
         }
         progress.update(`checking plugin for ${datasource.name}`);
-        if (datasource.env && datasource.service) {
-          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env);
-          if (kb) {
-            const conflicts = datasourceKbConflicts(datasource as any, kb);
-            if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
-          }
-        }
         const plugin = ctx.pluginRegistry.get(datasource.kind);
         if (!plugin || !plugin.doctor) {
           progress.fail('doctor capability unavailable');
           throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
+        }
+        if (datasource.env && datasource.service) {
+          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env);
+          if (kb) {
+            const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+            if (critical.length) {
+              const checks = [
+                {
+                  check: 'kb routing consistency',
+                  status: 'fail' as const,
+                  detail: `MISCONFIGURED_DATASOURCE: ${critical.join('; ')}`,
+                },
+              ];
+              checks.push({
+                check: 'doctor blocked',
+                status: 'warn',
+                detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
+              });
+              if (ctx.jsonMode) {
+                printJson({
+                  datasource: datasource.name,
+                  plugin: plugin.manifest.name,
+                  warnings,
+                  checks,
+                  nextActions: [`taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`],
+                  summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
+                });
+              } else {
+                console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
+                console.log('Next actions:');
+                console.log(`- taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`);
+              }
+              process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
+              return;
+            }
+            const conflicts = datasourceKbConflicts(datasource as any, kb);
+            if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
+          }
         }
         const creds = await ctx.credentialStore.get(datasource.credentialRef);
         progress.update('running connector checks');

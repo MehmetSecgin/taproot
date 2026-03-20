@@ -13,7 +13,12 @@ function runCli(args: string[], env: Record<string, string> = {}) {
   });
 }
 
-function setupState(input?: { runtimeConfig?: Record<string, unknown>; templates?: Array<Record<string, unknown>>; datasources?: Array<Record<string, unknown>> }) {
+function setupState(input?: {
+  runtimeConfig?: Record<string, unknown>;
+  templates?: Array<Record<string, unknown>>;
+  datasources?: Array<Record<string, unknown>>;
+  kbServices?: Array<Record<string, unknown>>;
+}) {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-query-resolution-'));
   const configDir = path.join(stateRoot, 'config');
   fs.mkdirSync(configDir, { recursive: true });
@@ -40,11 +45,16 @@ function setupState(input?: { runtimeConfig?: Record<string, unknown>; templates
   );
   fs.writeFileSync(path.join(configDir, 'templates.json'), JSON.stringify(input?.templates || []));
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(input?.runtimeConfig || {}));
+  const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-query-resolution-memory-'));
+  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  fs.mkdirSync(kbDir, { recursive: true });
+  fs.writeFileSync(path.join(kbDir, 'services.json'), JSON.stringify(input?.kbServices || []));
   return {
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_FORCE_DIRECT: '1',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
     },
   };
 }
@@ -132,5 +142,46 @@ describe('query resolution', () => {
     const out = runCli(['query', '--env', 'qa', '--service', 'legacy', '--query', 'SELECT 1'], env);
     expect(out.status).toBe(3);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+  });
+
+  it('fails with MISCONFIGURED_DATASOURCE when store conflicts with stronger KB routing', () => {
+    const { env } = setupState({
+      datasources: [
+        {
+          name: 'prod-orders',
+          kind: 'mysql',
+          env: 'prod',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 3306, database: 'orders' },
+          credentialRef: 'prod:orders',
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: {},
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ],
+      kbServices: [
+        {
+          service: 'orders',
+          connections: [
+            {
+              env: 'prod',
+              engine: 'mysql',
+              database: 'orders',
+              db_user: 'reader',
+              access_method: 'tsh',
+              target: 'orders-tidb',
+              status: 'active',
+              verified_at_utc: '2026-03-01T00:00:00Z',
+            },
+          ],
+        },
+      ],
+    });
+    const out = runCli(['query', '--env', 'prod', '--service', 'orders', '--query', 'SELECT 1'], env);
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
   });
 });

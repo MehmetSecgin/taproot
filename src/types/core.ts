@@ -120,6 +120,8 @@ export interface QueryResult {
   };
 }
 
+export type SchemaProvenance = 'observed-query' | 'refreshed-metadata' | 'manual';
+
 export interface DoctorCheck {
   check: string;
   status: 'ok' | 'warn' | 'fail';

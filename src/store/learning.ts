@@ -4,6 +4,8 @@ import type { DatasourceProfile, QueryResult } from '../types/core.js';
 import { nowIso } from '../core/time.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
+import type { RefreshedSchemaJoin, RefreshedSchemaTable } from '../core/schema-refresh.js';
+import type { SchemaProvenance } from '../types/core.js';
 
 interface ResolutionEntry {
   key: string;
@@ -80,6 +82,7 @@ export interface SchemaObservationEntry {
   lastSeenAt: string;
   sightings: number;
   confidence: number;
+  sources: SchemaProvenance[];
 }
 
 export interface SchemaJoinEntry {
@@ -98,6 +101,7 @@ export interface SchemaJoinEntry {
   lastSeenAt: string;
   sightings: number;
   confidence: number;
+  sources: SchemaProvenance[];
 }
 
 export interface SchemaQueryShapeEntry {
@@ -115,6 +119,7 @@ export interface SchemaQueryShapeEntry {
   lastSeenAt: string;
   sightings: number;
   confidence: number;
+  sources: SchemaProvenance[];
 }
 
 function normalizeIntent(value?: string): string {
@@ -279,6 +284,7 @@ export class LearningStore {
         lastSeenAt: input.now,
         sightings: (prev?.sightings || 0) + 1,
         confidence: Math.min(1, Math.max(0.35, (prev?.confidence || 0.65) + 0.03)),
+        sources: Array.from(new Set([...(prev?.sources || []), 'observed-query'])).sort() as SchemaProvenance[],
       };
       if (idx >= 0) observations[idx] = next;
       else observations.push(next);
@@ -304,6 +310,7 @@ export class LearningStore {
         lastSeenAt: input.now,
         sightings: (prev?.sightings || 0) + 1,
         confidence: Math.min(1, Math.max(0.4, (prev?.confidence || schema.confidence) + 0.03)),
+        sources: Array.from(new Set([...(prev?.sources || []), 'observed-query'])).sort() as SchemaProvenance[],
       };
       if (idx >= 0) joins[idx] = next;
       else joins.push(next);
@@ -327,6 +334,7 @@ export class LearningStore {
       lastSeenAt: input.now,
       sightings: (prevShape?.sightings || 0) + 1,
       confidence: Math.min(1, Math.max(0.35, (prevShape?.confidence || schema.confidence) + 0.02)),
+      sources: Array.from(new Set([...(prevShape?.sources || []), 'observed-query'])).sort() as SchemaProvenance[],
     };
     if (shapeIdx >= 0) shapes[shapeIdx] = nextShape;
     else shapes.push(nextShape);
@@ -354,6 +362,114 @@ export class LearningStore {
     const rows = this.loadSchemaShapes();
     if (!datasourceName) return rows;
     return rows.filter((r) => r.datasource === datasourceName);
+  }
+
+  saveSchemaRefresh(input: {
+    datasource: DatasourceProfile;
+    source: SchemaProvenance;
+    tables: RefreshedSchemaTable[];
+    joins: RefreshedSchemaJoin[];
+  }): void {
+    const now = nowIso();
+    const observations = this.loadSchemaObservations();
+    const joins = this.loadSchemaJoins();
+    const shapes = this.loadSchemaShapes();
+    const datasource = input.datasource;
+    const env = String(datasource.env || '');
+    const service = String(datasource.service || '');
+    const database = String(datasource.connection.database || '');
+    const target = String(datasource.connection.target || '');
+
+    for (const table of input.tables) {
+      const key = [datasource.name, database, table.table].join('|');
+      const idx = observations.findIndex((row) => row.key === key);
+      const prev = idx >= 0 ? observations[idx] : undefined;
+      const nextColumns = table.columns.map((column) => {
+        const existing = prev?.columns.find((item) => item.column === column);
+        return {
+          column,
+          selectedCount: existing?.selectedCount || 0,
+          filterCount: existing?.filterCount || 0,
+          groupCount: existing?.groupCount || 0,
+          orderCount: existing?.orderCount || 0,
+          lastSeenAt: now,
+        };
+      });
+      const next: SchemaObservationEntry = {
+        key,
+        datasource: datasource.name,
+        env,
+        service,
+        kind: datasource.kind,
+        database,
+        target,
+        table: table.table,
+        aliases: prev?.aliases || [],
+        columns: nextColumns,
+        firstSeenAt: prev?.firstSeenAt || now,
+        lastSeenAt: now,
+        sightings: (prev?.sightings || 0) + 1,
+        confidence: Math.min(1, Math.max(0.55, prev?.confidence || 0.8)),
+        sources: Array.from(new Set([...(prev?.sources || []), input.source])).sort() as SchemaProvenance[],
+      };
+      if (idx >= 0) observations[idx] = next;
+      else observations.push(next);
+    }
+
+    for (const item of input.joins) {
+      const key = [datasource.name, database, item.leftTable, item.rightTable, item.conditionNormalized].join('|');
+      const idx = joins.findIndex((row) => row.key === key);
+      const prev = idx >= 0 ? joins[idx] : undefined;
+      const next: SchemaJoinEntry = {
+        key,
+        datasource: datasource.name,
+        env,
+        service,
+        kind: datasource.kind,
+        database,
+        leftTable: item.leftTable,
+        rightTable: item.rightTable,
+        directionHint: item.directionHint,
+        conditionRaw: item.conditionRaw,
+        conditionNormalized: item.conditionNormalized,
+        firstSeenAt: prev?.firstSeenAt || now,
+        lastSeenAt: now,
+        sightings: (prev?.sightings || 0) + 1,
+        confidence: Math.min(1, Math.max(0.6, prev?.confidence || 0.85)),
+        sources: Array.from(new Set([...(prev?.sources || []), input.source])).sort() as SchemaProvenance[],
+      };
+      if (idx >= 0) joins[idx] = next;
+      else joins.push(next);
+    }
+
+    const shapeKey = [datasource.name, database, 'metadata-refresh', input.tables.map((t) => t.table).sort().join(',')].join('|');
+    const shapeIdx = shapes.findIndex((row) => row.key === shapeKey);
+    const prevShape = shapeIdx >= 0 ? shapes[shapeIdx] : undefined;
+    const nextShape: SchemaQueryShapeEntry = {
+      key: shapeKey,
+      datasource: datasource.name,
+      env,
+      service,
+      kind: datasource.kind,
+      database,
+      operation: 'metadata-refresh',
+      normalizedSql: `metadata-refresh:${input.tables.map((t) => t.table).sort().join(',')}`,
+      tables: input.tables.map((t) => t.table).sort((a, b) => a.localeCompare(b)),
+      joins: input.joins.map((j) => `${j.leftTable}->${j.rightTable}`).sort((a, b) => a.localeCompare(b)),
+      firstSeenAt: prevShape?.firstSeenAt || now,
+      lastSeenAt: now,
+      sightings: (prevShape?.sightings || 0) + 1,
+      confidence: Math.min(1, Math.max(0.55, prevShape?.confidence || 0.8)),
+      sources: Array.from(new Set([...(prevShape?.sources || []), input.source])).sort() as SchemaProvenance[],
+    };
+    if (shapeIdx >= 0) shapes[shapeIdx] = nextShape;
+    else shapes.push(nextShape);
+
+    this.saveAll({
+      schemaObservations: observations,
+      schemaJoins: joins,
+      schemaShapes: shapes,
+    });
   }
 
   status(): { files: Record<string, number>; latest?: string } {

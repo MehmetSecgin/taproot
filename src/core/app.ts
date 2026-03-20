@@ -92,6 +92,7 @@ export function parseParamPairs(values: string[]): Record<string, string> {
 
 export function classifyError(message: string): string {
   const text = message.toLowerCase();
+  if (/misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/.test(text)) return 'MISCONFIGURED_DATASOURCE';
   if (/deterministic_required|prod requires deterministic/.test(text)) return 'DETERMINISTIC_REQUIRED';
   if (/discovery_unavailable/.test(text)) return 'DISCOVERY_UNAVAILABLE';
   if (/overloaded|queue limit/.test(text)) return 'OVERLOADED';
@@ -99,13 +100,15 @@ export function classifyError(message: string): string {
   if (/access denied|permission denied/.test(text)) return 'ACCESS_DENIED';
   if (/unknown database|does not exist/.test(text)) return 'UNKNOWN_DATABASE';
   if (/getaddrinfo|no such host|target.*not found/.test(text)) return 'UNKNOWN_TARGET';
-  if (/timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|network/.test(text)) return 'CONNECTIVITY';
+  if (/teleport proxy path unavailable|spawn tsh enoent/.test(text)) return 'CONNECTIVITY';
+  if (/timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/.test(text)) return 'CONNECTIVITY';
   if (/auth|login|expired|unauthorized/.test(text)) return 'AUTH_EXPIRED';
   return 'GENERIC';
 }
 
 export function nextAction(errorCode: string): string {
   const mapping: Record<string, string> = {
+    MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
     UNKNOWN_TARGET: 'Verify host/target in datasource profile and connector module.',
@@ -114,7 +117,7 @@ export function nextAction(errorCode: string): string {
     OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
-    DISCOVERY_UNAVAILABLE: 'Use direct CLI mode with --allow-discovery (daemon bypassed) if discovery is explicitly required.',
+    DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
     GENERIC: 'Inspect error details and rerun with --json for envelope details.',
   };
   return mapping[errorCode] || mapping.GENERIC;

@@ -92,6 +92,7 @@ taproot --json session ls
 ```bash
 taproot --json learn status
 taproot --json learn replay --run-id <id>
+taproot --json learn refresh-schema --datasource <name>
 taproot --json learn tables --datasource <name> --limit 50
 taproot --json learn joins --datasource <name> --limit 50
 taproot --json learn shapes --datasource <name> --limit 50
@@ -119,3 +120,4 @@ taproot completion fish
 - Never read TapRoot’s learning, cache, or credential files directly.
 - Let config decide which environments require deterministic resolution; do not assume special env names like `prod`, `stg`, or `qa`.
 - Prefer canonical service names in saved artifacts; aliases from `serviceAliases` are for input normalization, not storage.
+- If TapRoot is blocked, report the gap instead of falling back to direct `mysql`, `psql`, or `tsh` commands unless the user explicitly asks for that fallback.

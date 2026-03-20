@@ -14,6 +14,7 @@ Use TapRoot as the canonical DB/operator path.
 - Never inspect TapRoot cache, learning, or credential files directly. Use TapRoot commands only.
 - Respect runtime config from `~/.taproot/config/deterministic-config.json`; environment safety and service alias behavior come from config, not hardcoded env names.
 - Service names are normalized through `serviceAliases` in runtime config. Always use the canonical service name when known; aliases resolve transparently but should not be stored.
+- Do not fall back to direct `mysql`, `psql`, or `tsh` commands for DB work unless the user explicitly requests that fallback.
 
 ## Setup & Credentials
 - Use `taproot --json self-check` at the start of a new machine or repo setup to validate runtime, state root, KB dir, and built-in plugins.
@@ -35,6 +36,7 @@ Use TapRoot as the canonical DB/operator path.
 2. Preflight connectors and auth.
 - Run `taproot --json doctor --datasource <name> --connect` before query execution when connector or auth state may matter.
 - If doctor returns failures, stop and surface `checks` and `nextActions`.
+- If TapRoot is blocked by routing, proxy, or learning gaps, stop and report the issue instead of using direct shell DB tools.
 
 3. Execute the query path.
 - Use `taproot --json query --datasource <name> --query "<sql>"` for explicit SQL.
@@ -56,6 +58,7 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot --json cache save-target ...` or `taproot --json cache save-query ...` only when the user explicitly wants to pin a reusable target or query shape.
 - Use `taproot --json learn status` or `taproot --json learn replay --run-id <id>` for learning/run inspection.
 - Use `taproot --json learn tables --datasource <name> --limit <n>`, `learn joins`, and `learn shapes` to inspect learned schema observations.
+- Use `taproot --json learn refresh-schema --datasource <name>` when learned schema is empty or stale and TapRoot needs to refresh metadata itself.
 
 6. Prefer session-backed execution for repeated Teleport-style access.
 - Use `taproot --json daemon start` and `taproot --json session open ...` when repeated queries are expected and the datasource uses session-backed access.
@@ -74,7 +77,8 @@ Use TapRoot as the canonical DB/operator path.
 - `OVERLOADED`: daemon query queue is full. Wait and retry, or use direct CLI mode with `TAPROOT_FORCE_DIRECT=1`.
 - `SESSION_BUSY`: the per-session concurrent lease cap is exceeded. Wait for in-flight queries to finish, or open a new session.
 - `DETERMINISTIC_REQUIRED`: require a deterministic path from datasource profile or KB, or a config/CLI setting that explicitly enables discovery for that environment.
-- `DISCOVERY_UNAVAILABLE`: bypass the daemon and use direct CLI mode when explicit discovery is required.
+- `DISCOVERY_UNAVAILABLE`: populate deterministic routing through datasource profiles, KB, or prior TapRoot learning before retrying.
+- `MISCONFIGURED_DATASOURCE`: the datasource profile conflicts with stronger KB-backed routing and should be repaired before query execution.
 
 ## First Successful Query (Happy Path)
 ```bash

@@ -25,6 +25,7 @@ export function classifyExitCode(input: unknown): number {
   if (upper.startsWith('AUTH_EXPIRED:')) return EXIT_CODES.AUTH;
   if (upper.startsWith('ACCESS_DENIED:')) return EXIT_CODES.ACCESS_DENIED;
   if (upper.startsWith('UNKNOWN_TARGET:')) return EXIT_CODES.UNKNOWN_TARGET;
+  if (upper.startsWith('MISCONFIGURED_DATASOURCE:')) return EXIT_CODES.BAD_INPUT;
   if (upper.startsWith('DETERMINISTIC_REQUIRED:')) return EXIT_CODES.BAD_INPUT;
   if (upper.startsWith('DISCOVERY_UNAVAILABLE:')) return EXIT_CODES.BAD_INPUT;
   return EXIT_CODES.GENERAL_ERROR;
@@ -40,6 +41,8 @@ export function exitCodeForClass(code: string): number {
       return EXIT_CODES.ACCESS_DENIED;
     case 'UNKNOWN_TARGET':
       return EXIT_CODES.UNKNOWN_TARGET;
+    case 'MISCONFIGURED_DATASOURCE':
+      return EXIT_CODES.BAD_INPUT;
     default:
       return EXIT_CODES.GENERAL_ERROR;
   }

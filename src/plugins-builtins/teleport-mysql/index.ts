@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
 import { nowIso } from '../../core/time.js';
@@ -45,52 +45,6 @@ function removeSessionProxy(sessionId: string, key: string): void {
   if (!set.size) proxyKeyBySession.delete(sessionId);
 }
 
-function runDbExec(query: string, target: string, dbUser: string, dbName: string): { status: number; stdout: string; stderr: string } {
-  const escapedQuery = query.replace(/'/g, "'\\''");
-  const cmd = `tsh db exec '${escapedQuery}' --db-user ${dbUser} --db-name ${dbName} --dbs ${target} --no-confirm`;
-  const proc = spawnSync('/bin/zsh', ['-lc', cmd], { encoding: 'utf8' });
-  return {
-    status: proc.status || 0,
-    stdout: String(proc.stdout || ''),
-    stderr: String(proc.stderr || ''),
-  };
-}
-
-const NOISE_PREFIXES = [
-  'Fetching databases by name',
-  'Executing command for',
-  'mysql: [Warning] Using a password on the command line interface can be insecure.',
-];
-
-function cleanLines(text: string): string[] {
-  return text
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s && !NOISE_PREFIXES.some((p) => s.startsWith(p)));
-}
-
-function parseTabbedOutput(text: string): { columns: string[]; rows: Array<Record<string, unknown>> } {
-  const lines = cleanLines(text);
-  const tabLines = lines.filter((l) => l.includes('\t'));
-  if (!tabLines.length && lines.length >= 2) {
-    const header = lines[0];
-    const rows = lines.slice(1).map((value) => ({ [header]: value }));
-    return { columns: [header], rows };
-  }
-  if (!tabLines.length) return { columns: [], rows: [] };
-  const headers = tabLines[0].split('\t');
-  const rows = tabLines.slice(1).map((line) => {
-    const parts = line.split('\t');
-    const row: Record<string, unknown> = {};
-    headers.forEach((h, i) => {
-      row[h] = parts[i] ?? '';
-    });
-    return row;
-  });
-  return { columns: headers, rows };
-}
-
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = net.createServer();
@@ -110,9 +64,11 @@ async function getFreePort(): Promise<number> {
   });
 }
 
-async function waitForTcpReady(host: string, port: number, timeoutMs: number): Promise<void> {
+async function waitForTcpReady(host: string, port: number, timeoutMs: number, shouldAbort?: () => string): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
+    const abortReason = shouldAbort?.();
+    if (abortReason) throw new Error(abortReason);
     const ok = await new Promise<boolean>((resolve) => {
       const socket = net.createConnection({ host, port });
       let settled = false;
@@ -189,11 +145,15 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
   const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', dbUser, '--db-name', dbName, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
+  let spawnError = '';
   proc.stderr.on('data', (chunk) => {
     stderr += String(chunk);
   });
   proc.stdout.on('data', () => {
     // ignore
+  });
+  proc.once('error', (error) => {
+    spawnError = String((error as Error)?.message || error || '');
   });
 
   const runtime: ProxyRuntime = {
@@ -210,14 +170,15 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
   markSessionProxy(sessionId, key);
 
   try {
-    await waitForTcpReady('127.0.0.1', port, 10000);
+    await waitForTcpReady('127.0.0.1', port, 10000, () => (spawnError ? `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}` : ''));
     return runtime;
   } catch (error) {
     await stopProxy(runtime);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
+    if (spawnError) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`);
     const detail = stderr.trim();
-    if (detail) throw new Error(detail);
+    if (detail) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
     throw error;
   }
 }
@@ -239,14 +200,24 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     if (!target || !dbUser || !dbName) {
       return [{ check: 'teleport-mysql doctor', status: 'fail', detail: 'missing target/dbUser/database in datasource+credentials' }];
     }
-    const proc = runDbExec('SELECT 1 AS ok', target, dbUser, dbName);
-    return [
-      {
-        check: 'teleport-mysql query',
-        status: proc.status === 0 ? 'ok' : 'fail',
-        detail: (proc.status === 0 ? proc.stdout : proc.stderr || proc.stdout || '').trim().slice(0, 400) || 'done',
-      },
-    ];
+    const sessionId = `doctor-${process.pid}-${Date.now()}`;
+    try {
+      const proxy = await ensureProxy(sessionId, String(target), String(dbUser), String(dbName));
+      const conn = await mysql.createConnection({
+        host: '127.0.0.1',
+        port: proxy.port,
+        user: String(dbUser),
+        password: input.credentials.password,
+        database: String(dbName),
+      });
+      await conn.query('SELECT 1 AS ok');
+      await conn.end();
+      return [{ check: 'teleport-mysql query', status: 'ok', detail: 'connection and read query succeeded' }];
+    } catch (error) {
+      return [{ check: 'teleport-mysql query', status: 'fail', detail: (error as Error).message }];
+    } finally {
+      await closeTeleportMysqlSessionProxies(sessionId);
+    }
   },
 
   async execute(request, creds): Promise<QueryResult> {
@@ -261,9 +232,10 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     }
 
     const warnings: string[] = [];
+    const effectiveSessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
+    const shouldCleanup = !sessionId;
     try {
-      if (!sessionId) throw new Error('missing daemon session id for teleport proxy');
-      const proxy = await ensureProxy(sessionId, String(target), String(dbUser), String(dbName));
+      const proxy = await ensureProxy(effectiveSessionId, String(target), String(dbUser), String(dbName));
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
@@ -287,24 +259,11 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         classification: 'success',
       };
     } catch (proxyError) {
-      // fallback path for compatibility and diagnostics
-      const proc = runDbExec(request.query, String(target), String(dbUser), String(dbName));
-      if (proc.status !== 0) {
-        throw new Error((proc.stderr || proc.stdout || '').trim() || `tsh db exec failed (${proc.status})`);
+      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
+    } finally {
+      if (shouldCleanup) {
+        await closeTeleportMysqlSessionProxies(effectiveSessionId);
       }
-      const parsed = parseTabbedOutput(proc.stdout);
-      warnings.push('teleport proxy path unavailable; used tsh db exec fallback');
-      return {
-        runId: '',
-        datasource: request.datasource.name,
-        plugin: 'teleport-mysql',
-        capability: request.capability,
-        query: { native: request.query },
-        result: parsed,
-        timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
-        warnings,
-        classification: 'success',
-      };
     }
   },
 };

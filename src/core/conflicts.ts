@@ -27,3 +27,29 @@ export function datasourceKbConflicts(datasource: DatasourceProfile, kb: Record<
   }
   return conflicts;
 }
+
+export function criticalDatasourceKbConflicts(datasource: DatasourceProfile, kb: Record<string, unknown>): string[] {
+  const conflicts = datasourceKbConflicts(datasource, kb);
+  if (!conflicts.length) return [];
+
+  const accessMethod = String(kb.access_method || '').toLowerCase();
+  const critical: string[] = [];
+
+  if (accessMethod === 'tsh') {
+    if (datasource.kind !== 'teleport-mysql') critical.push(...conflicts.filter((c) => c.startsWith('kind=')));
+    if (String(datasource.connection.host || '').trim()) critical.push(...conflicts.filter((c) => c.startsWith('host=')));
+    if (String(datasource.connection.port || '').trim()) critical.push(...conflicts.filter((c) => c.startsWith('port=')));
+    if (!String(datasource.connection.target || '').trim()) critical.push('target missing (kb requires teleport target)');
+    if (String(datasource.connection.target || '').trim() && String(kb.target || '').trim() && String(datasource.connection.target || '').trim() !== String(kb.target || '').trim()) {
+      critical.push(...conflicts.filter((c) => c.startsWith('target=')));
+    }
+  }
+
+  if (accessMethod === 'qa-portforward') {
+    const host = String(datasource.connection.host || '').trim();
+    if (host && host !== '127.0.0.1' && host !== 'localhost') critical.push(...conflicts.filter((c) => c.startsWith('host=')));
+    if (datasource.kind === 'teleport-mysql') critical.push(...conflicts.filter((c) => c.startsWith('kind=')));
+  }
+
+  return Array.from(new Set(critical));
+}

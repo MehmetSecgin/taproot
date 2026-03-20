@@ -55,17 +55,7 @@ export function discoverKubernetesTargets(namespace: string, service: string, en
 }
 
 export function discoverTeleportTargets(service: string, env: string, policy: EnvironmentPolicy): string[] {
-  const out = runJson('tsh', ['db', 'ls', '--format', 'json']);
-  if (out.status !== 0) return [];
-  try {
-    const rows = JSON.parse(out.stdout) as Array<Record<string, any>>;
-    const names = rows
-      .map((row) => String(row?.metadata?.name || '').trim())
-      .filter(Boolean);
-    return sortTargets(names, service, env, policy);
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 export function inferDatabaseCandidates(service: string, explicit?: string): string[] {

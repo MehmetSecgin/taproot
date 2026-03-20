@@ -5,7 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
-import { datasourceKbConflicts } from '../core/conflicts.js';
+import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import { enforceMutationPolicy } from '../core/safety.js';
@@ -15,6 +15,7 @@ import type { RpcRequest, RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
+import { bootstrapDatasource } from '../core/bootstrap.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -177,7 +178,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 throw new Error('DISCOVERY_UNAVAILABLE: discovery mode is only available in direct CLI mode when daemon is bypassed.');
               }
               let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
-              if (!datasource && env && service) datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+              let resolutionSource: 'explicit' | 'store' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
+              if (!datasource && env && service) {
+                datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+                if (datasource) resolutionSource = 'store';
+              }
+              if (!datasource && env && service) {
+                const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || `${env}-${service}`);
+                if (bootstrapped) {
+                  datasource = bootstrapped.profile;
+                  resolutionSource = 'kb';
+                }
+              }
               if (!datasource) {
                 if (policy.deterministicRequired) {
                   throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
@@ -194,6 +206,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 if (env && service) {
                   const kb = ctx.kbStore.resolveConnection(service, env);
                   if (kb) {
+                    const critical = criticalDatasourceKbConflicts(datasource as DatasourceProfile, kb);
+                    if (critical.length) {
+                      throw new Error(
+                        `MISCONFIGURED_DATASOURCE: datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+                      );
+                    }
                     const conflicts = datasourceKbConflicts(datasource as DatasourceProfile, kb);
                     if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
                   }
@@ -261,7 +279,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   execCreds,
                 );
                 result.resolved = {
-                  source: rawDs ? 'explicit' : 'store',
+                  source: resolutionSource,
                   env,
                   service,
                   accessMethod: String(ctx.kbStore.resolveConnection(service, env)?.access_method || ''),
