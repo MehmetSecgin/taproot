@@ -31,6 +31,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       checks: snapshot.checks,
       readiness: snapshot.readiness,
       nextActions: snapshot.nextActions,
+      nextActionDetails: snapshot.nextActionDetails,
     };
     if (ctx.jsonMode) printJson(data);
     else printHumanInit(snapshot.checks, snapshot.readiness, snapshot.nextActions);

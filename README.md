@@ -67,6 +67,8 @@ Targeted readiness returns:
 - `readiness`
 - `missing`
 - `nextCommand`
+- `nextActions`
+- `nextActionDetails`
 - `checks`
 - `target`
 
@@ -81,6 +83,8 @@ taproot --json doctor --datasource <name> --connect
 
 - `nextActions`: ordered command strings for compatibility
 - `nextActionDetails`: structured remediation entries with `command`, `priority`, `checks`, `codes`, and `reasons`
+
+`init --json` and `self-check --agent --json` now expose the same `nextActionDetails` shape for readiness/setup guidance, while keeping `nextActions` and `nextCommand` for compatibility.
 
 ## OpenVPN + Teleport setup
 ```bash
@@ -131,6 +135,7 @@ Expected structure:
 - `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.
 - `taproot self-check --agent` is the preferred machine-readable readiness contract, especially with `--datasource` or `--env` + `--service`.
 - `taproot doctor --json` returns structured remediation metadata in `nextActionDetails` in addition to the legacy `nextActions` string list.
+- `taproot init --json` and `taproot self-check --agent --json` now return structured readiness remediation in `nextActionDetails` too.
 - Secrets are never printed and are redacted from JSON output envelopes.
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.

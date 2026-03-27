@@ -146,13 +146,15 @@ export interface DoctorCheck {
   code?: DoctorCheckCode;
 }
 
-export interface DoctorNextAction {
+export interface RemediationAction {
   command: string;
   priority: number;
   reasons: string[];
   checks: string[];
   codes: DoctorCheckCode[];
 }
+
+export type DoctorNextAction = RemediationAction;
 
 export interface TapRootPlugin {
   manifest: PluginManifest;

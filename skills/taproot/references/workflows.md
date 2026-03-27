@@ -24,6 +24,15 @@ taproot --json self-check --agent --datasource <name>
 taproot --json self-check --agent --env <env> --service <service>
 ```
 
+- For `init --json` and `self-check --agent --json`, read both:
+```bash
+# ordered compatibility list
+nextActions
+
+# structured records with command, priority, checks, codes, reasons
+nextActionDetails
+```
+
 - KB-backed datasource create/repair:
 ```bash
 taproot --json init datasource --env <env> --service <service>
@@ -169,6 +178,7 @@ taproot completion fish
   - `meta.requestId`, `meta.sessionId`, `meta.runId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
   - `readiness`, `missing`, `nextCommand`, `target` from `self-check --agent`
+  - `nextActions`, `nextActionDetails` from `init --json` and `self-check --agent --json`
   - `nextActions`, `nextActionDetails` from `doctor --json`
 
 ## Safety

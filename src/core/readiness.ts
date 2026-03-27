@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeService, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
-import type { DatasourceProfile, DoctorCheckCode } from '../types/core.js';
+import type { DatasourceProfile, DoctorCheckCode, RemediationAction } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
 
 export type ReadinessState =
@@ -32,8 +32,57 @@ export interface ReadinessSnapshot {
   checks: ReadinessCheck[];
   readiness: ReadinessState;
   nextActions: string[];
+  nextActionDetails: RemediationAction[];
   target?: {
     datasource: string | null;
+  };
+}
+
+const READINESS_ACTION_PRIORITIES = {
+  kbSetup: 10,
+  init: 20,
+  datasourceRepair: 30,
+  credsRepair: 40,
+  connectorSetup: 50,
+  connectorConnect: 60,
+  masterKey: 70,
+  daemonStart: 80,
+} as const;
+
+function dedupeAction(
+  actions: Map<string, RemediationAction>,
+  action: RemediationAction,
+): void {
+  const existing = actions.get(action.command);
+  if (!existing) {
+    actions.set(action.command, action);
+    return;
+  }
+  existing.priority = Math.min(existing.priority, action.priority);
+  for (const reason of action.reasons) {
+    if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+  }
+  for (const check of action.checks) {
+    if (!existing.checks.includes(check)) existing.checks.push(check);
+  }
+  for (const code of action.codes) {
+    if (!existing.codes.includes(code)) existing.codes.push(code);
+  }
+}
+
+function actionForReadiness(input: {
+  command: string;
+  priority: number;
+  reason: string;
+  checks?: string[];
+  codes?: DoctorCheckCode[];
+}): RemediationAction {
+  return {
+    command: input.command,
+    priority: input.priority,
+    reasons: [input.reason],
+    checks: input.checks || [],
+    codes: input.codes || [],
   };
 }
 
@@ -134,69 +183,169 @@ function targetReadiness(
   return 'ready';
 }
 
+export function nextActionDetailsForReadiness(
+  readiness: ReadinessState,
+  input?: { datasource?: DatasourceProfile; target?: ReadinessTargetInput; checks?: ReadinessCheck[] },
+): RemediationAction[] {
+  const actions = new Map<string, RemediationAction>();
+  const relevantChecks = input?.checks || [];
+  const add = (action: RemediationAction) => dedupeAction(actions, action);
+  switch (readiness) {
+    case 'missing_kb':
+      add(
+        actionForReadiness({
+          command: 'taproot --json init',
+          priority: READINESS_ACTION_PRIORITIES.kbSetup,
+          reason: 'TapRoot cannot find the KB, so re-running init after fixing memory-root/KB visibility is the first step.',
+          checks: ['kb_dir'],
+        }),
+      );
+      break;
+    case 'missing_config':
+      add(
+        actionForReadiness({
+          command: 'taproot --json init',
+          priority: READINESS_ACTION_PRIORITIES.init,
+          reason: 'Runtime config is missing, so init needs to create the starter configuration first.',
+          checks: ['config_file'],
+        }),
+      );
+      break;
+    case 'missing_datasource':
+      if (input?.target?.env && input?.target?.service) {
+        add(
+          actionForReadiness({
+            command: `taproot --json init datasource --env ${input.target.env} --service ${input.target.service}`,
+            priority: READINESS_ACTION_PRIORITIES.datasourceRepair,
+            reason: 'The target datasource does not exist yet, so KB-backed datasource creation/repair is the next step.',
+            checks: ['target_datasource'],
+          }),
+        );
+        break;
+      }
+      add(
+        actionForReadiness({
+          command: 'taproot --json datasource add ...',
+          priority: READINESS_ACTION_PRIORITIES.datasourceRepair,
+          reason: 'No datasource profile is available yet, so create one before querying.',
+          checks: ['datasources'],
+        }),
+      );
+      break;
+    case 'missing_creds':
+      if (input?.datasource) {
+        add(
+          actionForReadiness({
+            command: `taproot --json creds set --ref ${input.datasource.credentialRef} --user <user> --password <password>`,
+            priority: READINESS_ACTION_PRIORITIES.credsRepair,
+            reason: 'The target datasource has no stored credentials yet, so credentials need to be added first.',
+            checks: ['target_credentials'],
+          }),
+        );
+        break;
+      }
+      add(
+        actionForReadiness({
+          command: 'taproot --json creds set --ref <ref> --user <user> --password <password>',
+          priority: READINESS_ACTION_PRIORITIES.credsRepair,
+          reason: 'No credentials are stored yet, so add the missing credential ref first.',
+          checks: ['credentials'],
+        }),
+      );
+      break;
+    case 'missing_connector_config':
+      if (input?.datasource) {
+        const missingChecks = relevantChecks.filter((check) => isMissingConnectorConfigCheck(check));
+        add(
+          actionForReadiness({
+            command: connectorSetupCommand(input.datasource, relevantChecks),
+            priority: READINESS_ACTION_PRIORITIES.connectorSetup,
+            reason: 'Connector wiring is incomplete, so connector setup must happen before the datasource can be used.',
+            checks: missingChecks.map((check) => check.check),
+            codes: missingChecks.map((check) => check.code).filter(Boolean) as DoctorCheckCode[],
+          }),
+        );
+        break;
+      }
+      add(
+        actionForReadiness({
+          command: 'taproot connector setup --datasource <name> --connector <name> ...',
+          priority: READINESS_ACTION_PRIORITIES.connectorSetup,
+          reason: 'A required connector is not fully configured yet.',
+        }),
+      );
+      break;
+    case 'blocked_connector_auth':
+      if (input?.datasource) {
+        const blockedChecks = relevantChecks.filter((check) => !isMissingConnectorConfigCheck(check) && check.status !== 'ok');
+        add(
+          actionForReadiness({
+            command: `taproot doctor --datasource ${input.datasource.name} --connect`,
+            priority: READINESS_ACTION_PRIORITIES.connectorConnect,
+            reason: 'Connector auth/status is blocked, so rerunning the connector connect flow is the best next step.',
+            checks: blockedChecks.map((check) => check.check),
+            codes: blockedChecks.map((check) => check.code).filter(Boolean) as DoctorCheckCode[],
+          }),
+        );
+        break;
+      }
+      add(
+        actionForReadiness({
+          command: 'taproot doctor --datasource <name> --connect',
+          priority: READINESS_ACTION_PRIORITIES.connectorConnect,
+          reason: 'Connector auth/status is blocked for this datasource.',
+        }),
+      );
+      break;
+    default:
+      break;
+  }
+  return [...actions.values()].sort((a, b) => a.priority - b.priority || a.command.localeCompare(b.command));
+}
+
 export function nextActionsForReadiness(
   readiness: ReadinessState,
   input?: { datasource?: DatasourceProfile; target?: ReadinessTargetInput; checks?: ReadinessCheck[] },
 ): string[] {
-  switch (readiness) {
-    case 'missing_kb':
-      return [
-        'Set OBSIDIAN_MEMORY_ROOT to a memory root that contains domains/engineering/references/db-kb, then rerun: taproot --json init',
-      ];
-    case 'missing_config':
-      return ['Run: taproot --json init'];
-    case 'missing_datasource':
-      if (input?.target?.env && input?.target?.service) {
-        return [`Create the datasource with taproot --json init datasource --env ${input.target.env} --service ${input.target.service}`];
-      }
-      return ['Create a datasource with taproot --json init datasource --env <env> --service <service> or taproot --json datasource add ...'];
-    case 'missing_creds':
-      if (input?.datasource) {
-        return [`Store credentials with taproot --json creds set --ref ${input.datasource.credentialRef} --user <user> --password <password>`];
-      }
-      return ['Store credentials with taproot --json creds set --ref <ref> --user <user> --password <password>'];
-    case 'missing_connector_config':
-      if (input?.datasource) return [connectorSetupCommand(input.datasource, input.checks || [])];
-      return ['Configure datasource connectors with taproot connector setup --datasource <name> --connector <name> ...'];
-    case 'blocked_connector_auth':
-      if (input?.datasource) return [`Run: taproot doctor --datasource ${input.datasource.name} --connect`];
-      return ['Run: taproot doctor --datasource <name> --connect'];
-    default:
-      return [];
+  return nextActionDetailsForReadiness(readiness, input).map((action) => action.command);
+}
+
+function withSupplementalReadinessActions(
+  actions: RemediationAction[],
+  input: { checks: ReadinessCheck[] },
+): RemediationAction[] {
+  const merged = new Map<string, RemediationAction>();
+  for (const action of actions) dedupeAction(merged, action);
+  if (!process.env.TAPROOT_MASTER_KEY) {
+    dedupeAction(
+      merged,
+      actionForReadiness({
+        command: 'export TAPROOT_MASTER_KEY=<secret>',
+        priority: READINESS_ACTION_PRIORITIES.masterKey,
+        reason: 'A master key is not set, so TapRoot is using the fallback local credential encryption secret.',
+        checks: ['master_key'],
+      }),
+    );
   }
+  if (input.checks.find((check) => check.check === 'daemon')?.status !== 'ok') {
+    dedupeAction(
+      merged,
+      actionForReadiness({
+        command: 'taproot --json daemon start',
+        priority: READINESS_ACTION_PRIORITIES.daemonStart,
+        reason: 'The daemon is not reachable, so start it before session-backed or daemon-assisted workflows.',
+        checks: ['daemon'],
+      }),
+    );
+  }
+  return [...merged.values()].sort((a, b) => a.priority - b.priority || a.command.localeCompare(b.command));
 }
 
 export function nextCommandForReadiness(
   readiness: ReadinessState,
   input?: { datasource?: DatasourceProfile; target?: ReadinessTargetInput; checks?: ReadinessCheck[] },
 ): string | null {
-  switch (readiness) {
-    case 'missing_kb':
-      return 'taproot --json init';
-    case 'missing_config':
-      return 'taproot --json init';
-    case 'missing_datasource':
-      if (input?.target?.env && input?.target?.service) {
-        return `taproot --json init datasource --env ${input.target.env} --service ${input.target.service}`;
-      }
-      if (input?.target?.datasource) return 'taproot --json datasource add ...';
-      return 'taproot --json datasource add ...';
-    case 'missing_creds':
-      if (input?.datasource) {
-        return `taproot --json creds set --ref ${input.datasource.credentialRef} --user <user> --password <password>`;
-      }
-      return 'taproot --json creds set --ref <ref> --user <user> --password <password>';
-    case 'missing_connector_config':
-      if (input?.datasource) {
-        return connectorSetupCommand(input.datasource, input.checks || []);
-      }
-      return 'taproot connector setup --datasource <name> --connector <name> ...';
-    case 'blocked_connector_auth':
-      if (input?.datasource) return `taproot doctor --datasource ${input.datasource.name} --connect`;
-      return 'taproot doctor --datasource <name> --connect';
-    default:
-      return null;
-  }
+  return nextActionDetailsForReadiness(readiness, input)[0]?.command || null;
 }
 
 async function resolveTargetDatasource(ctx: AppContext, target: ReadinessTargetInput): Promise<DatasourceProfile | undefined> {
@@ -285,20 +434,19 @@ export async function collectReadinessSnapshot(
   const readiness = normalizedTarget
     ? targetReadiness(checks, targetDatasource, targetCredentialPresent, connectorChecks)
     : computeReadiness(checks);
-  const nextActions = normalizedTarget
-    ? nextActionsForReadiness(readiness, { datasource: targetDatasource, target: normalizedTarget, checks })
-    : nextActionsForReadiness(readiness);
-  if (!process.env.TAPROOT_MASTER_KEY) {
-    nextActions.push('Set TAPROOT_MASTER_KEY to avoid using the fallback credential encryption secret');
-  }
-  if (checks.find((check) => check.check === 'daemon')?.status !== 'ok') {
-    nextActions.push('Start the daemon with: taproot --json daemon start');
-  }
+  const nextActionDetails = withSupplementalReadinessActions(
+    normalizedTarget
+      ? nextActionDetailsForReadiness(readiness, { datasource: targetDatasource, target: normalizedTarget, checks })
+      : nextActionDetailsForReadiness(readiness),
+    { checks },
+  );
+  const nextActions = nextActionDetails.map((action) => action.command);
 
   return {
     checks,
     readiness,
     nextActions,
+    nextActionDetails,
     ...(normalizedTarget ? { target: { datasource: targetDatasource?.name || null } } : {}),
   };
 }

@@ -135,6 +135,14 @@ describe('init command', () => {
     expect(Array.isArray(parsed.checks)).toBe(true);
     expect(typeof parsed.readiness).toBe('string');
     expect(Array.isArray(parsed.nextActions)).toBe(true);
+    expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
+    expect(parsed.nextActionDetails[0]).toMatchObject({
+      command: expect.any(String),
+      priority: expect.any(Number),
+      reasons: expect.any(Array),
+      checks: expect.any(Array),
+      codes: expect.any(Array),
+    });
   });
 
   it('creates datasource profile from KB', () => {
@@ -303,6 +311,8 @@ describe('init command', () => {
     expect(typeof parsed.readiness).toBe('string');
     expect(parsed).toHaveProperty('missing');
     expect(parsed).toHaveProperty('nextCommand');
+    expect(Array.isArray(parsed.nextActions)).toBe(true);
+    expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
   });
 
   it('returns missing_connector_config for targeted self-check when connector wiring is incomplete', () => {
@@ -350,6 +360,12 @@ describe('init command', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe(
       'connector_status_command_missing',
     );
+    expect(parsed.nextActionDetails[0]).toMatchObject({
+      command: expect.stringContaining('taproot connector setup --datasource qa-orders --connector kubectl-portforward'),
+      priority: 50,
+      checks: ['kubectl-portforward status'],
+      codes: ['connector_status_command_missing'],
+    });
     expect(parsed.nextCommand).toContain('taproot connector setup --datasource qa-orders --connector kubectl-portforward');
   });
 
@@ -401,6 +417,12 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.readiness).toBe('blocked_connector_auth');
     expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');
+    expect(parsed.nextActionDetails[0]).toMatchObject({
+      command: 'taproot doctor --datasource qa-orders --connect',
+      priority: 60,
+      checks: expect.arrayContaining(['openvpn status']),
+      codes: expect.arrayContaining(['connector_status_blocked']),
+    });
     expect(parsed.nextCommand).toBe('taproot doctor --datasource qa-orders --connect');
   });
 

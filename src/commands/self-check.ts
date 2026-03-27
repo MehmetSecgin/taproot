@@ -29,11 +29,15 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
         const data = {
           readiness: snapshot.readiness,
           missing: snapshot.readiness === 'ready' ? null : snapshot.readiness,
-          nextCommand: nextCommandForReadiness(snapshot.readiness, {
-            ...(snapshot.target?.datasource ? { datasource: ctx.datasourceStore.get(snapshot.target.datasource) } : {}),
-            ...(target ? { target } : {}),
-            checks: snapshot.checks,
-          }),
+          nextCommand:
+            snapshot.nextActionDetails[0]?.command ||
+            nextCommandForReadiness(snapshot.readiness, {
+              ...(snapshot.target?.datasource ? { datasource: ctx.datasourceStore.get(snapshot.target.datasource) } : {}),
+              ...(target ? { target } : {}),
+              checks: snapshot.checks,
+            }),
+          nextActions: snapshot.nextActions,
+          nextActionDetails: snapshot.nextActionDetails,
           checks: snapshot.checks,
           ...(snapshot.target ? { target: snapshot.target } : {}),
         };

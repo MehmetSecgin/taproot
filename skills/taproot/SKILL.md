@@ -23,6 +23,7 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot --json init` at the start of a new machine or repo setup to create starter runtime state and get the current readiness summary.
 - Use `taproot --json self-check --agent` for machine-readable readiness, and prefer targeted runs with `--datasource <name>` or `--env <env> --service <service>` when checking a real query path.
 - Use `taproot --json init datasource --env <env> --service <service>` as the explicit KB-backed create/repair path for datasource profiles.
+- Treat `nextActionDetails` as the preferred remediation contract in `init --json`, `self-check --agent --json`, and `doctor --json`; keep `nextActions` and `nextCommand` only for compatibility.
 - Use `taproot --json creds set --ref <ref> --user <u> --password <p>` to store credentials, or add connector-specific keys such as `--status-command`, `--connect-command`, `--disconnect-command`, and `--login-command`.
 - Use `taproot --json creds show --ref <ref>` to verify a credential ref. Sensitive values are redacted.
 - Use `taproot --json creds unset --ref <ref>` only when the user explicitly wants to remove a saved credential ref.
@@ -41,7 +42,7 @@ Use TapRoot as the canonical DB/operator path.
 
 2. Preflight connectors and auth.
 - Run `taproot --json doctor --datasource <name> --connect` only when connector or auth state is the task, or when the previous query attempt failed for connectivity/auth reasons.
-- If doctor returns failures, stop and surface `checks`, `nextActions`, and `nextActionDetails`.
+- If readiness or doctor returns failures, stop and surface `checks`, `nextActions`, and `nextActionDetails`.
 - If TapRoot is blocked by routing, proxy, or learning gaps, stop and report the issue instead of using direct shell DB tools.
 
 3. Execute the query path.
@@ -84,6 +85,7 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot --json init` for first-run bootstrap and a top-level readiness summary.
 - Use `taproot --json self-check` to validate the runtime environment before debugging higher-level failures.
 - Use `taproot --json self-check --agent --datasource <name>` or `--env <env> --service <service>` when you need a machine-readable answer about whether a specific query path is ready.
+- Read `nextActionDetails` first from `init --json` and `self-check --agent --json`; `nextCommand` should match the highest-priority action.
 - Use `taproot --json sanitize check-repo` before committing or sharing the repo to scan tracked files for leaked secrets.
 - Use `taproot completion zsh` or `taproot completion bash` / `fish` to inspect or install shell completion output.
 

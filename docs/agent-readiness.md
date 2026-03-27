@@ -140,7 +140,7 @@ The remaining improvement area is guided setup when KB is incomplete:
 
 It also supports target-aware runs with `--datasource` or `--env` + `--service`, which is the preferred contract for agents checking a real query path.
 
-The main remaining gap is that readiness/init still expose string next actions, while `doctor --json` now has a richer structured remediation contract.
+The main remaining gap is no longer action structure. `init --json`, `self-check --agent --json`, and `doctor --json` now all expose structured remediation metadata. The remaining gap is making that contract fully consistent across every setup/readiness path.
 
 ### 4. Add An Agent-Facing Readiness Mode
 
@@ -159,7 +159,7 @@ This should answer:
 - what is missing?
 - what exact next command should I run?
 
-The next improvement is to promote readiness/init next actions to the same structured metadata shape that `doctor --json` now returns.
+The next improvement is to keep the remediation contract aligned across every agent-facing path and reduce the remaining differences between top-level readiness and target-aware diagnosis.
 
 ### 5. Make KB Dependency More Explicit
 
@@ -238,6 +238,6 @@ The highest-leverage next step is not more command coverage. It is first-run orc
 - initialize
 - detect readiness
 - guide missing setup
-- make the result fully machine-readable across `init`, `self-check --agent`, and `doctor`
+- keep the result fully machine-readable and consistent across `init`, `self-check --agent`, and `doctor`
 
 That is the fastest path to making the TapRoot skill sufficient as the only context an agent needs.
