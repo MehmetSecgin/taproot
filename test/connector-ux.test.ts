@@ -97,11 +97,67 @@ describe('connector UX', () => {
   });
 
   it('doctor emits connector setup next-action hints for missing connector config', () => {
-    const { env } = setupStateRoot();
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-connector-missing-'));
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'qa-kpf',
+          kind: 'mysql',
+          env: 'qa',
+          service: 'demo',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 3306, database: 'demo' },
+          credentialRef: 'qa:demo',
+          connectors: ['kubectl-portforward'],
+          resolverHints: {},
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    const out = runCli(['--json', 'doctor', '--datasource', 'qa-kpf'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-master-key',
+    });
     expect(out.status).not.toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.nextActions)).toBe(true);
-    expect(parsed.nextActions.join('\n')).toContain('taproot doctor --datasource qa-demo --connect');
+    expect(parsed.nextActions.join('\n')).toContain(
+      'taproot connector setup --datasource qa-kpf --connector kubectl-portforward --status-command',
+    );
+    expect(parsed.nextActionDetails[0]).toMatchObject({
+      command: expect.stringContaining('taproot connector setup --datasource qa-kpf --connector kubectl-portforward'),
+      priority: 10,
+      checks: ['kubectl-portforward status'],
+      codes: ['connector_status_command_missing'],
+    });
+  });
+
+  it('doctor returns machine-readable connector codes for blocked status checks', () => {
+    const { env } = setupStateRoot();
+    const setupOut = runCli(
+      [
+        'connector',
+        'setup',
+        '--datasource',
+        'qa-demo',
+        '--connector',
+        'openvpn',
+        '--status-command',
+        'false',
+        '--connect-command',
+        'true',
+      ],
+      env,
+    );
+    expect(setupOut.status).toBe(0);
+    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
+    expect(out.status).not.toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');
   });
 });

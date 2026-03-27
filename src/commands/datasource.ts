@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeService } from '../core/app.js';
+import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson } from '../core/output.js';
 
@@ -122,7 +123,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   ds.command('resolve')
     .requiredOption('--env <env>')
     .requiredOption('--service <service>')
-    .action((opts) => {
+    .action(async (opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service);
@@ -147,26 +148,10 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const kb = ctx.kbStore.resolveConnection(service, opts.env);
       if (!kb) throw new Error(`No datasource profile found for env=${opts.env} service=${service}`);
       const name = defaultDatasourceName(opts.env, service);
-      const profile = {
-        name,
-        kind: String(kb.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql',
-        env: opts.env,
-        service,
-        tags: ['kb-derived'],
-        connection: {
-          host: kb.host as string | undefined,
-          port: kb.port as number | undefined,
-          database: kb.database as string | undefined,
-          target: kb.target as string | undefined,
-        },
-        credentialRef: `${opts.env}:${service}`,
-        connectors: [],
-        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: {},
-        updatedAt: nowIso(),
+      const profile = await saveKbBootstrapCandidate(ctx, opts.env, service, name, kb, {
         confidence: 0.85,
-      };
-      ctx.datasourceStore.save(profile as any);
+      });
+      if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env} service=${service}`);
       if (ctx.jsonMode) printJson({ source: 'kb', profile });
       else {
         console.log(`source: kb`);

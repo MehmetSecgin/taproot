@@ -7,11 +7,12 @@ import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/co
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
-import { bootstrapDatasource, ensureCredentialDefaults } from '../core/bootstrap.js';
+import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { printJson, renderTable } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy } from '../core/safety.js';
-import { nowIso } from '../core/time.js';
+import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import { rpcCall } from '../daemon/client.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
@@ -84,8 +85,14 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'allow non-deterministic datasource discovery', false)
     .option('--allow-mutate', 'allow mutating query', false)
+    .option(
+      '--timeout-ms <ms>',
+      `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
+      String(RUNTIME_CONSTANTS.query.defaultTimeoutMs),
+    )
     .action(async (opts) => {
       const ctx = getCtx();
+      const timeoutMs = parseTimeoutMs(opts.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const alias = parseDatasourceAlias(opts.datasource, aliases);
       const env = String(opts.env || alias?.env || '').trim();
@@ -110,6 +117,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (!forceDirect) {
           try {
             const rpc = await rpcCall({
+              timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, timeoutMs + 1000),
               method: 'query.execute',
               params: {
                 datasource: opts.datasource,
@@ -120,6 +128,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 query: opts.query,
                 allowDiscovery,
                 allowMutate: Boolean(opts.allowMutate),
+                timeoutMs,
                 param: opts.param || [],
               },
             });
@@ -207,16 +216,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
         }
       }
-      if (
-        datasource &&
-        env &&
-        service &&
-        datasource.name === (opts.datasource || datasource.name) &&
-        Array.isArray((datasource as any).tags) &&
-        (datasource as any).tags.includes('auto-bootstrap')
-      ) {
-        datasource = (await bootstrapDatasource(ctx, env, service, datasource.name))?.profile;
-      }
       if (!datasource && env && service && allowDiscovery) {
         const kb = ctx.kbStore.resolveConnection(service, env);
         const kbAccessMethod = String(kb?.access_method || '').trim().toLowerCase();
@@ -229,45 +228,28 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           const database = String(kb?.database || inferDatabaseCandidates(service)[0] || '');
           const dbUser = String(kb?.db_user || '');
           const accessMethod = accessMethods[0] || kbAccessMethod;
-          const credentialRef = `${env}:${service}`;
+          const syntheticKb = {
+            access_method: accessMethod,
+            engine,
+            database,
+            db_user: dbUser,
+            target,
+            namespace,
+            ...(kb || {}),
+          };
           if (accessMethod === 'tsh') {
-            await ensureCredentialDefaults(ctx, credentialRef, { dbUser });
-            await ensureCredentialDefaults(ctx, `tsh:${env}`, { statusCommand: 'tsh status' });
-            datasource = ctx.datasourceStore.save({
-              name: opts.datasource || `${env}-${service}`,
-              kind: 'teleport-mysql',
-              env,
-              service,
+            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || `${env}-${service}`, syntheticKb, {
+              targetOverride: target,
               tags: ['discovery-derived'],
-              connection: { target, database },
-              credentialRef,
-              connectors: ['teleport'],
-              policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-              resolverHints: { teleportCredentialRef: `tsh:${env}` },
-              updatedAt: nowIso(),
               confidence: 0.6,
-            } as any);
+            });
             resolutionSource = 'kb';
           } else if (accessMethod === 'qa-portforward') {
-            const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
-            const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
-            const connectCommand = `${statusCommand} || (svc_port=$(kubectl -n ${namespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl -n ${namespace} port-forward svc/${target} ${localPort}:$svc_port >/tmp/taproot-pf-${env}-${service}.log 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
-            await ensureCredentialDefaults(ctx, credentialRef, { user: dbUser || 'root' });
-            await ensureCredentialDefaults(ctx, `kpf:${env}:${service}`, { statusCommand, connectCommand }, true);
-            datasource = ctx.datasourceStore.save({
-              name: opts.datasource || `${env}-${service}`,
-              kind: engine.includes('postgres') ? 'postgres' : 'mysql',
-              env,
-              service,
+            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || `${env}-${service}`, syntheticKb, {
+              targetOverride: target,
               tags: ['discovery-derived'],
-              connection: { host: '127.0.0.1', port: localPort, database },
-              credentialRef,
-              connectors: ['kubectl-portforward'],
-              policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-              resolverHints: { 'kubectl-portforwardCredentialRef': `kpf:${env}:${service}` },
-              updatedAt: nowIso(),
               confidence: 0.6,
-            } as any);
+            });
             resolutionSource = 'kb';
           }
         }
@@ -319,6 +301,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const capability = opts.allowMutate ? 'executeMutate' : 'executeRead';
       const plugin = ctx.pluginRegistry.get(datasource.kind);
       if (!plugin?.execute) throw new Error(`No execute-capable plugin for datasource kind '${datasource.kind}'.`);
+      const execute = plugin.execute;
       if (!plugin.manifest.capabilities.includes(capability as any)) {
         throw new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`);
       }
@@ -342,14 +325,19 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         progress.update(`executing query via ${plugin.manifest.name}`);
         let result;
         try {
-          result = await plugin.execute(
-            {
-              datasource: datasource as any,
-              query,
-              capability: capability as any,
-            },
-            creds,
-          );
+          result = await withQueryTimeout({
+            timeoutMs,
+            run: () =>
+              execute(
+                {
+                  datasource: datasource as any,
+                  query,
+                  capability: capability as any,
+                  timeoutMs,
+                },
+                creds,
+              ),
+          });
         } catch (err) {
           const message = (err as Error).message || '';
           const code = classifyError(message);
@@ -368,14 +356,19 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           creds = { ...creds, password };
           await ctx.credentialStore.set(datasource.credentialRef, creds);
           progress.update('retrying query');
-          result = await plugin.execute(
-            {
-              datasource: datasource as any,
-              query,
-              capability: capability as any,
-            },
-            creds,
-          );
+          result = await withQueryTimeout({
+            timeoutMs,
+            run: () =>
+              execute(
+                {
+                  datasource: datasource as any,
+                  query,
+                  capability: capability as any,
+                  timeoutMs,
+                },
+                creds,
+              ),
+          });
         }
         result.runId = artifacts.runId;
         writeRunSummary(artifacts.runDir, result);

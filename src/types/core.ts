@@ -122,10 +122,36 @@ export interface QueryResult {
 
 export type SchemaProvenance = 'observed-query' | 'refreshed-metadata' | 'manual';
 
+export type DoctorCheckCode =
+  | 'connector_plugin_missing'
+  | 'connector_mode_unsupported'
+  | 'connector_status_command_missing'
+  | 'connector_connect_command_missing'
+  | 'connector_disconnect_command_missing'
+  | 'connector_login_command_missing'
+  | 'connector_status_blocked'
+  | 'connector_connect_blocked'
+  | 'connector_disconnect_blocked'
+  | 'executor_configuration_missing'
+  | 'executor_connectivity'
+  | 'executor_access_denied'
+  | 'executor_auth_expired'
+  | 'executor_unknown_target'
+  | 'executor_query_timeout';
+
 export interface DoctorCheck {
   check: string;
   status: 'ok' | 'warn' | 'fail';
   detail: string;
+  code?: DoctorCheckCode;
+}
+
+export interface DoctorNextAction {
+  command: string;
+  priority: number;
+  reasons: string[];
+  checks: string[];
+  codes: DoctorCheckCode[];
 }
 
 export interface TapRootPlugin {

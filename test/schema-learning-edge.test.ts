@@ -85,6 +85,14 @@ describe('schema learning edge cases', () => {
     expect(shape.tables.map((row) => row.table).sort()).toEqual(['customers', 'orders']);
   });
 
+  it('ignores cte names as physical tables', () => {
+    const shape = extractQueryShape(
+      'WITH recent AS (SELECT id FROM users) SELECT * FROM recent JOIN orders o ON o.user_id = recent.id',
+    );
+    expect(shape.tables.map((row) => row.table).sort()).toEqual(['orders', 'users']);
+    expect(shape.tables.map((row) => row.table)).not.toContain('recent');
+  });
+
   it('handles SHOW/DESCRIBE/EXPLAIN prefixes', () => {
     expect(extractQueryShape('SHOW TABLES').operation).toBe('show');
     expect(extractQueryShape('DESCRIBE users').operation).toBe('describe');

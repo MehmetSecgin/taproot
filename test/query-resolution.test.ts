@@ -50,6 +50,7 @@ function setupState(input?: {
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(path.join(kbDir, 'services.json'), JSON.stringify(input?.kbServices || []));
   return {
+    stateRoot,
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
@@ -106,6 +107,54 @@ describe('query resolution', () => {
     const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--query', 'SELECT 1', '--allow-discovery'], env);
     expect(out.status).toBe(1);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+  });
+
+  it('allow-discovery reuses canonical bootstrap shape for KB-backed discovery targets', () => {
+    const { env, stateRoot } = setupState({
+      datasources: [],
+      kbServices: [
+        {
+          service: 'orders',
+          connections: [
+            {
+              env: 'prod',
+              engine: 'mysql',
+              database: 'orders',
+              db_user: 'reader',
+              access_method: 'tsh',
+              target: 'orders-tidb',
+              status: 'active',
+              verified_at_utc: '2026-03-01T00:00:00Z',
+            },
+          ],
+        },
+      ],
+    });
+    const out = runCli(['query', '--env', 'prod', '--service', 'orders', '--allow-discovery'], {
+      ...env,
+      PATH: '',
+    });
+    expect(out.status).not.toBe(0);
+
+    const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
+    expect(datasources).toHaveLength(1);
+    expect(datasources[0]).toMatchObject({
+      name: 'prod-orders',
+      kind: 'teleport-mysql',
+      env: 'prod',
+      service: 'orders',
+      tags: ['auto-bootstrap', 'kb-derived'],
+      connection: {
+        database: 'orders',
+        target: 'orders-tidb',
+      },
+      credentialRef: 'prod:orders',
+      connectors: ['openvpn', 'teleport'],
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        teleportCredentialRef: 'tsh:prod',
+      },
+    });
   });
 
   it('intent resolves from template store', () => {

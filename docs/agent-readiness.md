@@ -72,11 +72,11 @@ For a user or agent to succeed on day one, the current setup is usually:
 
 ### What Still Feels Heavy
 
-- There is no single first-run command that prepares the environment.
-- `self-check` reports raw checks but not a clear readiness state.
+- `taproot init` improves first-run setup, but connector/auth wiring is still the heavier part of getting a machine query-ready.
+- `self-check --agent` now reports readiness states, but the most useful checks are target-aware runs against a specific datasource or env/service.
 - KB availability is assumed rather than guided.
 - Credential and connector setup is still fairly manual.
-- The agent has to infer whether the machine is actually query-ready.
+- The agent still needs targeted connector/auth checks to know whether a specific datasource is actually query-ready.
 
 ## Current Agent-Readiness Assessment
 
@@ -97,53 +97,56 @@ In that case, the TapRoot skill is likely enough for an agent to operate success
 
 TapRoot is not yet agent-ready on a fresh machine.
 
-The gap is not command surface coverage. The gap is install/setup orchestration and machine-readability of readiness.
+The gap is no longer basic command surface coverage. The remaining gap is first-run orchestration plus connector/auth readiness for the specific datasource an agent wants to use.
 
 ## Recommendations
 
-### 1. Add `taproot init`
+### 1. Keep `taproot init` As The First Entry Point
 
-Add a real first-run initializer that:
+`taproot init` now covers the basic first-run bootstrap:
 
-- creates state directories
-- writes a starter `deterministic-config.json` if missing
+- creates required local state
+- writes a starter `deterministic-config.json` when missing
 - checks memory-root and KB visibility
-- warns when `TAPROOT_MASTER_KEY` is unset and TapRoot would use the fallback derived secret
-- explains what is still missing
-- optionally writes example config with empty `environmentPolicies` and `serviceAliases`
+- warns when `TAPROOT_MASTER_KEY` is unset
+- reports what is still missing
 
-This should be the default entrypoint for first install.
+This should remain the default entrypoint for first install.
 
-### 2. Add A Guided Setup Flow
+### 2. Keep Improving Guided Datasource Setup
 
-Add a command such as `taproot setup datasource` or `taproot init datasource` that can:
+`taproot init datasource` now handles KB-backed datasource creation and explicit repair of critically stale datasource profiles.
 
-- create datasource profiles from KB when available
-- prompt for missing topology when KB is incomplete
+The remaining improvement area is guided setup when KB is incomplete:
+
+- prompt for missing topology
 - create or link credential refs
 - wire connector refs
 
-This reduces the number of independent commands an agent must discover and sequence.
+### 3. Extend Targeted Readiness Further
 
-### 3. Make `self-check` Report Readiness States
-
-Extend `self-check` so it reports explicit machine-usable states like:
+`self-check --agent` already reports explicit machine-usable states. The current useful set is:
 
 - `ready`
 - `missing_config`
 - `missing_kb`
 - `missing_datasource`
 - `missing_creds`
-- `missing_connectors`
+- `missing_connector_config`
+- `blocked_connector_auth`
 
-The current check list is useful for humans, but an agent needs a stronger summary contract.
+It also supports target-aware runs with `--datasource` or `--env` + `--service`, which is the preferred contract for agents checking a real query path.
 
 ### 4. Add An Agent-Facing Readiness Mode
 
-Add a mode such as:
+The current agent-facing readiness mode is:
 
 - `taproot --json self-check --agent`
-- or `taproot --json doctor --agent-readiness`
+
+For target-aware readiness, use:
+
+- `taproot --json self-check --agent --datasource <name>`
+- `taproot --json self-check --agent --env <env> --service <service>`
 
 This should answer:
 

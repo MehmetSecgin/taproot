@@ -34,7 +34,7 @@ export const openvpnPlugin: TapRootPlugin = {
   async doctor(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || DEFAULT_STATUS_COMMAND;
     const r = run(statusCommand);
-    return [{ check: 'openvpn status', status: r.ok ? 'ok' : 'warn', detail: r.detail }];
+    return [{ check: 'openvpn status', status: r.ok ? 'ok' : 'warn', detail: r.detail, ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
   },
 
   async connect(input): Promise<DoctorCheck[]> {
@@ -53,14 +53,21 @@ export const openvpnPlugin: TapRootPlugin = {
     }
 
     if (started.ok) {
-      return [{ check: 'openvpn connect', status: 'fail', detail: 'connect command executed but VPN did not report connected state' }];
+      return [
+        {
+          check: 'openvpn connect',
+          status: 'fail',
+          detail: 'connect command executed but VPN did not report connected state',
+          code: 'connector_connect_blocked',
+        },
+      ];
     }
-    return [{ check: 'openvpn connect', status: 'fail', detail: started.detail }];
+    return [{ check: 'openvpn connect', status: 'fail', detail: started.detail, code: 'connector_connect_blocked' }];
   },
 
   async disconnect(input): Promise<DoctorCheck[]> {
     const disconnectCommand = input.credentials.disconnectCommand || DEFAULT_DISCONNECT_COMMAND;
     const r = run(disconnectCommand);
-    return [{ check: 'openvpn disconnect', status: r.ok ? 'ok' : 'fail', detail: r.detail }];
+    return [{ check: 'openvpn disconnect', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_disconnect_blocked' }) }];
   },
 };

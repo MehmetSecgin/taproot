@@ -20,16 +20,23 @@ export const teleportPlugin: TapRootPlugin = {
   async doctor(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || 'tsh status';
     const r = run(statusCommand);
-    return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: r.detail }];
+    return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
   },
 
   async connect(input): Promise<DoctorCheck[]> {
     const loginCommand = input.credentials.loginCommand;
     if (!loginCommand) {
       const check = run(input.credentials.statusCommand || 'tsh status');
-      return [{ check: 'teleport login', status: check.ok ? 'ok' : 'warn', detail: check.ok ? 'session already valid' : 'No loginCommand configured; tsh status failed' }];
+      return [
+        {
+          check: 'teleport login',
+          status: check.ok ? 'ok' : 'warn',
+          detail: check.ok ? 'session already valid' : 'No loginCommand configured; tsh status failed',
+          ...(!check.ok ? { code: 'connector_login_command_missing' } : {}),
+        },
+      ];
     }
     const r = run(loginCommand);
-    return [{ check: 'teleport login', status: r.ok ? 'ok' : 'fail', detail: r.detail }];
+    return [{ check: 'teleport login', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_connect_blocked' }) }];
   },
 };

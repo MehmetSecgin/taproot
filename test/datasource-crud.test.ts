@@ -20,10 +20,17 @@ function setupState() {
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), '{}');
+  const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-datasource-memory-'));
+  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  fs.mkdirSync(kbDir, { recursive: true });
+  fs.writeFileSync(path.join(kbDir, 'services.json'), '[]');
   return {
+    stateRoot,
+    memoryRoot,
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
     },
   };
 }
@@ -95,6 +102,61 @@ describe('datasource CRUD', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.source).toBe('datasource-store');
     expect(parsed.profile.name).toBe('qa-svc');
+  });
+
+  it('datasource resolve from KB saves canonical bootstrap shape', () => {
+    const { env, stateRoot, memoryRoot } = setupState();
+    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    fs.writeFileSync(
+      path.join(kbDir, 'services.json'),
+      JSON.stringify([
+        {
+          service: 'orders',
+          connections: [
+            {
+              env: 'prod',
+              engine: 'mysql',
+              database: 'orders',
+              db_user: 'reader',
+              access_method: 'tsh',
+              target: 'orders-tidb',
+              status: 'active',
+              verified_at_utc: '2026-03-01T00:00:00Z',
+            },
+          ],
+        },
+      ]),
+    );
+
+    const out = runCli(['--json', 'datasource', 'resolve', '--env', 'prod', '--service', 'orders'], env);
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.source).toBe('kb');
+    expect(parsed.profile).toMatchObject({
+      name: 'prod-orders',
+      kind: 'teleport-mysql',
+      env: 'prod',
+      service: 'orders',
+      tags: ['auto-bootstrap', 'kb-derived'],
+      connection: {
+        database: 'orders',
+        target: 'orders-tidb',
+      },
+      credentialRef: 'prod:orders',
+      connectors: ['openvpn', 'teleport'],
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        teleportCredentialRef: 'tsh:prod',
+      },
+    });
+
+    const saved = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      name: 'prod-orders',
+      kind: 'teleport-mysql',
+      tags: ['auto-bootstrap', 'kb-derived'],
+    });
   });
 
   it('datasource add with connectors', () => {

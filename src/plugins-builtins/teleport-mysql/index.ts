@@ -2,6 +2,8 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
+import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
+import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
 
@@ -198,7 +200,8 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const dbUser = input.credentials.dbUser || input.credentials.user;
     const dbName = input.datasource.connection.database;
     if (!target || !dbUser || !dbName) {
-      return [{ check: 'teleport-mysql doctor', status: 'fail', detail: 'missing target/dbUser/database in datasource+credentials' }];
+      const detail = 'missing target/dbUser/database in datasource+credentials';
+      return [{ check: 'teleport-mysql doctor', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
     }
     const sessionId = `doctor-${process.pid}-${Date.now()}`;
     try {
@@ -214,7 +217,8 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       await conn.end();
       return [{ check: 'teleport-mysql query', status: 'ok', detail: 'connection and read query succeeded' }];
     } catch (error) {
-      return [{ check: 'teleport-mysql query', status: 'fail', detail: (error as Error).message }];
+      const detail = (error as Error).message;
+      return [{ check: 'teleport-mysql query', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
     } finally {
       await closeTeleportMysqlSessionProxies(sessionId);
     }
@@ -243,22 +247,39 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         password: creds.password,
         database: String(dbName),
       });
-      const [rows, fields] = await conn.query(request.query);
-      await conn.end();
-      const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-      const columns = Array.isArray(fields) ? fields.map((f: any) => String(f.name || '')) : Object.keys(normalizedRows[0] || {});
-      return {
-        runId: '',
-        datasource: request.datasource.name,
-        plugin: 'teleport-mysql',
-        capability: request.capability,
-        query: { native: request.query },
-        result: { columns, rows: normalizedRows },
-        timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
-        warnings,
-        classification: 'success',
-      };
+      try {
+        const [rows, fields] = await conn.query(
+          request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
+        );
+        const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+        const columns = Array.isArray(fields) ? fields.map((f: any) => String(f.name || '')) : Object.keys(normalizedRows[0] || {});
+        return {
+          runId: '',
+          datasource: request.datasource.name,
+          plugin: 'teleport-mysql',
+          capability: request.capability,
+          query: { native: request.query },
+          result: { columns, rows: normalizedRows },
+          timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
+          warnings,
+          classification: 'success',
+        };
+      } catch (error) {
+        const message = String((error as Error).message || '');
+        if (request.timeoutMs && /timeout/i.test(message)) {
+          (conn as any).destroy?.();
+          throw queryTimeoutError(request.timeoutMs);
+        }
+        throw error;
+      } finally {
+        await conn.end().catch(() => {
+          (conn as any).destroy?.();
+        });
+      }
     } catch (proxyError) {
+      if (String((proxyError as Error).message || '').startsWith('QUERY_TIMEOUT:')) {
+        throw proxyError;
+      }
       throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
     } finally {
       if (shouldCleanup) {

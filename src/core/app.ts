@@ -9,6 +9,7 @@ import { RuntimeConfigStore } from '../store/runtime-config.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
+export { classifyError } from './error-classification.js';
 
 export interface AppContext {
   paths: ReturnType<typeof resolvePaths>;
@@ -90,24 +91,9 @@ export function parseParamPairs(values: string[]): Record<string, string> {
   return out;
 }
 
-export function classifyError(message: string): string {
-  const text = message.toLowerCase();
-  if (/misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/.test(text)) return 'MISCONFIGURED_DATASOURCE';
-  if (/deterministic_required|prod requires deterministic/.test(text)) return 'DETERMINISTIC_REQUIRED';
-  if (/discovery_unavailable/.test(text)) return 'DISCOVERY_UNAVAILABLE';
-  if (/overloaded|queue limit/.test(text)) return 'OVERLOADED';
-  if (/session_busy|session .*active leases/.test(text)) return 'SESSION_BUSY';
-  if (/access denied|permission denied/.test(text)) return 'ACCESS_DENIED';
-  if (/unknown database|does not exist/.test(text)) return 'UNKNOWN_DATABASE';
-  if (/getaddrinfo|no such host|target.*not found/.test(text)) return 'UNKNOWN_TARGET';
-  if (/teleport proxy path unavailable|spawn tsh enoent/.test(text)) return 'CONNECTIVITY';
-  if (/timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/.test(text)) return 'CONNECTIVITY';
-  if (/auth|login|expired|unauthorized/.test(text)) return 'AUTH_EXPIRED';
-  return 'GENERIC';
-}
-
 export function nextAction(errorCode: string): string {
   const mapping: Record<string, string> = {
+    QUERY_TIMEOUT: 'Retry with a narrower query or raise --timeout-ms if the longer runtime is intentional.',
     MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
@@ -142,7 +128,7 @@ export async function runDatasourceConnectors(input: {
   for (const name of connectors) {
     const plugin = input.pluginRegistry.get(name);
     if (!plugin) {
-      checks.push({ check: `connector:${name}`, status: 'warn', detail: 'connector plugin not found' });
+      checks.push({ check: `connector:${name}`, status: 'warn', detail: 'connector plugin not found', code: 'connector_plugin_missing' });
       continue;
     }
     const refKey = `${name}CredentialRef`;
@@ -155,7 +141,12 @@ export async function runDatasourceConnectors(input: {
     } else if (input.mode === 'disconnect' && plugin.disconnect) {
       checks.push(...(await plugin.disconnect({ datasource: input.datasource, credentials: creds })));
     } else {
-      checks.push({ check: `connector:${name}`, status: 'warn', detail: `mode '${input.mode}' not supported by plugin` });
+      checks.push({
+        check: `connector:${name}`,
+        status: 'warn',
+        detail: `mode '${input.mode}' not supported by plugin`,
+        code: 'connector_mode_unsupported',
+      });
     }
   }
   return checks;

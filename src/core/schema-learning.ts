@@ -133,6 +133,17 @@ function parseSelectLikeAst(ast: Record<string, unknown>): {
   joins: JoinObservation[];
   columns: ColumnObservation[];
 } {
+  const cteNames = new Set(
+    (Array.isArray(ast.with) ? ast.with : [])
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return '';
+        const name = (entry as Record<string, unknown>).name;
+        if (!name || typeof name !== 'object') return '';
+        const value = (name as Record<string, unknown>).value;
+        return typeof value === 'string' ? value.trim() : '';
+      })
+      .filter(Boolean),
+  );
   const tables: TableObservation[] = [];
   const joins: JoinObservation[] = [];
   const columns: ColumnObservation[] = [];
@@ -143,6 +154,8 @@ function parseSelectLikeAst(ast: Record<string, unknown>): {
   for (const item of from) {
     const tableName = safeTableName(item);
     if (!tableName) continue;
+    const bareTableName = tableName.split('.').pop() || tableName;
+    if (cteNames.has(bareTableName)) continue;
     const alias = safeAlias(item);
     tables.push({ table: tableName, alias });
     if (alias) aliasToTable.set(alias, tableName);

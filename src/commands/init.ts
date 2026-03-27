@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeService } from '../core/app.js';
-import { bootstrapDatasource } from '../core/bootstrap.js';
+import { reconcileDatasource } from '../core/bootstrap.js';
 import { writeJsonFile } from '../core/json.js';
 import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
@@ -44,7 +44,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const datasourceName = defaultDatasourceName(opts.env, service);
-      const result = await bootstrapDatasource(ctx, opts.env, service, datasourceName);
+      const result = await reconcileDatasource(ctx, opts.env, service, datasourceName);
       if (!result) {
         throw new Error(`No KB data found for env=${opts.env} service=${service}`);
       }
@@ -60,7 +60,13 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
         printJson(data);
         return;
       }
-      console.log(result.source === 'store-existing' ? `Datasource already exists: ${result.profile.name}` : `Created datasource: ${result.profile.name}`);
+      console.log(
+        result.source === 'store-existing'
+          ? `Datasource already exists: ${result.profile.name}`
+          : result.source === 'kb-repaired'
+            ? `Repaired datasource: ${result.profile.name}`
+            : `Created datasource: ${result.profile.name}`,
+      );
       console.log(`source: ${result.source}`);
       console.log(`credentialRefs: ${result.credentialRefs.join(', ') || '(none)'}`);
       console.log(`connectors: ${result.connectors.join(', ') || '(none)'}`);

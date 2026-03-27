@@ -48,6 +48,13 @@ function setupKb(memoryRoot: string, service = 'orders', env = 'qa') {
   return kbDir;
 }
 
+function setupCustomKb(memoryRoot: string, services: Array<Record<string, unknown>>) {
+  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  fs.mkdirSync(kbDir, { recursive: true });
+  fs.writeFileSync(path.join(kbDir, 'services.json'), JSON.stringify(services));
+  return kbDir;
+}
+
 describe('init command', () => {
   it('creates starter config with environmentPolicies and serviceAliases', () => {
     const stateRoot = makeStateRoot();
@@ -185,6 +192,81 @@ describe('init command', () => {
     expect(parsed.skipped).toBe(true);
   });
 
+  it('repairs existing datasource profile when it critically conflicts with KB', () => {
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupCustomKb(memoryRoot, [
+      {
+        service: 'orders',
+        connections: [
+          {
+            env: 'prod',
+            engine: 'mysql',
+            database: 'orders',
+            db_user: 'reader',
+            access_method: 'tsh',
+            target: 'orders-tidb',
+            status: 'active',
+            verified_at_utc: '2026-03-01T00:00:00Z',
+          },
+        ],
+      },
+    ]);
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'prod-orders',
+          kind: 'mysql',
+          env: 'prod',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 3306, database: 'orders' },
+          credentialRef: 'prod:orders',
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: {},
+          updatedAt: new Date().toISOString(),
+          confidence: 0.4,
+        },
+      ]),
+    );
+    const seed = runCli(['creds', 'set', '--ref', 'prod:orders', '--db-user', 'existing-reader'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seed.status).toBe(0);
+
+    const out = runCli(['--json', 'init', 'datasource', '--env', 'prod', '--service', 'orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.source).toBe('kb-repaired');
+    expect(parsed.skipped).toBe(false);
+    expect(parsed.profile.kind).toBe('teleport-mysql');
+    expect(parsed.profile.connection.target).toBe('orders-tidb');
+    expect(parsed.profile.credentialRef).toBe('prod:orders');
+
+    const datasources = JSON.parse(fs.readFileSync(path.join(configDir, 'datasources.json'), 'utf8'));
+    expect(datasources).toHaveLength(1);
+    expect(datasources[0].kind).toBe('teleport-mysql');
+
+    const creds = runCli(['--json', 'creds', 'show', '--ref', 'prod:orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(creds.status).toBe(0);
+    const credsParsed = JSON.parse(creds.stdout);
+    expect(credsParsed.values.dbUser).toBe('existing-reader');
+  });
+
   it('returns readiness payload for self-check --agent', () => {
     const stateRoot = makeStateRoot();
     const memoryRoot = makeMemoryRoot();
@@ -221,6 +303,155 @@ describe('init command', () => {
     expect(typeof parsed.readiness).toBe('string');
     expect(parsed).toHaveProperty('missing');
     expect(parsed).toHaveProperty('nextCommand');
+  });
+
+  it('returns missing_connector_config for targeted self-check when connector wiring is incomplete', () => {
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ environmentPolicies: {}, serviceAliases: {} }));
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'qa-orders',
+          kind: 'mysql',
+          env: 'qa',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 4406, database: 'orders' },
+          credentialRef: 'qa:orders',
+          connectors: ['kubectl-portforward'],
+          resolverHints: {},
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    setupKb(memoryRoot);
+    const seed = runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'reader'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seed.status).toBe(0);
+
+    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(out.status).toBe(7);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.readiness).toBe('missing_connector_config');
+    expect(parsed.target.datasource).toBe('qa-orders');
+    expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe(
+      'connector_status_command_missing',
+    );
+    expect(parsed.nextCommand).toContain('taproot connector setup --datasource qa-orders --connector kubectl-portforward');
+  });
+
+  it('returns blocked_connector_auth for targeted self-check when connector status fails', () => {
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ environmentPolicies: {}, serviceAliases: {} }));
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'qa-orders',
+          kind: 'mysql',
+          env: 'qa',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 4406, database: 'orders' },
+          credentialRef: 'qa:orders',
+          connectors: ['openvpn'],
+          resolverHints: { openvpnCredentialRef: 'vpn:work' },
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    setupKb(memoryRoot);
+    const seedDatasource = runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'reader'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seedDatasource.status).toBe(0);
+    const seedConnector = runCli(['creds', 'set', '--ref', 'vpn:work', '--status-command', 'false'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seedConnector.status).toBe(0);
+
+    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(out.status).toBe(7);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.readiness).toBe('blocked_connector_auth');
+    expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');
+    expect(parsed.nextCommand).toBe('taproot doctor --datasource qa-orders --connect');
+  });
+
+  it('returns ready for targeted self-check when connector status succeeds', () => {
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ environmentPolicies: {}, serviceAliases: {} }));
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'qa-orders',
+          kind: 'mysql',
+          env: 'qa',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 4406, database: 'orders' },
+          credentialRef: 'qa:orders',
+          connectors: ['openvpn'],
+          resolverHints: { openvpnCredentialRef: 'vpn:work' },
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    setupKb(memoryRoot);
+    const seedDatasource = runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'reader'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seedDatasource.status).toBe(0);
+    const seedConnector = runCli(['creds', 'set', '--ref', 'vpn:work', '--status-command', 'true'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(seedConnector.status).toBe(0);
+
+    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.readiness).toBe('ready');
+    expect(parsed.target.datasource).toBe('qa-orders');
   });
 
   it('exits 7 when self-check --agent is not ready', () => {

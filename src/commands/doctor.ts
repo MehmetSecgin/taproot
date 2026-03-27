@@ -1,10 +1,12 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { classifyError, normalizeService, runDatasourceConnectors } from '../core/app.js';
+import { bootstrapDatasource } from '../core/bootstrap.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
+import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
   const oneLine = detail.replace(/\s+/g, ' ').trim();
@@ -12,39 +14,335 @@ function compactDetail(detail: string, max = 160): string {
   return `${oneLine.slice(0, max - 1)}...`;
 }
 
-function doctorNextActions(datasourceName: string, checks: Array<{ check: string; status: string; detail: string }>): string[] {
-  const actions = new Set<string>();
+interface PrioritizedAction {
+  action: string;
+  priority: number;
+  order: number;
+  reasons: string[];
+  checks: string[];
+  codes: DoctorCheckCode[];
+}
+
+function upsertAction(
+  store: Map<string, PrioritizedAction>,
+  action: string,
+  priority: number,
+  orderRef: { current: number },
+  metadata?: { reason?: string; check?: string; code?: DoctorCheckCode },
+): void {
+  const existing = store.get(action);
+  if (existing) {
+    if (priority < existing.priority) existing.priority = priority;
+    if (metadata?.reason && !existing.reasons.includes(metadata.reason)) existing.reasons.push(metadata.reason);
+    if (metadata?.check && !existing.checks.includes(metadata.check)) existing.checks.push(metadata.check);
+    if (metadata?.code && !existing.codes.includes(metadata.code)) existing.codes.push(metadata.code);
+    return;
+  }
+  store.set(action, {
+    action,
+    priority,
+    order: orderRef.current++,
+    reasons: metadata?.reason ? [metadata.reason] : [],
+    checks: metadata?.check ? [metadata.check] : [],
+    codes: metadata?.code ? [metadata.code] : [],
+  });
+}
+
+function connectorSetupHint(datasourceName: string, connector: string): string {
+  if (connector === 'openvpn') {
+    return `taproot connector setup --datasource ${datasourceName} --connector openvpn --connect-command '<command>' --status-command '<command>'`;
+  }
+  if (connector === 'teleport') {
+    return `taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`;
+  }
+  if (connector === 'kubectl-portforward') {
+    return `taproot connector setup --datasource ${datasourceName} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`;
+  }
+  return `taproot connector setup --datasource ${datasourceName} --connector ${connector || '<name>'} ...`;
+}
+
+const ACTION_PRIORITIES = {
+  connectorSetup: 10,
+  datasourceRepair: 20,
+  connectorConnect: 30,
+  credsShow: 40,
+  credsSet: 50,
+  datasourceShow: 60,
+  timeoutRetry: 70,
+} as const;
+
+function connectorNameFromCheck(check: string): string {
+  const label = String(check || '').toLowerCase();
+  if (label.startsWith('openvpn')) return 'openvpn';
+  if (label.startsWith('teleport')) return 'teleport';
+  if (label.startsWith('kubectl-portforward')) return 'kubectl-portforward';
+  return String(label.match(/^connector:([^ ]+)/)?.[1] || '').trim();
+}
+
+function isMissingConnectorConfigCode(code?: DoctorCheckCode): boolean {
+  return (
+    code === 'connector_plugin_missing' ||
+    code === 'connector_mode_unsupported' ||
+    code === 'connector_status_command_missing' ||
+    code === 'connector_connect_command_missing' ||
+    code === 'connector_disconnect_command_missing' ||
+    code === 'connector_login_command_missing'
+  );
+}
+
+function credentialRepairHint(datasource: DatasourceProfile): string {
+  if (datasource.kind === 'teleport-mysql') {
+    return `taproot --json creds set --ref ${datasource.credentialRef} --db-user <user> --password <password>`;
+  }
+  return `taproot --json creds set --ref ${datasource.credentialRef} --user <user> --password <password>`;
+}
+
+function datasourceRepairHint(datasource: DatasourceProfile): string {
+  if (datasource.env && datasource.service) {
+    return `taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`;
+  }
+  return `taproot datasource show --name ${datasource.name}`;
+}
+
+function addActionForCheck(
+  actions: Map<string, PrioritizedAction>,
+  command: string,
+  priority: number,
+  orderRef: { current: number },
+  check: DoctorCheck,
+  reason: string,
+): void {
+  upsertAction(actions, command, priority, orderRef, { reason, check: check.check, code: check.code });
+}
+
+function addExecutorNextActions(
+  actions: Map<string, PrioritizedAction>,
+  datasource: DatasourceProfile,
+  check: DoctorCheck,
+  orderRef: { current: number },
+): boolean {
+  const code = check.code;
+  switch (code) {
+    case 'executor_access_denied':
+      addActionForCheck(
+        actions,
+        `taproot --json creds show --ref ${datasource.credentialRef}`,
+        ACTION_PRIORITIES.credsShow,
+        orderRef,
+        check,
+        'Executor rejected the stored datasource credentials.',
+      );
+      addActionForCheck(
+        actions,
+        credentialRepairHint(datasource),
+        ACTION_PRIORITIES.credsSet,
+        orderRef,
+        check,
+        'Executor access was denied, so the datasource credentials likely need repair.',
+      );
+      return true;
+    case 'executor_auth_expired':
+      if (datasource.connectors?.length) {
+        addActionForCheck(
+          actions,
+          `taproot doctor --datasource ${datasource.name} --connect`,
+          ACTION_PRIORITIES.connectorConnect,
+          orderRef,
+          check,
+          'Connector-backed auth looks expired, so reconnect is the fastest recovery path.',
+        );
+      }
+      addActionForCheck(
+        actions,
+        credentialRepairHint(datasource),
+        ACTION_PRIORITIES.credsSet,
+        orderRef,
+        check,
+        'Executor auth looks expired, so credentials may need to be refreshed.',
+      );
+      return true;
+    case 'executor_connectivity':
+      if (datasource.connectors?.length) {
+        addActionForCheck(
+          actions,
+          `taproot doctor --datasource ${datasource.name} --connect`,
+          ACTION_PRIORITIES.connectorConnect,
+          orderRef,
+          check,
+          'A connector-backed connectivity failure is best retried through the connector connect flow first.',
+        );
+      }
+      addActionForCheck(
+        actions,
+        `taproot datasource show --name ${datasource.name}`,
+        ACTION_PRIORITIES.datasourceShow,
+        orderRef,
+        check,
+        'Executor connectivity failed, so inspect the datasource target and connection settings.',
+      );
+      return true;
+    case 'executor_unknown_target':
+      addActionForCheck(
+        actions,
+        datasourceRepairHint(datasource),
+        ACTION_PRIORITIES.datasourceRepair,
+        orderRef,
+        check,
+        'The executor could not resolve the target, so the datasource routing needs repair.',
+      );
+      return true;
+    case 'executor_configuration_missing':
+      addActionForCheck(
+        actions,
+        datasourceRepairHint(datasource),
+        ACTION_PRIORITIES.datasourceRepair,
+        orderRef,
+        check,
+        'The datasource is missing required topology fields, so repair the datasource definition first.',
+      );
+      addActionForCheck(
+        actions,
+        credentialRepairHint(datasource),
+        ACTION_PRIORITIES.credsSet,
+        orderRef,
+        check,
+        'The executor is also missing required credential fields for this datasource.',
+      );
+      return true;
+    case 'executor_query_timeout':
+      addActionForCheck(
+        actions,
+        `taproot query --datasource ${datasource.name} --query '<sql>' --timeout-ms <ms>`,
+        ACTION_PRIORITIES.timeoutRetry,
+        orderRef,
+        check,
+        'The doctor query timed out, so retry with a narrower query or a larger timeout budget.',
+      );
+      return true;
+    default:
+      return false;
+  }
+}
+
+function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[]): DoctorNextAction[] {
+  const actions = new Map<string, PrioritizedAction>();
+  const orderRef = { current: 0 };
   for (const check of checks) {
     const label = String(check.check || '').toLowerCase();
     const detail = String(check.detail || '');
     if (check.status === 'ok') continue;
 
+    if (isMissingConnectorConfigCode(check.code)) {
+      addActionForCheck(
+        actions,
+        connectorSetupHint(datasource.name, connectorNameFromCheck(check.check)),
+        ACTION_PRIORITIES.connectorSetup,
+        orderRef,
+        check,
+        'Connector wiring is incomplete, so setup is required before the datasource can be used.',
+      );
+      continue;
+    }
+
+    if (addExecutorNextActions(actions, datasource, check, orderRef)) {
+      continue;
+    }
+
     if (label.startsWith('openvpn')) {
       if (/no connectcommand configured/i.test(detail)) {
-        actions.add(`taproot connector setup --datasource ${datasourceName} --connector openvpn --connect-command '<command>' --status-command '<command>'`);
+        addActionForCheck(
+          actions,
+          connectorSetupHint(datasource.name, 'openvpn'),
+          ACTION_PRIORITIES.connectorSetup,
+          orderRef,
+          check,
+          'OpenVPN is missing required commands, so connector setup is the first repair.',
+        );
       } else {
-        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+        addActionForCheck(
+          actions,
+          `taproot doctor --datasource ${datasource.name} --connect`,
+          ACTION_PRIORITIES.connectorConnect,
+          orderRef,
+          check,
+          'OpenVPN reported a blocked state, so retry the connector connect flow first.',
+        );
       }
     }
     if (label.startsWith('teleport')) {
       if (/no logincommand configured/i.test(detail)) {
-        actions.add(`taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`);
+        addActionForCheck(
+          actions,
+          connectorSetupHint(datasource.name, 'teleport'),
+          ACTION_PRIORITIES.connectorSetup,
+          orderRef,
+          check,
+          'Teleport is missing login wiring, so connector setup is required first.',
+        );
       } else {
-        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+        addActionForCheck(
+          actions,
+          `taproot doctor --datasource ${datasource.name} --connect`,
+          ACTION_PRIORITIES.connectorConnect,
+          orderRef,
+          check,
+          'Teleport reported a blocked session, so reconnect is the fastest next step.',
+        );
       }
     }
     if (label.startsWith('kubectl-portforward')) {
       if (/no connectcommand configured/i.test(detail) || /no statuscommand configured/i.test(detail)) {
-        actions.add(`taproot connector setup --datasource ${datasourceName} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`);
+        addActionForCheck(
+          actions,
+          connectorSetupHint(datasource.name, 'kubectl-portforward'),
+          ACTION_PRIORITIES.connectorSetup,
+          orderRef,
+          check,
+          'kubectl port-forward wiring is incomplete, so setup is required before reconnecting.',
+        );
       } else {
-        actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+        addActionForCheck(
+          actions,
+          `taproot doctor --datasource ${datasource.name} --connect`,
+          ACTION_PRIORITIES.connectorConnect,
+          orderRef,
+          check,
+          'kubectl port-forward reported a blocked state, so retry the connector connect flow first.',
+        );
       }
     }
     if (/connect/i.test(label)) {
-      actions.add(`taproot doctor --datasource ${datasourceName} --connect`);
+      addActionForCheck(
+        actions,
+        `taproot doctor --datasource ${datasource.name} --connect`,
+        ACTION_PRIORITIES.connectorConnect,
+        orderRef,
+        check,
+        'A connector connect check failed, so rerunning the connect flow is the best first step.',
+      );
     }
   }
-  return [...actions];
+  return [...actions.values()]
+    .sort((a, b) => (a.priority - b.priority) || (a.order - b.order))
+    .map((entry) => ({
+      command: entry.action,
+      priority: entry.priority,
+      reasons: entry.reasons,
+      checks: entry.checks,
+      codes: entry.codes,
+    }));
+}
+
+function misconfiguredDatasourceNextActions(datasource: DatasourceProfile): DoctorNextAction[] {
+  return [
+    {
+      command: `taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`,
+      priority: ACTION_PRIORITIES.datasourceRepair,
+      reasons: ['The datasource routing conflicts with KB-backed resolution and must be repaired before doctor can continue.'],
+      checks: ['kb routing consistency'],
+      codes: [],
+    },
+  ];
 }
 
 export function registerDoctor(program: Command, getCtx: () => AppContext): void {
@@ -78,27 +376,10 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
           datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
           if (!datasource) {
-            const kb = ctx.kbStore.resolveConnection(service, opts.env);
-            if (kb) {
-              const dsFromKb = {
-                name: `${opts.env}-${service}`,
-                kind: String(kb.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql',
-                env: opts.env,
-                service,
-                tags: ['kb-derived'],
-                connection: {
-                  host: kb.host as string | undefined,
-                  port: kb.port as number | undefined,
-                  target: kb.target as string | undefined,
-                  database: kb.database as string | undefined,
-                },
-                credentialRef: `${opts.env}:${service}`,
-                policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-                updatedAt: new Date().toISOString(),
-                confidence: 0.8,
-              } as any;
-              datasource = ctx.datasourceStore.save(dsFromKb);
-              logVerbose(`bootstrapped datasource from KB (${dsFromKb.name})`);
+            const bootstrapped = await bootstrapDatasource(ctx, opts.env, service, `${opts.env}-${service}`);
+            if (bootstrapped) {
+              datasource = bootstrapped.profile;
+              logVerbose(`bootstrapped datasource from KB (${bootstrapped.profile.name})`);
             }
           }
         }
@@ -117,7 +398,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           if (kb) {
             const critical = criticalDatasourceKbConflicts(datasource as any, kb);
             if (critical.length) {
-              const checks = [
+              const checks: DoctorCheck[] = [
                 {
                   check: 'kb routing consistency',
                   status: 'fail' as const,
@@ -129,13 +410,15 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
                 status: 'warn',
                 detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
               });
+              const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
               if (ctx.jsonMode) {
                 printJson({
                   datasource: datasource.name,
                   plugin: plugin.manifest.name,
                   warnings,
                   checks,
-                  nextActions: [`taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`],
+                  nextActions: nextActionDetails.map((item) => item.command),
+                  nextActionDetails,
                   summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
                 });
               } else {
@@ -182,7 +465,8 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           detail: opts.verboseDetail || ctx.verbose ? c.detail : compactDetail(c.detail),
         }));
         const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== 'ok');
-        const nextActions = doctorNextActions(datasource.name, checks);
+        const nextActionDetails = doctorNextActions(datasource, checks);
+        const nextActions = nextActionDetails.map((item) => item.command);
 
         if (ctx.jsonMode) {
           printJson({
@@ -191,6 +475,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
             warnings,
             checks,
             nextActions,
+            nextActionDetails,
             summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
           });
         } else {

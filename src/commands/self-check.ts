@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { normalizeService } from '../core/app.js';
 import type { AppContext } from '../core/app.js';
 import { EXIT_CODES } from '../core/exit-codes.js';
 import { printJson } from '../core/output.js';
@@ -10,21 +11,38 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
     .command('self-check')
     .description('Validate local runtime, stores, and built-in plugin registry')
     .option('--agent', 'emit agent-readiness summary', false)
+    .option('--datasource <name>')
+    .option('--env <env>')
+    .option('--service <service>')
     .action(async (opts) => {
       const ctx = getCtx();
-      const snapshot = await collectReadinessSnapshot(ctx);
+      const target =
+        opts.datasource || (opts.env && opts.service)
+          ? {
+              ...(opts.datasource ? { datasource: String(opts.datasource) } : {}),
+              ...(opts.env ? { env: String(opts.env) } : {}),
+              ...(opts.service ? { service: normalizeService(String(opts.service), ctx.runtimeConfigStore.serviceAliases()) } : {}),
+            }
+          : undefined;
+      const snapshot = await collectReadinessSnapshot(ctx, { target });
       if (opts.agent) {
         const data = {
           readiness: snapshot.readiness,
           missing: snapshot.readiness === 'ready' ? null : snapshot.readiness,
-          nextCommand: nextCommandForReadiness(snapshot.readiness),
+          nextCommand: nextCommandForReadiness(snapshot.readiness, {
+            ...(snapshot.target?.datasource ? { datasource: ctx.datasourceStore.get(snapshot.target.datasource) } : {}),
+            ...(target ? { target } : {}),
+            checks: snapshot.checks,
+          }),
           checks: snapshot.checks,
+          ...(snapshot.target ? { target: snapshot.target } : {}),
         };
         if (ctx.jsonMode) printJson(data);
         else {
           console.log(`readiness: ${data.readiness}`);
           if (data.missing) console.log(`missing: ${data.missing}`);
           if (data.nextCommand) console.log(`nextCommand: ${data.nextCommand}`);
+          if (data.target) console.log(`target: ${data.target.datasource || '(unresolved)'}`);
           snapshot.checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
         }
         if (snapshot.readiness !== 'ready') process.exitCode = EXIT_CODES.NOT_READY;
