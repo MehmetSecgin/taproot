@@ -13,14 +13,16 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 - Reuse-first: prefer preexisting tools/libs over custom reinvention.
 
 ## Commands
-- `taproot self-check`
+- `taproot init` and `taproot init datasource --env <env> --service <service>`
+- `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
 - `taproot query --datasource <name> [--query | --template | --intent] [--param k=v] [--allow-discovery]`
 - `taproot datasource <list|show|add|remove|resolve>`
+- `taproot connector <setup|status>`
 - `taproot template <list|save|validate|run>`
-- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related>`
+- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related|list-services>`
 - `taproot cache <show|prune|clear>`
-- `taproot learn <status|compact|replay>`
+- `taproot learn <status|compact|replay|refresh-schema|tables|joins|shapes>`
 - `taproot creds <set|show|unset>`
 - `taproot daemon <start|status|stop|restart>`
 - `taproot session <open|ls|inspect|close|close-all>`
@@ -32,18 +34,53 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 npm ci
 npm run build
 
-# store credentials under a reference key
-node dist/index.js creds set --ref production:sample --user sample_reader --password '***'
+# initialize local runtime state and starter config
+node dist/index.js --json init
 
-# create datasource profile
-node dist/index.js datasource add --name production-sample --kind mysql --env production --service sample --credential-ref production:sample --host db.internal.example --port 3306 --database sample_app
+# create or repair a KB-backed datasource profile
+node dist/index.js --json init datasource --env production --service sample
+
+# store datasource credentials under the standard ref
+node dist/index.js --json creds set --ref production:sample --user sample_reader --password '***'
+
+# agent-facing readiness check for the specific datasource/query path
+node dist/index.js --json self-check --agent --env production --service sample
 
 # preflight checks
-node dist/index.js doctor --datasource production-sample
+node dist/index.js --json doctor --datasource production-sample --connect
 
 # execute read query
-node dist/index.js query --datasource production-sample --query \"SELECT 1 AS ok\"
+node dist/index.js --json query --datasource production-sample --query \"SELECT 1 AS ok\"
 ```
+
+## Agent-Facing Diagnostics
+
+Use targeted readiness before deeper troubleshooting:
+
+```bash
+taproot --json self-check --agent --datasource <name>
+taproot --json self-check --agent --env <env> --service <service>
+```
+
+Targeted readiness returns:
+
+- `readiness`
+- `missing`
+- `nextCommand`
+- `checks`
+- `target`
+
+For deeper diagnosis, use:
+
+```bash
+taproot --json doctor --datasource <name>
+taproot --json doctor --datasource <name> --connect
+```
+
+`doctor --json` now returns both:
+
+- `nextActions`: ordered command strings for compatibility
+- `nextActionDetails`: structured remediation entries with `command`, `priority`, `checks`, `codes`, and `reasons`
 
 ## OpenVPN + Teleport setup
 ```bash
@@ -91,6 +128,9 @@ Expected structure:
 - Built-in DB plugins only expose `executeRead` in v1.
 - `prod` defaults to deterministic no-guess datasource resolution (profile/KB); use `--allow-discovery` only when explicitly needed.
 - Mutating queries require `--allow-mutate` **and** datasource policy with `executeMutate`.
+- `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.
+- `taproot self-check --agent` is the preferred machine-readable readiness contract, especially with `--datasource` or `--env` + `--service`.
+- `taproot doctor --json` returns structured remediation metadata in `nextActionDetails` in addition to the legacy `nextActions` string list.
 - Secrets are never printed and are redacted from JSON output envelopes.
 - Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.

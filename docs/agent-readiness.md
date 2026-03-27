@@ -65,10 +65,13 @@ For a user or agent to succeed on day one, the current setup is usually:
 ### What Is Already Nice
 
 - State directories are created automatically.
+- `taproot init` creates starter config and reports the current readiness snapshot.
+- `self-check --agent` supports target-aware readiness for `--datasource` and `--env` + `--service`.
 - `query --env --service` can auto-bootstrap datasources from KB.
+- `init datasource` can now repair critically stale datasource profiles instead of forcing delete-and-recreate.
 - Runtime config has safe neutral defaults when an env policy is missing.
 - `self-check` gives a lightweight runtime sanity check.
-- `doctor` provides actionable next steps for several connector failures.
+- `doctor` provides ranked next steps for connector and executor failures, and `doctor --json` now exposes structured `nextActionDetails`.
 
 ### What Still Feels Heavy
 
@@ -137,6 +140,8 @@ The remaining improvement area is guided setup when KB is incomplete:
 
 It also supports target-aware runs with `--datasource` or `--env` + `--service`, which is the preferred contract for agents checking a real query path.
 
+The main remaining gap is that readiness/init still expose string next actions, while `doctor --json` now has a richer structured remediation contract.
+
 ### 4. Add An Agent-Facing Readiness Mode
 
 The current agent-facing readiness mode is:
@@ -154,7 +159,7 @@ This should answer:
 - what is missing?
 - what exact next command should I run?
 
-This would make the TapRoot skill much more reliable as the only context an agent receives.
+The next improvement is to promote readiness/init next actions to the same structured metadata shape that `doctor --json` now returns.
 
 ### 5. Make KB Dependency More Explicit
 
@@ -233,6 +238,6 @@ The highest-leverage next step is not more command coverage. It is first-run orc
 - initialize
 - detect readiness
 - guide missing setup
-- make the result machine-readable
+- make the result fully machine-readable across `init`, `self-check --agent`, and `doctor`
 
 That is the fastest path to making the TapRoot skill sufficient as the only context an agent needs.
