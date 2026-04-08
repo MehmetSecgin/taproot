@@ -232,7 +232,7 @@ describe('init command', () => {
           service: 'orders',
           tags: [],
           connection: { host: '127.0.0.1', port: 3306, database: 'orders' },
-          credentialRef: 'prod:orders',
+          credentialRef: 'prod',
           connectors: [],
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
@@ -241,7 +241,7 @@ describe('init command', () => {
         },
       ]),
     );
-    const seed = runCli(['creds', 'set', '--ref', 'prod:orders', '--db-user', 'existing-reader'], {
+    const seed = runCli(['creds', 'set', '--ref', 'prod', '--db-user', 'existing-reader'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       OBSIDIAN_MEMORY_ROOT: memoryRoot,
@@ -259,13 +259,13 @@ describe('init command', () => {
     expect(parsed.skipped).toBe(false);
     expect(parsed.profile.kind).toBe('teleport-mysql');
     expect(parsed.profile.connection.target).toBe('orders-tidb');
-    expect(parsed.profile.credentialRef).toBe('prod:orders');
+    expect(parsed.profile.credentialRef).toBe('prod');
 
     const datasources = JSON.parse(fs.readFileSync(path.join(configDir, 'datasources.json'), 'utf8'));
     expect(datasources).toHaveLength(1);
     expect(datasources[0].kind).toBe('teleport-mysql');
 
-    const creds = runCli(['--json', 'creds', 'show', '--ref', 'prod:orders'], {
+    const creds = runCli(['--json', 'creds', 'show', '--ref', 'prod'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       OBSIDIAN_MEMORY_ROOT: memoryRoot,

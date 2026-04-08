@@ -69,7 +69,7 @@ function buildKbBootstrapCandidate(
   const database = String(kb.database || '');
   const dbUser = String(kb.db_user || '');
   const target = String(options?.targetOverride || kb.target || '');
-  const credentialRef = `${env}:${service}`;
+  const credentialRef = env;
   const tags = options?.tags || ['auto-bootstrap', 'kb-derived'];
   const confidence = options?.confidence ?? 0.9;
 
