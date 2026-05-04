@@ -1,4 +1,5 @@
 import type { AppContext } from './app.js';
+import { defaultDatasourceName } from './app.js';
 import { criticalDatasourceKbConflicts } from './conflicts.js';
 import { nowIso } from './time.js';
 import type { DatasourceProfile } from '../types/core.js';
@@ -72,14 +73,15 @@ function buildKbBootstrapCandidate(
   const credentialRef = env;
   const tags = options?.tags || ['auto-bootstrap', 'kb-derived'];
   const confidence = options?.confidence ?? 0.9;
+  const namespace = String(kb.namespace || '').trim() || undefined;
 
   if (accessMethod === 'qa-portforward') {
-    const namespace = String(kb.namespace || 'develop');
-    const context = String(process.env.TAPROOT_QA_CONTEXT || kb.k8s_context || env || namespace);
+    const effectiveNamespace = String(namespace || 'default');
+    const context = String(process.env.TAPROOT_QA_CONTEXT || kb.k8s_context || env || effectiveNamespace);
     const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
     const logFile = `/tmp/taproot-pf-${env}-${service}.log`;
     const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
-    const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${namespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${namespace} port-forward svc/${target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
+    const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${effectiveNamespace} port-forward svc/${target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
 
     return {
       kb,
@@ -87,6 +89,7 @@ function buildKbBootstrapCandidate(
         name: datasourceName,
         kind: engine.includes('postgres') ? 'postgres' : 'mysql',
         env,
+        namespace,
         service,
         tags,
         connection: {
@@ -99,7 +102,7 @@ function buildKbBootstrapCandidate(
         policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
         resolverHints: {
           openvpnCredentialRef: 'vpn:work',
-          'kubectl-portforwardCredentialRef': `kpf:${env}:${service}`,
+          'kubectl-portforwardCredentialRef': `kpf:${env}:${namespace || 'default'}:${service}`,
         },
         updatedAt: nowIso(),
         confidence,
@@ -118,7 +121,7 @@ function buildKbBootstrapCandidate(
           },
         },
         {
-          ref: `kpf:${env}:${service}`,
+          ref: `kpf:${env}:${namespace || 'default'}:${service}`,
           defaults: {
             statusCommand,
             connectCommand,
@@ -136,6 +139,7 @@ function buildKbBootstrapCandidate(
         name: datasourceName,
         kind: 'teleport-mysql',
         env,
+        namespace,
         service,
         tags,
         connection: {
@@ -205,8 +209,9 @@ export async function bootstrapDatasource(
   env: string,
   service: string,
   datasourceName: string,
+  namespace?: string,
 ): Promise<BootstrapResult | undefined> {
-  const existing = ctx.datasourceStore.get(datasourceName);
+  const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
   if (existing) {
     return {
       profile: existing,
@@ -215,9 +220,10 @@ export async function bootstrapDatasource(
     };
   }
 
-  const kb = ctx.kbStore.resolveConnection(service, env);
+  const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
-  const profile = await saveKbBootstrapCandidate(ctx, env, service, datasourceName, kb);
+  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
   if (!profile) return undefined;
   return {
     profile,
@@ -231,16 +237,18 @@ export async function reconcileDatasource(
   env: string,
   service: string,
   datasourceName: string,
+  namespace?: string,
 ): Promise<BootstrapResult | undefined> {
-  const kb = ctx.kbStore.resolveConnection(service, env);
+  const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
 
-  const candidate = buildKbBootstrapCandidate(env, service, datasourceName, kb);
+  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const candidate = buildKbBootstrapCandidate(env, service, resolvedName, kb);
   if (!candidate) return undefined;
 
-  const existing = ctx.datasourceStore.get(datasourceName);
+  const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
   if (!existing) {
-    const profile = await saveKbBootstrapCandidate(ctx, env, service, datasourceName, kb);
+    const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
     if (!profile) return undefined;
     return {
       profile,
@@ -258,7 +266,7 @@ export async function reconcileDatasource(
     };
   }
 
-  const profile = await saveKbBootstrapCandidate(ctx, env, service, datasourceName, kb);
+  const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
   if (!profile) return undefined;
   return {
     profile,

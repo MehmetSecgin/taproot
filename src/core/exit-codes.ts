@@ -22,6 +22,8 @@ export function classifyExitCode(input: unknown): number {
     return EXIT_CODES.BAD_INPUT;
   }
   if (upper.startsWith('CONNECTIVITY:')) return EXIT_CODES.CONNECTIVITY;
+  if (upper.startsWith('QUERY_TIMEOUT:')) return EXIT_CODES.GENERAL_ERROR;
+  if (upper.startsWith('MISSING_PARTITION_PREDICATE:')) return EXIT_CODES.BAD_INPUT;
   if (upper.startsWith('AUTH_EXPIRED:')) return EXIT_CODES.AUTH;
   if (upper.startsWith('ACCESS_DENIED:')) return EXIT_CODES.ACCESS_DENIED;
   if (upper.startsWith('UNKNOWN_TARGET:')) return EXIT_CODES.UNKNOWN_TARGET;
@@ -35,6 +37,10 @@ export function exitCodeForClass(code: string): number {
   switch (code) {
     case 'CONNECTIVITY':
       return EXIT_CODES.CONNECTIVITY;
+    case 'QUERY_TIMEOUT':
+      return EXIT_CODES.GENERAL_ERROR;
+    case 'MISSING_PARTITION_PREDICATE':
+      return EXIT_CODES.BAD_INPUT;
     case 'AUTH_EXPIRED':
       return EXIT_CODES.AUTH;
     case 'ACCESS_DENIED':

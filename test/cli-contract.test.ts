@@ -29,10 +29,12 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('query');
     expect(out.stdout).toContain('datasource');
     expect(out.stdout).toContain('template');
+    expect(out.stdout).toContain('card');
     expect(out.stdout).toContain('kb');
     expect(out.stdout).toContain('daemon');
     expect(out.stdout).toContain('session');
     expect(out.stdout).toContain('init');
+    expect(out.stdout).toContain('onboard');
   });
 
   it('prints skill version', () => {
@@ -51,6 +53,13 @@ describe('cli contract', () => {
     const out = runCli(['__complete', 'con']);
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('connector');
+  });
+
+  it('learn help includes schema snapshot command', () => {
+    const out = runCli(['learn', '--help']);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain('schema');
+    expect(out.stdout).toContain('ensure-schema');
   });
 
   it('provides dynamic datasource/template completion entries', () => {

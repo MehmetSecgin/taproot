@@ -146,8 +146,10 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
   const port = await getFreePort();
   const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', dbUser, '--db-name', dbName, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  type ExitInfo = { code: number | null; signal: NodeJS.Signals | null };
   let stderr = '';
   let spawnError = '';
+  const exitState: { value: ExitInfo | null } = { value: null };
   proc.stderr.on('data', (chunk) => {
     stderr += String(chunk);
   });
@@ -156,6 +158,9 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
   });
   proc.once('error', (error) => {
     spawnError = String((error as Error)?.message || error || '');
+  });
+  proc.once('exit', (code, signal) => {
+    exitState.value = { code, signal };
   });
 
   const runtime: ProxyRuntime = {
@@ -171,14 +176,29 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
   proxiesByKey.set(key, runtime);
   markSessionProxy(sessionId, key);
 
+  const abortReason = (): string => {
+    if (spawnError) return `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`;
+    const exit = exitState.value;
+    if (exit) {
+      const detail = stderr.trim() || `tsh proxy db exited code=${exit.code} signal=${exit.signal ?? 'none'}`;
+      return `CONNECTIVITY: teleport proxy path unavailable; ${detail}`;
+    }
+    return '';
+  };
+
   try {
-    await waitForTcpReady('127.0.0.1', port, 10000, () => (spawnError ? `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}` : ''));
+    await waitForTcpReady('127.0.0.1', port, 10000, abortReason);
     return runtime;
   } catch (error) {
     await stopProxy(runtime);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
     if (spawnError) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`);
+    const exit = exitState.value;
+    if (exit) {
+      const detail = stderr.trim() || `tsh proxy db exited code=${exit.code} signal=${exit.signal ?? 'none'}`;
+      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
+    }
     const detail = stderr.trim();
     if (detail) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
     throw error;

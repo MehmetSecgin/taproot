@@ -17,7 +17,10 @@ import { registerSanitize } from './commands/sanitize.js';
 import { registerDaemon } from './commands/daemon.js';
 import { registerSession } from './commands/session.js';
 import { registerInit } from './commands/init.js';
+import { registerOnboard } from './commands/onboard.js';
+import { registerCard } from './commands/card.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
+import { classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
 
@@ -70,6 +73,8 @@ registerSanitize(program, context);
 registerDaemon(program, context);
 registerSession(program, context);
 registerInit(program, context);
+registerOnboard(program, context);
+registerCard(program, context);
 
 program.configureOutput({
   outputError: () => {
@@ -87,9 +92,17 @@ function hasCredsTopologyMisuseHint(input: string): boolean {
 function emitError(error: unknown, code: string): void {
   cleanupProgress();
   const message = (error as Error)?.message || String(error || 'Unknown error');
+  const classifiedCode = code === 'UNHANDLED' || code === 'UNCAUGHT_EXCEPTION' || code === 'UNHANDLED_REJECTION'
+    ? classifyError(message)
+    : code;
   const jsonMode = process.argv.includes('--json');
   if (jsonMode) {
-    printEnvelope(false, undefined, { code, message });
+    printEnvelope(
+      false,
+      undefined,
+      { code: classifiedCode, message, details: (error as Error & { details?: unknown })?.details },
+      (error as Error & { meta?: Record<string, unknown> })?.meta,
+    );
     return;
   }
   console.error(message);

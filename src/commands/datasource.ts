@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { defaultDatasourceName, normalizeService } from '../core/app.js';
+import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson } from '../core/output.js';
@@ -27,6 +27,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       name: d.name,
       kind: d.kind,
       env: d.env || '',
+      namespace: d.namespace || '',
       service: d.service || '',
       confidence: d.confidence,
       updatedAt: d.updatedAt,
@@ -45,6 +46,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         name: item.name,
         kind: item.kind,
         env: item.env || '',
+        namespace: item.namespace || '',
         service: item.service || '',
         credentialRef: item.credentialRef,
         connectors: item.connectors || [],
@@ -74,6 +76,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .requiredOption('--kind <kind>')
     .requiredOption('--credential-ref <ref>')
     .option('--env <env>')
+    .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--host <host>')
     .option('--port <port>')
@@ -92,6 +95,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         name: opts.name,
         kind: opts.kind,
         env: opts.env,
+        namespace: opts.namespace ? normalizeNamespace(opts.namespace) : undefined,
         service: opts.service ? normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()) : undefined,
         tags: [],
         connection: {
@@ -122,11 +126,13 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
   ds.command('resolve')
     .requiredOption('--env <env>')
+    .option('--namespace <namespace>')
     .requiredOption('--service <service>')
     .action(async (opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service);
+      const namespace = normalizeNamespace(opts.namespace);
+      const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
       if (fromStore) {
         if (ctx.jsonMode) printJson({ source: 'datasource-store', profile: fromStore });
         else {
@@ -135,6 +141,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
             name: fromStore.name,
             kind: fromStore.kind,
             env: fromStore.env || '',
+            namespace: fromStore.namespace || '',
             service: fromStore.service || '',
             credentialRef: fromStore.credentialRef,
             host: fromStore.connection?.host || '',
@@ -145,13 +152,13 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         }
         return;
       }
-      const kb = ctx.kbStore.resolveConnection(service, opts.env);
-      if (!kb) throw new Error(`No datasource profile found for env=${opts.env} service=${service}`);
-      const name = defaultDatasourceName(opts.env, service);
+      const kb = ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined);
+      if (!kb) throw new Error(`No datasource profile found for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
+      const name = defaultDatasourceName(opts.env, service, String(kb.namespace || namespace || '').trim() || undefined);
       const profile = await saveKbBootstrapCandidate(ctx, opts.env, service, name, kb, {
         confidence: 0.85,
       });
-      if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env} service=${service}`);
+      if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       if (ctx.jsonMode) printJson({ source: 'kb', profile });
       else {
         console.log(`source: kb`);

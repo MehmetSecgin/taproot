@@ -26,4 +26,12 @@ export const RUNTIME_CONSTANTS = {
   rpc: {
     requestTimeoutMs: 30 * 1000,
   },
+  query: {
+    defaultTimeoutMs: intFromEnv('TAPROOT_QUERY_TIMEOUT_MS', 5 * 1000),
+  },
+  connector: {
+    preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),
+    statusCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_STATUS_MS', 3 * 1000),
+    connectCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_CONNECT_MS', 12 * 1000),
+  },
 } as const;

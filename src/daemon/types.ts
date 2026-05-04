@@ -1,3 +1,5 @@
+import type { QueryMemory, SchemaContext } from '../types/core.js';
+
 export interface RpcRequest {
   protocolVersion: number;
   requestId: string;
@@ -20,6 +22,8 @@ export interface RpcResponse {
   meta: {
     runId?: string;
     sessionId?: string;
+    schemaContext?: SchemaContext;
+    queryMemory?: QueryMemory;
     timings?: {
       durationMs: number;
     };
@@ -44,6 +48,7 @@ export interface SessionRecord {
   fingerprint: string;
   datasourceName: string;
   env?: string;
+  namespace?: string;
   service?: string;
   kind?: string;
   state: SessionState;

@@ -30,8 +30,12 @@ export class DatasourceStore {
     return true;
   }
 
-  resolveByEnvService(env: string, service: string): DatasourceProfile | undefined {
-    const filtered = this.list().filter((d) => d.env === env && d.service === service);
+  resolveByEnvService(env: string, service: string, namespace?: string): DatasourceProfile | undefined {
+    const filtered = this.list().filter((d) => {
+      if (d.env !== env || d.service !== service) return false;
+      if (namespace == null || namespace === '') return true;
+      return String(d.namespace || '') === namespace;
+    });
     if (!filtered.length) return undefined;
     return filtered.sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
   }

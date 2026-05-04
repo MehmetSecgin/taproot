@@ -10,6 +10,7 @@ export const DatasourceProfileSchema = z.object({
   name: z.string().min(1),
   kind: z.string().min(1),
   env: z.string().optional(),
+  namespace: z.string().optional(),
   service: z.string().optional(),
   tags: z.array(z.string()).default([]),
   connection: z.object({
@@ -49,6 +50,7 @@ export const EnvironmentPolicySchema = z.object({
   allowDiscoveryByDefault: z.boolean().default(false),
   preferredAccessMethods: z.array(z.string()).default([]),
   targetPreference: z.array(z.string()).default([]),
+  ledgerRedactionTier: z.enum(['raw', 'redact', 'strict']).optional(),
 });
 
 export const RuntimeConfigSchema = z.object({
@@ -63,7 +65,12 @@ export const RuntimeConfigSchema = z.object({
       sampleCellMax: z.number().int().positive().optional(),
       ttlHours: z.number().int().positive().optional(),
     }).optional(),
+    ledger: z.object({
+      redactionTier: z.enum(['raw', 'redact', 'strict']).optional(),
+    }).optional(),
+    cardRoots: z.array(z.string()).optional(),
   }).optional(),
+  cardRoots: z.array(z.string()).optional(),
   environmentPolicies: z.record(z.string(), EnvironmentPolicySchema.partial()).optional(),
   serviceAliases: z.record(z.string(), z.string()).optional(),
 });

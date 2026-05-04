@@ -8,16 +8,20 @@ description: Use TapRoot for deterministic datasource queries, doctor checks, KB
 Use TapRoot as the canonical DB/operator path.
 
 ## Hard Rules
+- **Schema first.** Before any exploratory table/column SQL, run `taproot --json learn ensure-schema --datasource <name>` or `--env <env> --service <service>`. It returns cached learning when present and runs one introspection pass when missing. Do not rediscover tables/columns with ad-hoc queries.
+- **Read schemaContext.** Every `taproot query` response carries `meta.schemaContext` for referenced learned tables. Read it for partition keys and indexes before writing the next query against the same datasource. Do not re-run `SHOW CREATE` when `schemaContext` already has the table metadata.
+- **All DDL inspection goes through TapRoot.** When you need DDL, use `taproot --json query --query "SHOW CREATE TABLE <db>.<table>"` (or `SHOW FULL COLUMNS FROM <table>`). Never run `mysql -e`, `psql -c`, `tsh db exec`, or `tsh proxy db` directly. Routing the query through TapRoot lands the result in the learning store and benefits the next agent.
+- **No silent fallback.** If TapRoot returns `CONNECTIVITY`, `ACCESS_DENIED`, `AUTH_EXPIRED`, `MISCONFIGURED_DATASOURCE`, or any non-`ok` response, surface `error.code`, `error.message`, and `nextActionDetails` and stop. Do not bypass with direct `mysql` / `psql` / `tsh` commands. Direct fallback is only allowed when the user explicitly asks for it.
+- **Daemon + session for repeated tsh access.** For datasources accessed via `tsh` (e.g. `tidb-orders-prod`), run `taproot --json daemon start` and open a session before issuing queries. Cold `tsh proxy db` adds 3–10 s per call; reuse a session.
 - Prefer `--json` for command execution paths that will be parsed or relayed.
 - Prefer `--datasource` when the datasource is already known; use `--env` + `--service` when resolution is part of the task.
 - Prefer known-good existing TapRoot state over rediscovery. If datasource, service/env mapping, target, database, or query intent is already known from the user, KB, saved templates, cache, or prior TapRoot output, use it directly instead of rediscovering it.
-- Prefer `--intent` or `--template` over raw SQL when the task matches an existing query shape. Raw SQL is the fallback, not the default.
+- Prefer curated query cards, then `--intent` or `--template`, over raw SQL when the task matches an existing query shape. Raw SQL is the fallback, not the default.
 - Keep queries read-only unless the user explicitly requests mutation and the datasource policy allows it.
 - TapRoot query execution defaults to a 5000ms timeout. Only raise it with `--timeout-ms <ms>` when a slower query is intentional.
 - Never inspect TapRoot cache, learning, or credential files directly. Use TapRoot commands only.
 - Respect runtime config from `~/.taproot/config/deterministic-config.json`; environment safety and service alias behavior come from config, not hardcoded env names.
 - Service names are normalized through `serviceAliases` in runtime config. Always use the canonical service name when known; aliases resolve transparently but should not be stored.
-- Do not fall back to direct `mysql`, `psql`, or `tsh` commands for DB work unless the user explicitly requests that fallback.
 
 ## Setup & Credentials
 - Use `taproot --json init` at the start of a new machine or repo setup to create starter runtime state and get the current readiness summary.
@@ -47,10 +51,12 @@ Use TapRoot as the canonical DB/operator path.
 
 3. Execute the query path.
 - Query selection order:
-  - First: `taproot --json query --datasource <name> --intent "<intent>" --param key=value`
-  - Second: `taproot --json query --datasource <name> --template <id> --param key=value`
-  - Third: `taproot --json query --datasource <name> --query "<sql>"`
+  - First: `taproot --json query --datasource <name> --card <id> --param key=value`
+  - Second: `taproot --json query --datasource <name> --intent "<intent>" --param key=value`
+  - Third: `taproot --json query --datasource <name> --template <id> --param key=value`
+  - Fourth: `taproot --json query --datasource <name> --query "<sql>"`
 - Use `taproot --json cache resolve-query --service <service> --intent "<intent>"` when you suspect an intent/query mapping already exists and need to inspect it before writing SQL.
+- Use `taproot --json card list --datasource <name>` and `taproot --json card show <id>` to inspect curated, repo-reviewable query cards before inventing SQL.
 - When env/service is the entrypoint, use `taproot --json query --env <env> --service <service> ...`.
 - Use `--timeout-ms <ms>` only when the user explicitly needs more than the default 5000ms budget.
 - Add `--allow-discovery` only as a last resort when deterministic routing is missing and the user has explicitly authorized discovery.
@@ -64,6 +70,7 @@ Use TapRoot as the canonical DB/operator path.
 - Schema discovery is last resort work. If the user already named the table or TapRoot already has the query shape, do not start with table discovery.
 
 4. Template management.
+- Use `taproot --json card list`, `card show <id>`, and `card validate <path>` for curated query-card inspection. Cards may carry soft requirements in `meta.queryMemory.warnings`; fix the SQL/card usage unless the warning is knowingly irrelevant.
 - Use `taproot --json template list` to see available templates.
 - Use `taproot --json template validate --id <id>` to check parameter coverage before relying on a template.
 - Use `taproot --json template run --id <id> --param key=value` to render a template without executing it.
@@ -74,6 +81,8 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot --json cache resolve-query --service <service> --intent "<intent>"` to inspect saved query templates.
 - Use `taproot --json cache save-target ...` or `taproot --json cache save-query ...` only when the user explicitly wants to pin a reusable target or query shape.
 - Use `taproot --json learn status` or `taproot --json learn replay --run-id <id>` for learning/run inspection.
+- Use `taproot --json learn ensure-schema --datasource <name>` as the default first read for table/column context.
+- Use `taproot --json learn schema --datasource <name>` when you explicitly want a read-only view of current learned schema without triggering introspection.
 - Use `taproot --json learn tables --datasource <name> --limit <n>`, `learn joins`, and `learn shapes` to inspect learned schema observations.
 - Use `taproot --json learn refresh-schema --datasource <name>` when learned schema is empty or stale and TapRoot needs to refresh metadata itself.
 
@@ -90,15 +99,39 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot completion zsh` or `taproot completion bash` / `fish` to inspect or install shell completion output.
 
 ## Error Handling
-- `CONNECTIVITY` or connector failures: rerun doctor with `--connect` once, then return `checks`, ordered `nextActions`, and structured `nextActionDetails`.
-- `ACCESS_DENIED` or `AUTH_EXPIRED`: fail fast and return the exact error plus the next operator action.
-- `BAD_INPUT`: invalid CLI arguments or missing required params. Check the command signature and required options.
+
+Each code below has one allowed recovery action. Do not loop. Return error + `nextActionDetails` to the user if the single recovery does not resolve it.
+
+- `CONNECTIVITY` / connector failures: rerun `doctor --datasource <n> --connect` ONCE. If still failing, return `checks` + ordered `nextActions` + structured `nextActionDetails` and stop.
+- `ACCESS_DENIED` / `AUTH_EXPIRED`: fail fast. Tell the user to run `tsh login` or `taproot creds set` themselves. Never spawn an interactive `tsh login` from inside the agent.
+- `BAD_INPUT`: invalid CLI arguments or missing required params. Re-read the command signature; do not retry blindly.
+- `MISSING_PARTITION_PREDICATE`: table is RANGE/LIST-partitioned. Add the partition column(s) to WHERE or JOIN predicates and retry through TapRoot. Do not bypass with direct `tsh db exec`; `--allow-partition-scan` requires explicit user authorization.
 - `UNKNOWN_TARGET`: datasource or target not found. Verify the datasource name first, then rerun resolution.
-- `OVERLOADED`: daemon query queue is full. Wait and retry, or use direct CLI mode with `TAPROOT_FORCE_DIRECT=1`.
-- `SESSION_BUSY`: the per-session concurrent lease cap is exceeded. Wait for in-flight queries to finish, or open a new session.
+- `OVERLOADED`: daemon query queue is full. Wait and retry once, or use direct CLI mode with `TAPROOT_FORCE_DIRECT=1`.
+- `SESSION_BUSY`: per-session concurrent-lease cap exceeded. Wait for in-flight queries to finish or open a new session.
 - `DETERMINISTIC_REQUIRED`: require a deterministic path from datasource profile or KB, or a config/CLI setting that explicitly enables discovery for that environment.
 - `DISCOVERY_UNAVAILABLE`: populate deterministic routing through datasource profiles, KB, or prior TapRoot learning before retrying.
-- `MISCONFIGURED_DATASOURCE`: the datasource profile conflicts with stronger KB-backed routing and should be repaired with `taproot --json init datasource --env <env> --service <service>` before query execution.
+- `MISCONFIGURED_DATASOURCE`: repair with `taproot --json init datasource --env <env> --service <service>` before query execution.
+
+## Troubleshooting
+
+Map symptoms to TapRoot commands. Do not bypass.
+
+- **Hangs ~10 s, then `CONNECTIVITY: teleport proxy path unavailable`** — `tsh proxy db` is exiting before TCP-ready (expired cert, bad db user, missing target). Run `taproot --json doctor --datasource <n> --connect --verbose-detail`. Verify `tsh status` outside TapRoot only to diagnose; do not switch to direct `tsh db exec` for the actual query.
+- **Repeated `SHOW CREATE TABLE` calls in a session** — call `taproot --json learn ensure-schema ...` once at the start. The schema cache answers column / index / DDL questions. Re-running `SHOW CREATE` per question is the smell that introspection was skipped.
+- **`taproot doctor` slow (>15 s)** — likely OpenVPN connect (up to 20 s) or cold `tsh proxy db`. Drop `--connect` if you only need status. Confirm the daemon is started so subsequent queries reuse the session.
+- **Query timeout fires immediately** — connector preflight ran before the query timeout was applied. Pass `--timeout-ms` large enough to cover preflight + query.
+- **First query against a prod tsh datasource is always slow** — start the daemon and open a session, then run queries. Cold-spawn `tsh proxy db` is the cost.
+
+## First Successful Query — Prod TSH Smoke Test
+
+Verify TapRoot is healthy against a known prod datasource (read-only DDL only):
+
+```bash
+taproot --json daemon start
+taproot --json learn ensure-schema --env prod --service order-processor
+taproot --json query --env prod --service order-processor --query "SHOW CREATE TABLE order_service.order_items"
+```
 
 ## First Successful Query (Happy Path)
 ```bash

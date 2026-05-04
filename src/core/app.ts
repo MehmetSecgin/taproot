@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { RUNTIME_CONSTANTS } from './constants.js';
 import { ensurePaths, resolveFallbackPaths, resolvePaths } from './paths.js';
 import { DatasourceStore } from '../store/datasources.js';
 import { TemplateStore } from '../store/templates.js';
@@ -6,6 +7,7 @@ import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { LearningStore } from '../store/learning.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
+import { CardStore } from '../store/cards.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
@@ -19,6 +21,7 @@ export interface AppContext {
   kbStore: KbStore;
   learningStore: LearningStore;
   runtimeConfigStore: RuntimeConfigStore;
+  cardStore: CardStore;
   pluginRegistry: PluginRegistry;
   jsonMode: boolean;
   noColor: boolean;
@@ -41,6 +44,7 @@ export function buildContext(opts: {
     ensurePaths(paths);
   }
   const pluginRegistry = new PluginRegistry();
+  const runtimeConfigStore = new RuntimeConfigStore(paths.runtimeConfigFile);
   loadBuiltins(pluginRegistry);
   return {
     paths,
@@ -49,7 +53,8 @@ export function buildContext(opts: {
     credentialStore: new CredentialStore(paths.credentialFile),
     kbStore: new KbStore(paths.kbDir),
     learningStore: new LearningStore(paths.learningDir),
-    runtimeConfigStore: new RuntimeConfigStore(paths.runtimeConfigFile),
+    runtimeConfigStore,
+    cardStore: new CardStore({ stateRoot: paths.stateRoot, runtimeConfigStore }),
     pluginRegistry,
     jsonMode: Boolean(opts.jsonMode),
     noColor: Boolean(opts.noColor),
@@ -64,6 +69,10 @@ export function normalizeService(value?: string, aliases?: Record<string, string
   const normalized = v.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
   const aliasMap = aliases || {};
   return aliasMap[normalized] || normalized;
+}
+
+export function normalizeNamespace(value?: string): string {
+  return (value || '').trim().replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
 }
 
 export function environmentPolicy(ctx: Pick<AppContext, 'runtimeConfigStore'>, env?: string): EnvironmentPolicy {
@@ -94,6 +103,7 @@ export function parseParamPairs(values: string[]): Record<string, string> {
 export function nextAction(errorCode: string): string {
   const mapping: Record<string, string> = {
     QUERY_TIMEOUT: 'Retry with a narrower query or raise --timeout-ms if the longer runtime is intentional.',
+    MISSING_PARTITION_PREDICATE: 'Add the table partition column to WHERE or JOIN predicates and retry through TapRoot.',
     MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
@@ -109,12 +119,39 @@ export function nextAction(errorCode: string): string {
   return mapping[errorCode] || mapping.GENERIC;
 }
 
-export function defaultDatasourceName(env: string, service: string): string {
-  return `${env}-${service}`;
+export function defaultDatasourceName(env: string, service: string, namespace?: string): string {
+  const normalizedNamespace = normalizeNamespace(namespace);
+  return normalizedNamespace ? `${env}-${normalizedNamespace}-${service}` : `${env}-${service}`;
 }
 
 export function runOutputDir(paths: ReturnType<typeof resolvePaths>): string {
   return path.join(paths.stateRoot, 'runs');
+}
+
+async function withConnectorTimeout(name: string, mode: string, timeoutMs: number, run: () => Promise<DoctorCheck[]>): Promise<DoctorCheck[]> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race<DoctorCheck[]>([
+      run(),
+      new Promise<DoctorCheck[]>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`connector_timeout: ${name} ${mode} exceeded ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    const message = (error as Error).message || String(error);
+    return [
+      {
+        check: `connector:${name}`,
+        status: 'fail',
+        detail: message.slice(0, 400),
+        code: message.startsWith('connector_timeout') ? 'connector_timeout' : 'connector_check_failed',
+      },
+    ];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function runDatasourceConnectors(input: {
@@ -124,30 +161,60 @@ export async function runDatasourceConnectors(input: {
   mode: 'doctor' | 'connect' | 'disconnect';
 }): Promise<DoctorCheck[]> {
   const connectors = input.datasource.connectors || [];
+  const perCheckTimeoutMs =
+    input.mode === 'connect'
+      ? RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs
+      : RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
+
+  const settled = await Promise.allSettled(
+    connectors.map(async (name): Promise<DoctorCheck[]> => {
+      const plugin = input.pluginRegistry.get(name);
+      if (!plugin) {
+        return [{ check: `connector:${name}`, status: 'warn', detail: 'connector plugin not found', code: 'connector_plugin_missing' }];
+      }
+      const refKey = `${name}CredentialRef`;
+      const ref = String(input.datasource.resolverHints?.[refKey] || '').trim();
+      const creds = ref ? await input.credentialStore.get(ref) : {};
+      if (input.mode === 'doctor' && plugin.doctor) {
+        return await withConnectorTimeout(name, 'doctor', perCheckTimeoutMs, () =>
+          plugin.doctor!({ datasource: input.datasource, credentials: creds }),
+        );
+      }
+      if (input.mode === 'connect' && plugin.connect) {
+        return await withConnectorTimeout(name, 'connect', perCheckTimeoutMs, () =>
+          plugin.connect!({ datasource: input.datasource, credentials: creds }),
+        );
+      }
+      if (input.mode === 'disconnect' && plugin.disconnect) {
+        return await withConnectorTimeout(name, 'disconnect', perCheckTimeoutMs, () =>
+          plugin.disconnect!({ datasource: input.datasource, credentials: creds }),
+        );
+      }
+      return [
+        {
+          check: `connector:${name}`,
+          status: 'warn',
+          detail: `mode '${input.mode}' not supported by plugin`,
+          code: 'connector_mode_unsupported',
+        },
+      ];
+    }),
+  );
+
   const checks: DoctorCheck[] = [];
-  for (const name of connectors) {
-    const plugin = input.pluginRegistry.get(name);
-    if (!plugin) {
-      checks.push({ check: `connector:${name}`, status: 'warn', detail: 'connector plugin not found', code: 'connector_plugin_missing' });
-      continue;
-    }
-    const refKey = `${name}CredentialRef`;
-    const ref = String(input.datasource.resolverHints?.[refKey] || '').trim();
-    const creds = ref ? await input.credentialStore.get(ref) : {};
-    if (input.mode === 'doctor' && plugin.doctor) {
-      checks.push(...(await plugin.doctor({ datasource: input.datasource, credentials: creds })));
-    } else if (input.mode === 'connect' && plugin.connect) {
-      checks.push(...(await plugin.connect({ datasource: input.datasource, credentials: creds })));
-    } else if (input.mode === 'disconnect' && plugin.disconnect) {
-      checks.push(...(await plugin.disconnect({ datasource: input.datasource, credentials: creds })));
+  settled.forEach((result, idx) => {
+    if (result.status === 'fulfilled') {
+      checks.push(...result.value);
     } else {
+      const name = connectors[idx];
+      const message = (result.reason as Error)?.message || String(result.reason);
       checks.push({
         check: `connector:${name}`,
-        status: 'warn',
-        detail: `mode '${input.mode}' not supported by plugin`,
-        code: 'connector_mode_unsupported',
+        status: 'fail',
+        detail: message.slice(0, 400),
+        code: 'connector_check_failed',
       });
     }
-  }
+  });
   return checks;
 }

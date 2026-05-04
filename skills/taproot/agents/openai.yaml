@@ -1,7 +1,7 @@
 interface:
   display_name: "TapRoot"
   short_description: "Operate TapRoot for DB queries, doctor checks, template management, credential setup, and schema inspection."
-  default_prompt: "Use $taproot to run a TapRoot doctor or query workflow and explain the result."
+  default_prompt: "Use $taproot to run a TapRoot workflow and explain the result. When table or column context is needed, start with `taproot --json learn ensure-schema --datasource <name>` (or `--env <env> --service <service>`), which should reuse learned schema and introspect once only when learning is missing."
 
 policy:
   allow_implicit_invocation: true

@@ -3,19 +3,26 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { buildContext, classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
-import { enforceMutationPolicy } from '../core/safety.js';
+import { enforceMutationPolicy, enforcePartitionPredicate } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
+import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
+import { ensureSchemaSnapshot } from '../commands/learn.js';
+import { supportsSchemaRefresh } from '../core/schema-refresh.js';
+import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
+import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
+import { buildQueryMemory, resolveReason } from '../core/query-memory.js';
+import type { QueryCard } from '../types/cards.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -23,7 +30,7 @@ export interface DaemonOptions {
 }
 
 function defaultRunDir(stateRoot?: string): string {
-  return path.join(stateRoot || path.join(os.homedir(), '.taproot'), 'run');
+  return path.join(stateRoot || process.env.TAPROOT_STATE_ROOT || path.join(os.homedir(), '.taproot'), 'run');
 }
 
 function responseBase(req: RpcRequest): RpcResponse {
@@ -52,6 +59,10 @@ function parseQueryParams(params: Record<string, unknown>): Record<string, strin
     return Object.fromEntries(Object.entries(params.params as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
   }
   return {};
+}
+
+function cardParamNames(card: QueryCard): string[] {
+  return (card.params || []).map((param) => param.name).filter(Boolean);
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
@@ -128,6 +139,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const session = sessions.open({
                 datasourceName: String(req.params.datasource || req.params.datasourceName || 'unknown'),
                 env: String(req.params.env || ''),
+                namespace: String(req.params.namespace || ''),
                 service: String(req.params.service || ''),
                 kind: String(req.params.kind || ''),
                 connection: (req.params.connection as Record<string, unknown>) || {},
@@ -172,6 +184,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const rawDs = String(req.params.datasource || '').trim();
               const alias = rawDs.match(/^([a-z0-9]+)-([a-z0-9-]+)$/i);
               const env = String(req.params.env || alias?.[1] || '').trim();
+              const namespace = normalizeNamespace(String(req.params.namespace || ''));
               const service = normalizeService(String(req.params.service || alias?.[2] || ''), ctx.runtimeConfigStore.serviceAliases());
               const policy = environmentPolicy(ctx, env);
               if (allowDiscovery || policy.allowDiscoveryByDefault) {
@@ -180,11 +193,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
               let resolutionSource: 'explicit' | 'store' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
               if (!datasource && env && service) {
-                datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+                datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
                 if (datasource) resolutionSource = 'store';
               }
               if (!datasource && env && service) {
-                const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || `${env}-${service}`);
+                const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined);
                 if (bootstrapped) {
                   datasource = bootstrapped.profile;
                   resolutionSource = 'kb';
@@ -197,14 +210,21 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 throw new Error('Datasource resolution failed.');
               }
 
-              const releaseGlobal = await queryLimiter.acquire();
+              const timeoutMs = parseTimeoutMs(req.params.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
+              const timeoutController = new AbortController();
+              const timeoutTimer = setTimeout(() => {
+                timeoutController.abort(new Error(`QUERY_TIMEOUT: query exceeded timeout (${timeoutMs}ms) and was aborted.`));
+              }, timeoutMs);
+              const startedAtMs = Date.now();
+              const remainingTimeoutMs = (): number => Math.max(1, timeoutMs - (Date.now() - startedAtMs));
+              const releaseGlobal = await queryLimiter.acquire({ signal: timeoutController.signal });
               let leaseSessionId = '';
               let leaseId = '';
               let heartbeat: NodeJS.Timeout | undefined;
               try {
                 const warnings: string[] = [];
                 if (env && service) {
-                  const kb = ctx.kbStore.resolveConnection(service, env);
+                  const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
                   if (kb) {
                     const critical = criticalDatasourceKbConflicts(datasource as DatasourceProfile, kb);
                     if (critical.length) {
@@ -219,6 +239,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 const session = sessions.open({
                   datasourceName: datasource.name,
                   env: datasource.env,
+                  namespace: datasource.namespace,
                   service: datasource.service,
                   kind: datasource.kind,
                   connection: datasource.connection as Record<string, unknown>,
@@ -233,13 +254,25 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 );
                 let query = String(req.params.query || '').trim();
                 const params = parseQueryParams(req.params);
+                let selectedCard: QueryCard | undefined;
+                if (req.params.card) {
+                  selectedCard = ctx.cardStore.get(String(req.params.card));
+                  if (!selectedCard) throw new Error(`Query card not found: ${String(req.params.card)}`);
+                  const allowedParams = cardParamNames(selectedCard);
+                  if (allowedParams.length) {
+                    const unknownParams = Object.keys(params).filter((key) => !allowedParams.includes(key));
+                    if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for card ${selectedCard.id}: ${unknownParams.join(', ')}`);
+                  }
+                  if (!query) query = fillTemplate(selectedCard.sql, params);
+                }
                 if (!query && req.params.template) {
                   const tpl = ctx.templateStore.get(String(req.params.template));
                   if (!tpl) throw new Error(`Template not found: ${String(req.params.template)}`);
                   query = fillTemplate(tpl.nativeQueryTemplate, params);
                 }
-                if (!query && req.params.intent) {
-                  const intent = String(req.params.intent);
+                const effectiveIntent = String(req.params.intent || selectedCard?.intent || '');
+                if (!query && effectiveIntent) {
+                  const intent = effectiveIntent;
                   const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', intent);
                   const tpl =
                     (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
@@ -248,59 +281,149 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
                 }
                 if (!query) throw new Error('No query resolved.');
-                const testHoldMs = Number(req.params._testHoldMs || 0);
-                if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
-                  await new Promise((r) => setTimeout(r, testHoldMs));
-                }
-
                 const allowMutate = Boolean(req.params.allowMutate);
-                enforceMutationPolicy({ sql: query, allowMutate, datasource: datasource as DatasourceProfile });
+                const referencedTables = collectReferencedTables(query);
+                if (supportsSchemaRefresh(datasource as DatasourceProfile) && referencedTables.length) {
+                  try {
+                    await ensureSchemaSnapshot(ctx, {
+                      datasource: datasource.name,
+                      tables: referencedTables,
+                      metadataTimeoutMs: 3000,
+                    });
+                  } catch {
+                    // Query execution must not depend on metadata refresh succeeding.
+                  }
+                }
+                const schemaContext = buildSchemaContext(query, datasource.name, ctx.learningStore);
+                const reason = resolveReason(String(req.params.reason || ''));
+                const queryMemory = buildQueryMemory({
+                  ledgerDir: ctx.paths.runsLedgerDir,
+                  datasource: datasource.name,
+                  env,
+                  service,
+                  intent: effectiveIntent,
+                  reason,
+                  sql: query,
+                  tables: referencedTables,
+                  cardStore: ctx.cardStore,
+                  selectedCard,
+                });
+                base.meta.schemaContext = schemaContext;
+                base.meta.queryMemory = queryMemory;
                 const capability = allowMutate ? 'executeMutate' : 'executeRead';
                 const plugin = ctx.pluginRegistry.get(datasource.kind);
                 if (!plugin?.execute) throw new Error(`No execute plugin for '${datasource.kind}'.`);
+                const execute = plugin.execute;
                 if (!plugin.manifest.capabilities.includes(capability as any)) throw new Error(`Plugin '${plugin.manifest.name}' does not support ${capability}.`);
                 const creds = await ctx.credentialStore.get(datasource.credentialRef);
                 const execCreds = { ...creds, __sessionId: session.sessionId };
                 const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
                 base.meta.runId = artifacts.runId;
                 appendEvent(artifacts.runDir, `daemon query started capability=${capability} requestId=${req.requestId}`);
-                const connectorChecks = await runDatasourceConnectors({
-                  datasource: datasource as DatasourceProfile,
-                  credentialStore: ctx.credentialStore,
-                  pluginRegistry: ctx.pluginRegistry,
-                  mode: 'connect',
-                });
-                for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-                if (connectorChecks.some((c) => c.status === 'fail')) {
-                  throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+                try {
+                  enforceMutationPolicy({ sql: query, allowMutate, datasource: datasource as DatasourceProfile });
+                  warnings.push(
+                    ...enforcePartitionPredicate({
+                      sql: query,
+                      schemaContext,
+                      allowPartitionScan: Boolean(req.params.allowPartitionScan),
+                    }),
+                  );
+                  const connectorChecks = await runDatasourceConnectors({
+                    datasource: datasource as DatasourceProfile,
+                    credentialStore: ctx.credentialStore,
+                    pluginRegistry: ctx.pluginRegistry,
+                    mode: 'connect',
+                  });
+                  for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
+                  if (connectorChecks.some((c) => c.status === 'fail')) {
+                    throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+                  }
+                  const testHoldMs = Number(req.params._testHoldMs || 0);
+                  const result = await withQueryTimeout({
+                    timeoutMs: remainingTimeoutMs(),
+                    run: async () => {
+                      if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
+                        await new Promise((r) => setTimeout(r, testHoldMs));
+                      }
+                      return await execute(
+                        {
+                          datasource: datasource as DatasourceProfile,
+                          query,
+                          capability: capability as any,
+                          timeoutMs: remainingTimeoutMs(),
+                        },
+                        execCreds,
+                      );
+                    },
+                  });
+                  result.resolved = {
+                    source: resolutionSource,
+                    env,
+                    namespace: datasource.namespace || namespace || undefined,
+                    service,
+                    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
+                    target: String(datasource.connection.target || ''),
+                    database: String(datasource.connection.database || ''),
+                    engine: datasource.kind,
+                  };
+                  result.runId = artifacts.runId;
+                  if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
+                  result.meta = { ...(result.meta || {}), schemaContext, queryMemory };
+                  appendRunsLedgerEntry(
+                    ledgerInputFromResult({
+                      ledgerDir: ctx.paths.runsLedgerDir,
+                      result,
+                      datasource: datasource as DatasourceProfile,
+                      intent: effectiveIntent,
+                      reason,
+                      sql: query,
+                      tables: referencedTables,
+                      redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
+                      sessionId: session.sessionId,
+                    }),
+                  );
+                  writeRunSummary(artifacts.runDir, result);
+                  appendEvent(artifacts.runDir, `daemon query succeeded requestId=${req.requestId}`);
+                  ctx.learningStore.saveSuccess({ datasource: datasource as DatasourceProfile, queryIntent: effectiveIntent, sql: query, result });
+                  base.ok = true;
+                  base.data = {
+                    columns: result.result.columns,
+                    rows: result.result.rows,
+                    datasource: datasource.name,
+                    plugin: result.plugin,
+                    classification: result.classification,
+                    warnings: [...(result.warnings || []), ...warnings],
+                    queryMemory,
+                  };
+                } catch (error) {
+                  const message = (error as Error).message;
+                  const code = classifyError(message);
+                  appendEvent(artifacts.runDir, `daemon query failed code=${code} message=${message}`);
+                  ctx.learningStore.saveFailure({
+                    datasource: datasource as DatasourceProfile,
+                    queryIntent: effectiveIntent,
+                    sql: query,
+                    errorClass: code,
+                  });
+                  appendRunsLedgerEntry({
+                    ledgerDir: ctx.paths.runsLedgerDir,
+                    runId: artifacts.runId,
+                    sessionId: session.sessionId,
+                    datasource: datasource as DatasourceProfile,
+                    intent: effectiveIntent,
+                    reason,
+                    sql: query,
+                    tables: referencedTables,
+                    capability: capability as any,
+                    outcomeCode: code,
+                    errorClass: code,
+                    redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
+                  });
+                  throw error;
                 }
-                const result = await plugin.execute(
-                  { datasource: datasource as DatasourceProfile, query, capability: capability as any },
-                  execCreds,
-                );
-                result.resolved = {
-                  source: resolutionSource,
-                  env,
-                  service,
-                  accessMethod: String(ctx.kbStore.resolveConnection(service, env)?.access_method || ''),
-                  target: String(datasource.connection.target || ''),
-                  database: String(datasource.connection.database || ''),
-                  engine: datasource.kind,
-                };
-                result.runId = artifacts.runId;
-                writeRunSummary(artifacts.runDir, result);
-                appendEvent(artifacts.runDir, `daemon query succeeded requestId=${req.requestId}`);
-                ctx.learningStore.saveSuccess({ datasource: datasource as DatasourceProfile, queryIntent: String(req.params.intent || ''), sql: query, result });
-                base.ok = true;
-                base.data = {
-                  columns: result.result.columns,
-                  rows: result.result.rows,
-                  datasource: datasource.name,
-                  plugin: result.plugin,
-                  classification: result.classification,
-                  warnings,
-                };
               } finally {
+                clearTimeout(timeoutTimer);
                 if (heartbeat) clearInterval(heartbeat);
                 if (leaseSessionId && leaseId) sessions.releaseLease(leaseSessionId, leaseId);
                 releaseGlobal();
@@ -326,7 +449,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
             base.error = {
               code,
               message,
-              details: { nextAction: nextAction(code) },
+              details: { ...(((error as Error & { details?: Record<string, unknown> }).details) || {}), nextAction: nextAction(code) },
             };
           }
 

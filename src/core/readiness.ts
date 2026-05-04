@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { normalizeService, runDatasourceConnectors } from './app.js';
+import { normalizeNamespace, normalizeService, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
 import type { DatasourceProfile, DoctorCheckCode, RemediationAction } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
@@ -18,6 +18,7 @@ export type ReadinessCheckStatus = 'ok' | 'warn' | 'fail';
 export interface ReadinessTargetInput {
   datasource?: string;
   env?: string;
+  namespace?: string;
   service?: string;
 }
 
@@ -215,7 +216,7 @@ export function nextActionDetailsForReadiness(
       if (input?.target?.env && input?.target?.service) {
         add(
           actionForReadiness({
-            command: `taproot --json init datasource --env ${input.target.env} --service ${input.target.service}`,
+            command: `taproot --json init datasource --env ${input.target.env}${input.target.namespace ? ` --namespace ${input.target.namespace}` : ''} --service ${input.target.service}`,
             priority: READINESS_ACTION_PRIORITIES.datasourceRepair,
             reason: 'The target datasource does not exist yet, so KB-backed datasource creation/repair is the next step.',
             checks: ['target_datasource'],
@@ -351,9 +352,10 @@ export function nextCommandForReadiness(
 async function resolveTargetDatasource(ctx: AppContext, target: ReadinessTargetInput): Promise<DatasourceProfile | undefined> {
   if (target.datasource) return ctx.datasourceStore.get(String(target.datasource).trim());
   const env = String(target.env || '').trim();
+  const namespace = normalizeNamespace(String(target.namespace || '').trim());
   const service = normalizeService(String(target.service || '').trim(), ctx.runtimeConfigStore.serviceAliases());
   if (!env || !service) return undefined;
-  return ctx.datasourceStore.resolveByEnvService(env, service);
+  return ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
 }
 
 export async function collectReadinessSnapshot(
@@ -391,6 +393,7 @@ export async function collectReadinessSnapshot(
     ? {
         datasource: String(target.datasource || '').trim() || undefined,
         env: String(target.env || '').trim() || undefined,
+        namespace: normalizeNamespace(String(target.namespace || '').trim()) || undefined,
         service: normalizeService(String(target.service || '').trim(), ctx.runtimeConfigStore.serviceAliases()) || undefined,
       }
     : undefined;
@@ -398,7 +401,7 @@ export async function collectReadinessSnapshot(
   let targetDatasource: DatasourceProfile | undefined;
   let targetCredentialPresent = false;
   let connectorChecks: ReadinessCheck[] = [];
-  if (normalizedTarget && (normalizedTarget.datasource || (normalizedTarget.env && normalizedTarget.service))) {
+    if (normalizedTarget && (normalizedTarget.datasource || (normalizedTarget.env && normalizedTarget.service))) {
     targetDatasource = await resolveTargetDatasource(ctx, normalizedTarget);
     checks.push({
       check: 'target_datasource',
@@ -407,7 +410,7 @@ export async function collectReadinessSnapshot(
         ? targetDatasource.name
         : normalizedTarget.datasource
           ? `Datasource not found: ${normalizedTarget.datasource}`
-          : `No datasource profile found for env=${normalizedTarget.env} service=${normalizedTarget.service}`,
+          : `No datasource profile found for env=${normalizedTarget.env}${normalizedTarget.namespace ? ` namespace=${normalizedTarget.namespace}` : ''} service=${normalizedTarget.service}`,
     });
     if (targetDatasource) {
       const creds = await ctx.credentialStore.get(targetDatasource.credentialRef);

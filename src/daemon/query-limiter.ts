@@ -7,7 +7,14 @@ export interface QueryLimiterStats {
 
 type QueueEntry = {
   resolve: (release: () => void) => void;
+  reject: (error: Error) => void;
 };
+
+function toAbortError(reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  if (typeof reason === 'string' && reason.trim()) return new Error(reason);
+  return new Error('Operation aborted.');
+}
 
 export class QueryLimiter {
   private readonly queue: QueueEntry[] = [];
@@ -31,7 +38,10 @@ export class QueryLimiter {
     };
   }
 
-  async acquire(): Promise<() => void> {
+  async acquire(input?: { signal?: AbortSignal }): Promise<() => void> {
+    if (input?.signal?.aborted) {
+      throw toAbortError(input.signal.reason);
+    }
     if (this.inFlight < this.maxConcurrent) {
       this.inFlight += 1;
       return this.makeRelease();
@@ -39,8 +49,30 @@ export class QueryLimiter {
     if (this.queue.length >= this.maxQueued) {
       throw new Error(`OVERLOADED: query queue limit reached (${this.queue.length}/${this.maxQueued})`);
     }
-    return await new Promise<() => void>((resolve) => {
-      this.queue.push({ resolve });
+    return await new Promise<() => void>((resolve, reject) => {
+      const entry: QueueEntry = {
+        resolve: (release) => {
+          cleanup();
+          if (input?.signal?.aborted) {
+            release();
+            reject(toAbortError(input.signal.reason));
+            return;
+          }
+          resolve(release);
+        },
+        reject: (error) => {
+          cleanup();
+          reject(error);
+        },
+      };
+      const onAbort = () => {
+        const idx = this.queue.indexOf(entry);
+        if (idx >= 0) this.queue.splice(idx, 1);
+        entry.reject(toAbortError(input?.signal?.reason));
+      };
+      const cleanup = () => input?.signal?.removeEventListener('abort', onAbort);
+      input?.signal?.addEventListener('abort', onAbort, { once: true });
+      this.queue.push(entry);
     });
   }
 

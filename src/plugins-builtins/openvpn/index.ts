@@ -1,10 +1,47 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
-function run(command: string): { ok: boolean; detail: string } {
-  const proc = spawnSync('/bin/zsh', ['-lc', command], { encoding: 'utf8' });
-  if (proc.status === 0) return { ok: true, detail: (proc.stdout || '').trim() || 'ok' };
-  return { ok: false, detail: ((proc.stderr || proc.stdout || '').trim() || `exit=${proc.status}`).slice(0, 400) };
+async function runAsync(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
+  return await new Promise((resolve) => {
+    const proc = spawn('/bin/zsh', ['-lc', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const finish = (result: { ok: boolean; detail: string; timedOut: boolean }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        if (!proc.killed) proc.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, detail: `command timed out after ${timeoutMs}ms`, timedOut: true });
+    }, timeoutMs);
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    proc.once('error', (error) => {
+      finish({ ok: false, detail: ((error as Error).message || 'spawn error').slice(0, 400), timedOut: false });
+    });
+    proc.once('exit', (code) => {
+      if (code === 0) {
+        finish({ ok: true, detail: stdout.trim() || 'ok', timedOut: false });
+        return;
+      }
+      const detail = (stderr.trim() || stdout.trim() || `exit=${code}`).slice(0, 400);
+      finish({ ok: false, detail, timedOut: false });
+    });
+  });
 }
 
 const DEFAULT_STATUS_COMMAND =
@@ -16,9 +53,21 @@ const DEFAULT_CONNECT_COMMAND =
 const DEFAULT_DISCONNECT_COMMAND =
   '"/Applications/OpenVPN Connect.app/Contents/MacOS/OpenVPN Connect" --quit >/dev/null 2>&1 || true';
 
-function waitUntilConnected(statusCommand: string, attempts = 20, sleepSeconds = 1): { ok: boolean; detail: string } {
-  const loop = `for _ in $(seq 1 ${attempts}); do ${statusCommand} && exit 0; sleep ${sleepSeconds}; done; exit 1`;
-  return run(loop);
+const STATUS_TIMEOUT_MS = 1500;
+const COMMAND_TIMEOUT_MS = 3000;
+const POLL_INTERVAL_MS = 500;
+
+async function pollUntilConnected(statusCommand: string, deadlineAt: number): Promise<{ ok: boolean; detail: string }> {
+  let lastDetail = 'not connected';
+  while (Date.now() < deadlineAt) {
+    const r = await runAsync(statusCommand, STATUS_TIMEOUT_MS);
+    if (r.ok) return { ok: true, detail: r.detail };
+    lastDetail = r.detail;
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
+  }
+  return { ok: false, detail: lastDetail };
 }
 
 export const openvpnPlugin: TapRootPlugin = {
@@ -33,21 +82,23 @@ export const openvpnPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || DEFAULT_STATUS_COMMAND;
-    const r = run(statusCommand);
+    const r = await runAsync(statusCommand, STATUS_TIMEOUT_MS);
     return [{ check: 'openvpn status', status: r.ok ? 'ok' : 'warn', detail: r.detail, ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
   },
 
   async connect(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || DEFAULT_STATUS_COMMAND;
-    const pre = run(statusCommand);
+    const pre = await runAsync(statusCommand, STATUS_TIMEOUT_MS);
     if (pre.ok) {
       return [{ check: 'openvpn connect', status: 'ok', detail: 'already connected' }];
     }
 
     const connectCommand = input.credentials.connectCommand || DEFAULT_CONNECT_COMMAND;
-    const started = run(connectCommand);
+    const started = await runAsync(connectCommand, COMMAND_TIMEOUT_MS);
 
-    const post = waitUntilConnected(statusCommand);
+    const waitMs = Number(input.credentials.connectWaitMs || 10000);
+    const deadlineAt = Date.now() + Math.max(1000, waitMs);
+    const post = await pollUntilConnected(statusCommand, deadlineAt);
     if (post.ok) {
       return [{ check: 'openvpn connect', status: 'ok', detail: 'connected' }];
     }
@@ -67,7 +118,7 @@ export const openvpnPlugin: TapRootPlugin = {
 
   async disconnect(input): Promise<DoctorCheck[]> {
     const disconnectCommand = input.credentials.disconnectCommand || DEFAULT_DISCONNECT_COMMAND;
-    const r = run(disconnectCommand);
+    const r = await runAsync(disconnectCommand, COMMAND_TIMEOUT_MS);
     return [{ check: 'openvpn disconnect', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_disconnect_blocked' }) }];
   },
 };

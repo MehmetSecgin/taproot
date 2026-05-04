@@ -1,10 +1,51 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
-function run(command: string): { ok: boolean; detail: string } {
-  const proc = spawnSync('/bin/zsh', ['-lc', command], { encoding: 'utf8' });
-  if (proc.status === 0) return { ok: true, detail: (proc.stdout || '').trim() || 'ok' };
-  return { ok: false, detail: ((proc.stderr || proc.stdout || '').trim() || `exit=${proc.status}`).slice(0, 400) };
+const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
+const LOGIN_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs;
+
+async function run(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
+  return await new Promise((resolve) => {
+    const proc = spawn('/bin/zsh', ['-lc', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const finish = (result: { ok: boolean; detail: string; timedOut: boolean }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        if (!proc.killed) proc.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, detail: `command timed out after ${timeoutMs}ms`, timedOut: true });
+    }, timeoutMs);
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    proc.once('error', (error) => {
+      finish({ ok: false, detail: ((error as Error).message || 'spawn error').slice(0, 400), timedOut: false });
+    });
+    proc.once('exit', (code) => {
+      if (code === 0) {
+        finish({ ok: true, detail: stdout.trim() || 'ok', timedOut: false });
+        return;
+      }
+      const detail = (stderr.trim() || stdout.trim() || `exit=${code}`).slice(0, 400);
+      finish({ ok: false, detail, timedOut: false });
+    });
+  });
 }
 
 export const teleportPlugin: TapRootPlugin = {
@@ -19,14 +60,14 @@ export const teleportPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || 'tsh status';
-    const r = run(statusCommand);
+    const r = await run(statusCommand, STATUS_TIMEOUT_MS);
     return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
   },
 
   async connect(input): Promise<DoctorCheck[]> {
     const loginCommand = input.credentials.loginCommand;
     if (!loginCommand) {
-      const check = run(input.credentials.statusCommand || 'tsh status');
+      const check = await run(input.credentials.statusCommand || 'tsh status', STATUS_TIMEOUT_MS);
       return [
         {
           check: 'teleport login',
@@ -36,7 +77,7 @@ export const teleportPlugin: TapRootPlugin = {
         },
       ];
     }
-    const r = run(loginCommand);
+    const r = await run(loginCommand, LOGIN_TIMEOUT_MS);
     return [{ check: 'teleport login', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_connect_blocked' }) }];
   },
 };

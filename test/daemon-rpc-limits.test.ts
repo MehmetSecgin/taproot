@@ -121,4 +121,46 @@ describe('daemon rpc limits', () => {
       await daemon.stop();
     }
   });
+
+  it('counts queue wait time against timeoutMs', async () => {
+    const total = RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + 1;
+    const { daemon, socketPath } = await setupDaemon(total);
+    try {
+      const blockers = Array.from({ length: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries }, (_, i) =>
+        rpcCall({
+          socketPath,
+          method: 'query.execute',
+          params: {
+            datasource: `qa-fake-${i}`,
+            query: 'SELECT 1 AS ok',
+            _testHoldMs: 200,
+            timeoutMs: 1_000,
+          },
+          timeoutMs: 5_000,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const startedAt = Date.now();
+      const queued = await rpcCall({
+        socketPath,
+        method: 'query.execute',
+        params: {
+          datasource: `qa-fake-${RUNTIME_CONSTANTS.daemon.maxConcurrentQueries}`,
+          query: 'SELECT 1 AS ok',
+          timeoutMs: 50,
+        },
+        timeoutMs: 5_000,
+      });
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(queued.ok).toBe(false);
+      expect(queued.error?.code).toBe('QUERY_TIMEOUT');
+      expect(elapsedMs).toBeLessThan(180);
+
+      await Promise.all(blockers);
+    } finally {
+      await daemon.stop();
+    }
+  });
 });

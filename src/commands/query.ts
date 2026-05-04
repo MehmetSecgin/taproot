@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
-import { classifyError, environmentPolicy, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
@@ -10,10 +10,17 @@ import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifa
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { printJson, renderTable } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
-import { enforceMutationPolicy } from '../core/safety.js';
+import { enforceMutationPolicy, enforcePartitionPredicate } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
+import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { rpcCall } from '../daemon/client.js';
+import { ensureSchemaSnapshot } from './learn.js';
+import { supportsSchemaRefresh } from '../core/schema-refresh.js';
+import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
+import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
+import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
+import type { QueryCard } from '../types/cards.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -26,6 +33,10 @@ function parseDatasourceAlias(value: string | undefined, aliases: Record<string,
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
   return { env: m[1], service: normalizeService(m[2], aliases) };
+}
+
+function cardParamNames(card: QueryCard): string[] {
+  return (card.params || []).map((param) => param.name).filter(Boolean);
 }
 
 function preferredAccessMethods(ctx: AppContext, env: string, kbAccessMethod?: string): string[] {
@@ -78,13 +89,17 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .description('Execute plugin-native query against resolved datasource')
     .option('--datasource <name>')
     .option('--env <env>')
+    .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--intent <intent>')
+    .option('--reason <reason>')
+    .option('--card <id>')
     .option('--template <id>')
     .option('--query <native>')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'allow non-deterministic datasource discovery', false)
     .option('--allow-mutate', 'allow mutating query', false)
+    .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -92,10 +107,12 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     )
     .action(async (opts) => {
       const ctx = getCtx();
+      ensureStarterRuntime(ctx);
       const timeoutMs = parseTimeoutMs(opts.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const alias = parseDatasourceAlias(opts.datasource, aliases);
       const env = String(opts.env || alias?.env || '').trim();
+      const namespace = normalizeNamespace(String(opts.namespace || ''));
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
@@ -123,11 +140,15 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 datasource: opts.datasource,
                 env: opts.env,
                 service: opts.service,
+                namespace: opts.namespace,
                 intent: opts.intent,
+                reason: opts.reason,
+                card: opts.card,
                 template: opts.template,
                 query: opts.query,
                 allowDiscovery,
                 allowMutate: Boolean(opts.allowMutate),
+                allowPartitionScan: Boolean(opts.allowPartitionScan),
                 timeoutMs,
                 param: opts.param || [],
               },
@@ -151,6 +172,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                   `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
                 );
                 console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+                const renderedMemory = renderQueryMemoryTty(rpc.meta?.queryMemory || (rpc.data?.queryMemory as any));
+                if (renderedMemory) console.log(renderedMemory);
               }
               return;
             }
@@ -182,20 +205,21 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       let resolutionSource: 'explicit' | 'store' | 'learning' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
       const deterministicRequired = policy.deterministicRequired;
       if (!datasource && opts.env && service) {
-        datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
+        datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
         if (datasource) resolutionSource = 'store';
       }
       if (!datasource && env && service) {
-        datasource = ctx.datasourceStore.resolveByEnvService(env, service);
+        datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
         if (datasource) resolutionSource = 'store';
       }
       if (!datasource && env && service && (!deterministicRequired || allowDiscovery)) {
-        const learned = ctx.learningStore.resolveConnection(env, service);
+        const learned = ctx.learningStore.resolveConnection(env, service, namespace || undefined);
         if (learned) {
           datasource = ctx.datasourceStore.save({
             name: learned.datasourceName,
             kind: learned.kind,
             env: learned.env,
+            namespace: learned.namespace,
             service: learned.service,
             tags: ['learning-derived'],
             connection: learned.connection,
@@ -210,18 +234,18 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
       }
       if (!datasource && env && service) {
-        datasource = (await bootstrapDatasource(ctx, env, service, opts.datasource || `${env}-${service}`))?.profile;
+        datasource = (await bootstrapDatasource(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined))?.profile;
         if (datasource) {
           resolutionSource = 'kb';
           logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
         }
       }
       if (!datasource && env && service && allowDiscovery) {
-        const kb = ctx.kbStore.resolveConnection(service, env);
+        const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
         const kbAccessMethod = String(kb?.access_method || '').trim().toLowerCase();
-        const namespace = String(kb?.namespace || 'develop');
+        const targetNamespace = String(kb?.namespace || namespace || 'default');
         const accessMethods = preferredAccessMethods(ctx, env, kbAccessMethod);
-        const targets = discoverTargets(ctx, { env, service, accessMethods, namespace });
+        const targets = discoverTargets(ctx, { env, service, accessMethods, namespace: targetNamespace });
         if (targets.length) {
           const target = targets[0];
           const engine = policy.targetPreference.find((item) => target.toLowerCase().includes(item.toLowerCase())) || (String(kb?.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql');
@@ -234,18 +258,18 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             database,
             db_user: dbUser,
             target,
-            namespace,
+            namespace: targetNamespace,
             ...(kb || {}),
           };
           if (accessMethod === 'tsh') {
-            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || `${env}-${service}`, syntheticKb, {
+            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
               confidence: 0.6,
             });
             resolutionSource = 'kb';
           } else if (accessMethod === 'qa-portforward') {
-            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || `${env}-${service}`, syntheticKb, {
+            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
               confidence: 0.6,
@@ -263,7 +287,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       }
       const warnings: string[] = [];
       if (env && service) {
-        const kb = ctx.kbStore.resolveConnection(service, env);
+        const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
         if (kb) {
           const critical = criticalDatasourceKbConflicts(datasource as any, kb);
           if (critical.length) {
@@ -279,25 +303,62 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       }
       progress.update(`datasource ready (${datasource.name})`);
 
-      let query = (opts.query || '').trim();
       const params = parseParamPairs(opts.param || []);
+      let selectedCard: QueryCard | undefined;
+      let query = (opts.query || '').trim();
+      if (opts.card) {
+        selectedCard = ctx.cardStore.get(opts.card);
+        if (!selectedCard) throw new Error(`Query card not found: ${opts.card}`);
+        const allowedParams = cardParamNames(selectedCard);
+        if (allowedParams.length) {
+          const unknownParams = Object.keys(params).filter((key) => !allowedParams.includes(key));
+          if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for card ${selectedCard.id}: ${unknownParams.join(', ')}`);
+        }
+        if (!query) query = fillTemplate(selectedCard.sql, params);
+      }
       if (!query && opts.template) {
         const tpl = ctx.templateStore.get(opts.template);
         if (!tpl) throw new Error(`Template not found: ${opts.template}`);
         query = fillTemplate(tpl.nativeQueryTemplate, params);
       }
-      if (!query && opts.intent) {
-        const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', opts.intent);
+      const effectiveIntent = opts.intent || selectedCard?.intent || '';
+      if (!query && effectiveIntent) {
+        const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', effectiveIntent);
         const tpl =
           (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
-          ctx.kbStore.resolveQuery(service || datasource.service || '', opts.intent) ||
-          ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: opts.intent });
+          ctx.kbStore.resolveQuery(service || datasource.service || '', effectiveIntent) ||
+          ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: effectiveIntent });
         if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
       }
       if (!query) throw new Error('No query resolved. Provide --query, --template, or --intent.');
       progress.update('query resolved');
 
-      enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
+      const referencedTables = collectReferencedTables(query);
+      if (supportsSchemaRefresh(datasource as any) && referencedTables.length) {
+        try {
+          await ensureSchemaSnapshot(ctx, {
+            datasource: datasource.name,
+            tables: referencedTables,
+            metadataTimeoutMs: 3000,
+          });
+        } catch (err) {
+          logVerbose(`schema prime skipped: ${(err as Error).message}`);
+        }
+      }
+      const schemaContext = buildSchemaContext(query, datasource.name, ctx.learningStore);
+      const reason = resolveReason(opts.reason);
+      const queryMemory = buildQueryMemory({
+        ledgerDir: ctx.paths.runsLedgerDir,
+        datasource: datasource.name,
+        env,
+        service,
+        intent: effectiveIntent,
+        reason,
+        sql: query,
+        tables: referencedTables,
+        cardStore: ctx.cardStore,
+        selectedCard,
+      });
       const capability = opts.allowMutate ? 'executeMutate' : 'executeRead';
       const plugin = ctx.pluginRegistry.get(datasource.kind);
       if (!plugin?.execute) throw new Error(`No execute-capable plugin for datasource kind '${datasource.kind}'.`);
@@ -310,12 +371,25 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
+        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
+        warnings.push(
+          ...enforcePartitionPredicate({
+            sql: query,
+            schemaContext,
+            allowPartitionScan: Boolean(opts.allowPartitionScan),
+          }),
+        );
         progress.update('checking connectors');
-        const connectorChecks = await runDatasourceConnectors({
-          datasource: datasource as any,
-          credentialStore: ctx.credentialStore,
-          pluginRegistry: ctx.pluginRegistry,
-          mode: 'connect',
+        const preflightBudgetMs = Math.max(timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
+        const connectorChecks = await withQueryTimeout({
+          timeoutMs: preflightBudgetMs,
+          run: () =>
+            runDatasourceConnectors({
+              datasource: datasource as any,
+              credentialStore: ctx.credentialStore,
+              pluginRegistry: ctx.pluginRegistry,
+              mode: 'connect',
+            }),
         });
         for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
         for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
@@ -371,26 +445,42 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           });
         }
         result.runId = artifacts.runId;
-        writeRunSummary(artifacts.runDir, result);
-        appendEvent(artifacts.runDir, 'query succeeded');
-
-        ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: opts.intent, sql: query, result });
         if (warnings.length) result.warnings = [...result.warnings, ...warnings];
         result.resolved = {
           source: resolutionSource,
           env,
+          namespace: datasource.namespace || namespace || undefined,
           service,
-          accessMethod: String(ctx.kbStore.resolveConnection(service, env)?.access_method || ''),
+          accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
           target: String(datasource.connection.target || ''),
           database: String(datasource.connection.database || ''),
           engine: datasource.kind,
         };
+        result.meta = { ...(result.meta || {}), schemaContext, queryMemory };
+        appendRunsLedgerEntry(
+          ledgerInputFromResult({
+            ledgerDir: ctx.paths.runsLedgerDir,
+            result,
+            datasource: datasource as any,
+            intent: effectiveIntent,
+            reason,
+            sql: query,
+            tables: referencedTables,
+            redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
+          }),
+        );
+        writeRunSummary(artifacts.runDir, result);
+        appendEvent(artifacts.runDir, 'query succeeded');
+
+        ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: effectiveIntent, sql: query, result });
         progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
 
         if (ctx.jsonMode) printJson(result);
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
           console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
+          const renderedMemory = renderQueryMemoryTty(queryMemory);
+          if (renderedMemory) console.log(renderedMemory);
         }
         } catch (error) {
           const message = (error as Error).message;
@@ -399,11 +489,27 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           progress.fail(`query failed (${code})`);
           ctx.learningStore.saveFailure({
             datasource: datasource as any,
-            queryIntent: opts.intent,
+            queryIntent: effectiveIntent,
             sql: query,
             errorClass: code,
           });
-          throw new Error(`${code}: ${message}`);
+          appendRunsLedgerEntry({
+            ledgerDir: ctx.paths.runsLedgerDir,
+            runId: artifacts.runId,
+            datasource: datasource as any,
+            intent: effectiveIntent,
+            reason,
+            sql: query,
+            tables: referencedTables,
+            capability: capability as any,
+            outcomeCode: code,
+            errorClass: code,
+            redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
+          });
+          const wrapped = new Error(`${code}: ${message}`);
+          (wrapped as Error & { details?: unknown }).details = (error as Error & { details?: unknown }).details;
+          (wrapped as Error & { meta?: Record<string, unknown> }).meta = { runId: artifacts.runId, schemaContext, queryMemory };
+          throw wrapped;
         }
       } finally {
         progress.stop();

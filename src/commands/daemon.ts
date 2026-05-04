@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord } from '../core/output.js';
@@ -10,6 +11,19 @@ import { rpcCall } from '../daemon/client.js';
 
 function runDirFromCtx(ctx: AppContext): string {
   return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.taproot'), 'run');
+}
+
+function resolveDaemonEntry(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(here, 'daemon-main.js'),
+    path.join(here, '..', 'daemon-main.js'),
+    path.join(here, '..', '..', 'dist', 'daemon-main.js'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
 }
 
 function shouldPrintPlainSuccess(ctx: AppContext): boolean {
@@ -35,7 +49,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       fs.mkdirSync(runDir, { recursive: true });
       const logPath = path.join(runDir, 'taprootd.log');
       progress.update('starting taprootd');
-      const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
+      const child = spawn(process.execPath, [resolveDaemonEntry()], {
         detached: true,
         stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
       });
@@ -128,7 +142,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       const runDir = runDirFromCtx(ctx);
       fs.mkdirSync(runDir, { recursive: true });
       const logPath = path.join(runDir, 'taprootd.log');
-      const child = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
+      const child = spawn(process.execPath, [resolveDaemonEntry()], {
         detached: true,
         stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
       });

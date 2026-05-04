@@ -41,11 +41,15 @@ export class KbStore {
     ).sort((a, b) => a.localeCompare(b));
   }
 
-  resolveConnection(service: string, env: string): Record<string, unknown> | null {
+  resolveConnection(service: string, env: string, namespace?: string): Record<string, unknown> | null {
     const svc = this.services().find((s) => String(s.service || '').trim().toLowerCase() === service.toLowerCase());
     if (!svc) return null;
     const conns = Array.isArray(svc.connections) ? svc.connections : [];
-    const active = conns.filter((c: any) => String(c.env) === env && String(c.status || 'active') === 'active');
+    const active = conns.filter((c: any) => {
+      if (String(c.env) !== env || String(c.status || 'active') !== 'active') return false;
+      if (namespace == null || namespace === '') return true;
+      return String(c.namespace || '') === namespace;
+    });
     if (!active.length) return null;
     return active.sort((a: any, b: any) => String(b.verified_at_utc || '').localeCompare(String(a.verified_at_utc || '')))[0];
   }

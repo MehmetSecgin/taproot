@@ -20,6 +20,7 @@ function sha256(input: string): string {
 export function buildFingerprint(input: {
   datasourceName: string;
   env?: string;
+  namespace?: string;
   service?: string;
   kind?: string;
   connection?: Record<string, unknown>;
@@ -28,6 +29,7 @@ export function buildFingerprint(input: {
   const payload = {
     datasourceName: input.datasourceName,
     env: input.env || '',
+    namespace: input.namespace || '',
     service: input.service || '',
     kind: input.kind || '',
     connection: input.connection || {},
@@ -98,6 +100,7 @@ export class SessionRegistry {
   open(input: {
     datasourceName: string;
     env?: string;
+    namespace?: string;
     service?: string;
     kind?: string;
     connection?: Record<string, unknown>;
@@ -120,6 +123,7 @@ export class SessionRegistry {
       fingerprint,
       datasourceName: input.datasourceName,
       env: input.env,
+      namespace: input.namespace,
       service: input.service,
       kind: input.kind,
       state: 'ready',

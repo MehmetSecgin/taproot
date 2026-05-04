@@ -30,6 +30,7 @@ export interface DatasourceProfile {
   name: string;
   kind: string;
   env?: string;
+  namespace?: string;
   service?: string;
   tags?: string[];
   connection: {
@@ -52,6 +53,7 @@ export interface EnvironmentPolicy {
   allowDiscoveryByDefault: boolean;
   preferredAccessMethods: string[];
   targetPreference: string[];
+  ledgerRedactionTier?: LedgerRedactionTier;
 }
 
 export interface RuntimeConfig {
@@ -66,7 +68,12 @@ export interface RuntimeConfig {
       sampleCellMax?: number;
       ttlHours?: number;
     };
+    ledger?: {
+      redactionTier?: LedgerRedactionTier;
+    };
+    cardRoots?: string[];
   };
+  cardRoots?: string[];
   environmentPolicies?: Record<string, Partial<EnvironmentPolicy>>;
   serviceAliases?: Record<string, string>;
 }
@@ -109,9 +116,14 @@ export interface QueryResult {
   };
   warnings: string[];
   classification: 'success' | 'error';
+  meta?: {
+    schemaContext?: SchemaContext;
+    queryMemory?: QueryMemory;
+  };
   resolved?: {
     source?: string;
     env?: string;
+    namespace?: string;
     service?: string;
     accessMethod?: string;
     target?: string;
@@ -121,6 +133,64 @@ export interface QueryResult {
 }
 
 export type SchemaProvenance = 'observed-query' | 'refreshed-metadata' | 'manual';
+
+export interface SchemaIndex {
+  name: string;
+  columns: string[];
+  unique?: boolean;
+  type?: string;
+}
+
+export interface SchemaPartition {
+  kind: string;
+  expr?: string;
+  key?: string;
+  keys?: string[];
+}
+
+export interface TableContext {
+  database: string;
+  columns: string[];
+  primaryKey?: string[];
+  indexes: SchemaIndex[];
+  partition?: SchemaPartition;
+  lastSeenAt: string;
+}
+
+export interface SchemaContext {
+  tables: Record<string, TableContext>;
+}
+
+export type LedgerRedactionTier = 'raw' | 'redact' | 'strict';
+
+export interface QueryMemoryPastRun {
+  runId: string;
+  ts: string;
+  datasource: string;
+  intent?: string;
+  reason?: string;
+  fingerprint: string;
+  outcomeCode: string;
+  errorClass?: string;
+  lesson?: string;
+  tables: string[];
+  durationMs?: number;
+  rowCount?: number;
+}
+
+export interface QueryMemoryMatchedCard {
+  id: string;
+  purpose?: string;
+  lastUsedAt?: string;
+  lastOutcome?: string;
+}
+
+export interface QueryMemory {
+  matchedCards: QueryMemoryMatchedCard[];
+  similarPastRuns: QueryMemoryPastRun[];
+  warnings: string[];
+  hints: string[];
+}
 
 export type DoctorCheckCode =
   | 'connector_plugin_missing'
@@ -132,6 +202,8 @@ export type DoctorCheckCode =
   | 'connector_status_blocked'
   | 'connector_connect_blocked'
   | 'connector_disconnect_blocked'
+  | 'connector_check_failed'
+  | 'connector_timeout'
   | 'executor_configuration_missing'
   | 'executor_connectivity'
   | 'executor_access_denied'
@@ -172,6 +244,8 @@ export interface CliOutputEnvelope<T = unknown> {
     requestId?: string;
     runId?: string;
     sessionId?: string;
+    schemaContext?: SchemaContext;
+    queryMemory?: QueryMemory;
     timings?: {
       durationMs: number;
     };

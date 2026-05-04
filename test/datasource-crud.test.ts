@@ -104,6 +104,40 @@ describe('datasource CRUD', () => {
     expect(parsed.profile.name).toBe('qa-svc');
   });
 
+  it('datasource resolve by env+namespace+service prefers exact namespace match', () => {
+    const { env } = setupState();
+    addProfile(env, ['--namespace', 'develop']);
+    runCli(
+      [
+        'datasource',
+        'add',
+        '--name',
+        'qa-svc-test',
+        '--kind',
+        'mysql',
+        '--credential-ref',
+        'qa:svc',
+        '--env',
+        'qa',
+        '--namespace',
+        'test',
+        '--service',
+        'svc',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '3306',
+        '--database',
+        'svcdb',
+      ],
+      env,
+    );
+    const out = runCli(['--json', 'datasource', 'resolve', '--env', 'qa', '--namespace', 'develop', '--service', 'svc'], env);
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.profile).toMatchObject({ name: 'qa-svc', namespace: 'develop' });
+  });
+
   it('datasource resolve from KB saves canonical bootstrap shape', () => {
     const { env, stateRoot, memoryRoot } = setupState();
     const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');

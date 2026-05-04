@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../core/app.js';
-import { normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 export function registerCache(program: Command, getCtx: () => AppContext): void {
@@ -26,12 +26,13 @@ export function registerCache(program: Command, getCtx: () => AppContext): void 
 
   c.command('lookup-target')
     .requiredOption('--env <env>')
+    .option('--namespace <namespace>')
     .requiredOption('--service <service>')
     .requiredOption('--intent <intent>')
     .action((opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const out = ctx.learningStore.resolveTargetSelection(String(opts.env), service, String(opts.intent));
+      const out = ctx.learningStore.resolveTargetSelection(String(opts.env), service, String(opts.intent), normalizeNamespace(opts.namespace) || undefined);
       if (!out) throw new Error('No target selection match.');
       if (ctx.jsonMode) printJson(out);
       else console.log(renderRecord(out as unknown as Record<string, unknown>));
@@ -39,6 +40,7 @@ export function registerCache(program: Command, getCtx: () => AppContext): void 
 
   c.command('save-target')
     .requiredOption('--env <env>')
+    .option('--namespace <namespace>')
     .requiredOption('--service <service>')
     .requiredOption('--intent <intent>')
     .requiredOption('--engine <engine>')
@@ -49,6 +51,7 @@ export function registerCache(program: Command, getCtx: () => AppContext): void 
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const out = ctx.learningStore.saveTargetSelection({
         env: String(opts.env),
+        namespace: normalizeNamespace(opts.namespace) || undefined,
         service,
         intent: String(opts.intent),
         engine: String(opts.engine),

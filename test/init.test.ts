@@ -158,7 +158,8 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.source).toBe('kb-bootstrap');
     const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
-    expect(datasources[0].name).toBe('qa-orders');
+    expect(datasources[0].name).toBe('qa-develop-orders');
+    expect(datasources[0].namespace).toBe('develop');
   });
 
   it('skips existing datasource profile', () => {
@@ -171,9 +172,10 @@ describe('init command', () => {
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
         {
-          name: 'qa-orders',
+          name: 'qa-develop-orders',
           kind: 'mysql',
           env: 'qa',
+          namespace: 'develop',
           service: 'orders',
           tags: ['auto-bootstrap'],
           connection: { host: '127.0.0.1', port: 4406, database: 'orders' },
@@ -198,6 +200,54 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.source).toBe('store-existing');
     expect(parsed.skipped).toBe(true);
+  });
+
+  it('creates namespace-aware datasource profile from KB when namespace is targeted explicitly', () => {
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupCustomKb(memoryRoot, [
+      {
+        service: 'orders',
+        connections: [
+          {
+            env: 'qa',
+            namespace: 'develop',
+            engine: 'mysql',
+            database: 'orders_dev',
+            db_user: 'reader',
+            access_method: 'qa-portforward',
+            target: 'orders-develop-db',
+            status: 'active',
+            verified_at_utc: '2026-03-01T00:00:00Z',
+          },
+          {
+            env: 'qa',
+            namespace: 'test',
+            engine: 'mysql',
+            database: 'orders_test',
+            db_user: 'reader',
+            access_method: 'qa-portforward',
+            target: 'orders-test-db',
+            status: 'active',
+            verified_at_utc: '2026-03-02T00:00:00Z',
+          },
+        ],
+      },
+    ]);
+    const out = runCli(['--json', 'init', 'datasource', '--env', 'qa', '--namespace', 'develop', '--service', 'orders'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.profile).toMatchObject({
+      name: 'qa-develop-orders',
+      env: 'qa',
+      namespace: 'develop',
+      service: 'orders',
+      connection: { database: 'orders_dev' },
+    });
   });
 
   it('repairs existing datasource profile when it critically conflicts with KB', () => {

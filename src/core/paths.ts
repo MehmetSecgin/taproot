@@ -11,6 +11,7 @@ export interface Paths {
   templatesFile: string;
   cacheDir: string;
   runsDir: string;
+  runsLedgerDir: string;
   learningDir: string;
   kbDir: string;
 }
@@ -37,13 +38,14 @@ export function resolvePaths(memoryRoot?: string): Paths {
     templatesFile: path.join(configDir, 'templates.json'),
     cacheDir: path.join(stateRoot, 'cache'),
     runsDir: path.join(stateRoot, 'runs'),
+    runsLedgerDir: path.join(stateRoot, 'learning', 'runs-ledger'),
     learningDir: path.join(stateRoot, 'learning'),
     kbDir,
   };
 }
 
 export function ensurePaths(paths: Paths): void {
-  [paths.stateRoot, paths.configDir, paths.cacheDir, paths.runsDir, paths.learningDir].forEach((p) => fs.mkdirSync(p, { recursive: true }));
+  [paths.stateRoot, paths.configDir, paths.cacheDir, paths.runsDir, paths.learningDir, paths.runsLedgerDir].forEach((p) => fs.mkdirSync(p, { recursive: true }));
 }
 
 export function resolveFallbackPaths(memoryRoot?: string): Paths {
@@ -59,6 +61,7 @@ export function resolveFallbackPaths(memoryRoot?: string): Paths {
     templatesFile: path.join(configDir, 'templates.json'),
     cacheDir: path.join(stateRoot, 'cache'),
     runsDir: path.join(stateRoot, 'runs'),
+    runsLedgerDir: path.join(stateRoot, 'learning', 'runs-ledger'),
     learningDir: path.join(stateRoot, 'learning'),
     kbDir,
   };

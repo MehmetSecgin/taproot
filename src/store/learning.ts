@@ -1,15 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DatasourceProfile, QueryResult } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition } from '../types/core.js';
 import { nowIso } from '../core/time.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
 import type { RefreshedSchemaJoin, RefreshedSchemaTable } from '../core/schema-refresh.js';
 import type { SchemaProvenance } from '../types/core.js';
 
+export const SCHEMA_METADATA_VERSION = 2;
+
 interface ResolutionEntry {
   key: string;
   env: string;
+  namespace?: string;
   service: string;
   datasourceName: string;
   kind: string;
@@ -37,6 +40,7 @@ interface QueryLibraryEntry {
 interface TargetSelectionEntry {
   key: string;
   env: string;
+  namespace?: string;
   service: string;
   intentKey: string;
   engine: string;
@@ -69,6 +73,7 @@ export interface SchemaTableColumnStat {
 
 export interface SchemaObservationEntry {
   key: string;
+  metadataVersion?: number;
   datasource: string;
   env: string;
   service: string;
@@ -78,11 +83,23 @@ export interface SchemaObservationEntry {
   table: string;
   aliases: string[];
   columns: SchemaTableColumnStat[];
+  primaryKey?: string[];
+  indexes?: SchemaIndex[];
+  partition?: SchemaPartition;
   firstSeenAt: string;
   lastSeenAt: string;
   sightings: number;
   confidence: number;
   sources: SchemaProvenance[];
+}
+
+export function schemaObservationHasCurrentMetadata(row: SchemaObservationEntry): boolean {
+  return (
+    row.metadataVersion === SCHEMA_METADATA_VERSION &&
+    Array.isArray(row.indexes) &&
+    row.columns.length > 0 &&
+    (row.sources.includes('refreshed-metadata') || row.sources.includes('manual'))
+  );
 }
 
 export interface SchemaJoinEntry {
@@ -271,6 +288,7 @@ export class LearningStore {
       }
       const next: SchemaObservationEntry = {
         key,
+        metadataVersion: prev?.metadataVersion,
         datasource: datasource.name,
         env,
         service,
@@ -280,6 +298,9 @@ export class LearningStore {
         table,
         aliases: Array.from(new Set([...(prev?.aliases || []), ...aliases])).sort(),
         columns: nextColumns.sort((a, b) => a.column.localeCompare(b.column)),
+        primaryKey: prev?.primaryKey,
+        indexes: prev?.indexes,
+        partition: prev?.partition,
         firstSeenAt: prev?.firstSeenAt || input.now,
         lastSeenAt: input.now,
         sightings: (prev?.sightings || 0) + 1,
@@ -397,6 +418,7 @@ export class LearningStore {
       });
       const next: SchemaObservationEntry = {
         key,
+        metadataVersion: table.metadataVersion || SCHEMA_METADATA_VERSION,
         datasource: datasource.name,
         env,
         service,
@@ -406,6 +428,9 @@ export class LearningStore {
         table: table.table,
         aliases: prev?.aliases || [],
         columns: nextColumns,
+        primaryKey: table.primaryKey || prev?.primaryKey || [],
+        indexes: table.indexes || prev?.indexes || [],
+        partition: table.partition || prev?.partition,
         firstSeenAt: prev?.firstSeenAt || now,
         lastSeenAt: now,
         sightings: (prev?.sightings || 0) + 1,
@@ -506,8 +531,8 @@ export class LearningStore {
     };
   }
 
-  resolveConnection(env: string, service: string): ResolutionEntry | undefined {
-    const key = `${env}|${service}`;
+  resolveConnection(env: string, service: string, namespace?: string): ResolutionEntry | undefined {
+    const key = namespace ? `${env}|${namespace}|${service}` : `${env}|${service}`;
     return this.loadResolution()
       .filter((r) => r.key === key)
       .sort((a, b) => b.confidence - a.confidence || String(b.lastVerifiedAt).localeCompare(String(a.lastVerifiedAt)))[0];
@@ -521,16 +546,17 @@ export class LearningStore {
       .sort((a, b) => b.successCount - a.successCount || String(b.lastVerifiedAt).localeCompare(String(a.lastVerifiedAt)))[0];
   }
 
-  resolveTargetSelection(env: string, service: string, intent: string): TargetSelectionEntry | undefined {
+  resolveTargetSelection(env: string, service: string, intent: string, namespace?: string): TargetSelectionEntry | undefined {
     const intentKey = normalizeIntent(intent);
     if (!intentKey) return undefined;
     return this.loadTargetSelections()
-      .filter((row) => row.env === env && row.service === service && row.intentKey === intentKey)
+      .filter((row) => row.env === env && row.service === service && row.intentKey === intentKey && String(row.namespace || '') === String(namespace || ''))
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
   }
 
   saveTargetSelection(input: {
     env: string;
+    namespace?: string;
     service: string;
     intent: string;
     engine: string;
@@ -540,12 +566,14 @@ export class LearningStore {
   }): TargetSelectionEntry {
     const rows = this.loadTargetSelections();
     const env = String(input.env || '').trim();
+    const namespace = String(input.namespace || '').trim();
     const service = String(input.service || '').trim();
     const intentKey = normalizeIntent(input.intent);
-    const key = `${env}|${service}|${intentKey}`;
+    const key = `${env}|${namespace}|${service}|${intentKey}`;
     const next: TargetSelectionEntry = {
       key,
       env,
+      namespace: namespace || undefined,
       service,
       intentKey,
       engine: String(input.engine || '').trim(),
@@ -603,14 +631,16 @@ export class LearningStore {
     const now = nowIso();
 
     const env = String(input.datasource.env || '').trim();
+    const namespace = String(input.datasource.namespace || '').trim();
     const service = String(input.datasource.service || '').trim();
     if (env && service) {
-      const key = `${env}|${service}`;
+      const key = namespace ? `${env}|${namespace}|${service}` : `${env}|${service}`;
       const idx = resolution.findIndex((r) => r.key === key);
       const prev = idx >= 0 ? resolution[idx] : undefined;
       const next: ResolutionEntry = {
         key,
         env,
+        namespace: namespace || undefined,
         service,
         datasourceName: input.datasource.name,
         kind: input.datasource.kind,
@@ -629,6 +659,7 @@ export class LearningStore {
     if (env && service && input.queryIntent && input.result.resolved?.target && input.result.resolved?.database) {
       this.saveTargetSelection({
         env,
+        namespace: namespace || undefined,
         service,
         intent: input.queryIntent,
         engine: String(input.result.resolved.engine || input.datasource.kind || ''),
@@ -694,14 +725,16 @@ export class LearningStore {
     const targetSelections = this.loadTargetSelections();
     const now = nowIso();
     const env = String(input.datasource.env || '').trim();
+    const namespace = String(input.datasource.namespace || '').trim();
     const service = String(input.datasource.service || '').trim();
 
     if (env && service) {
-      const key = `${env}|${service}`;
+      const key = namespace ? `${env}|${namespace}|${service}` : `${env}|${service}`;
       const idx = resolution.findIndex((r) => r.key === key);
       if (idx >= 0) {
         resolution[idx] = {
           ...resolution[idx],
+          namespace: namespace || undefined,
           lastVerifiedAt: now,
           failureCount: resolution[idx].failureCount + 1,
           confidence: Math.max(0.1, resolution[idx].confidence - 0.05),

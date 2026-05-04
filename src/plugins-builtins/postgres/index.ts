@@ -4,6 +4,8 @@ import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 
+const CONNECT_TIMEOUT_MS = 5000;
+
 function connConfig(ds: any, creds: Record<string, string>, timeoutMs?: number) {
   return {
     host: ds.connection.host || '127.0.0.1',
@@ -14,6 +16,7 @@ function connConfig(ds: any, creds: Record<string, string>, timeoutMs?: number) 
     ssl: ds.connection.ssl ? { rejectUnauthorized: false } : undefined,
     statement_timeout: timeoutMs,
     query_timeout: timeoutMs,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
   };
 }
 

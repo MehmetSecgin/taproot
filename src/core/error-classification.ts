@@ -1,6 +1,7 @@
 import type { DoctorCheckCode } from '../types/core.js';
 
 export type ErrorClass =
+  | 'MISSING_PARTITION_PREDICATE'
   | 'QUERY_TIMEOUT'
   | 'MISCONFIGURED_DATASOURCE'
   | 'DETERMINISTIC_REQUIRED'
@@ -16,6 +17,7 @@ export type ErrorClass =
 
 export function classifyError(message: string): ErrorClass {
   const text = message.toLowerCase();
+  if (/missing_partition_predicate/.test(text)) return 'MISSING_PARTITION_PREDICATE';
   if (/query_timeout|query exceeded timeout|statement timeout/.test(text)) return 'QUERY_TIMEOUT';
   if (/misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/.test(text)) return 'MISCONFIGURED_DATASOURCE';
   if (/deterministic_required|prod requires deterministic/.test(text)) return 'DETERMINISTIC_REQUIRED';

@@ -6,7 +6,7 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 
 export function defaultSocketPath(stateRoot?: string): string {
-  const root = stateRoot || path.join(os.homedir(), '.taproot');
+  const root = stateRoot || process.env.TAPROOT_STATE_ROOT || path.join(os.homedir(), '.taproot');
   return path.join(root, 'run', 'taprootd.sock');
 }
 
@@ -24,34 +24,64 @@ export async function rpcCall(input: {
     method: input.method,
     params: input.params || {},
   };
+  const payload = `${JSON.stringify(req)}\n`;
 
-  return await new Promise<RpcResponse>((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-    const timer = setTimeout(() => {
-      socket.destroy(new Error(`CONNECTIVITY: daemon request timeout (${timeoutMs}ms)`));
-    }, timeoutMs);
+  const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ENOENT', 'EAGAIN']);
 
-    const done = (fn: () => void): void => {
-      clearTimeout(timer);
-      fn();
-    };
+  const attempt = (): Promise<RpcResponse> =>
+    new Promise<RpcResponse>((resolve, reject) => {
+      const socket = net.createConnection(socketPath);
+      let settled = false;
+      let received = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        socket.destroy(new Error(`CONNECTIVITY: daemon request timeout (${timeoutMs}ms)`));
+      }, timeoutMs);
 
-    let buffer = '';
-    socket.setEncoding('utf8');
+      const settle = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
 
-    socket.on('error', (error) => done(() => reject(error)));
-    socket.on('connect', () => {
-      socket.write(`${JSON.stringify(req)}\n`);
+      let buffer = '';
+      socket.setEncoding('utf8');
+
+      socket.on('error', (error) => settle(() => reject(error)));
+      socket.on('close', () => {
+        if (received) return;
+        settle(() => reject(new Error('CONNECTIVITY: daemon socket closed before response')));
+      });
+      socket.on('connect', () => {
+        socket.write(payload);
+      });
+      socket.on('data', (chunk) => {
+        buffer += chunk;
+        const idx = buffer.indexOf('\n');
+        if (idx < 0) return;
+        const line = buffer.slice(0, idx).trim();
+        if (!line) return;
+        received = true;
+        let res: RpcResponse;
+        try {
+          res = JSON.parse(line) as RpcResponse;
+        } catch (error) {
+          settle(() => reject(error as Error));
+          socket.end();
+          return;
+        }
+        socket.end();
+        settle(() => resolve(res));
+      });
     });
-    socket.on('data', (chunk) => {
-      buffer += chunk;
-      const idx = buffer.indexOf('\n');
-      if (idx < 0) return;
-      const line = buffer.slice(0, idx).trim();
-      if (!line) return;
-      const res = JSON.parse(line) as RpcResponse;
-      socket.end();
-      done(() => resolve(res));
-    });
-  });
+
+  try {
+    return await attempt();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (!code || !RETRYABLE_CODES.has(code)) throw error;
+    await new Promise((r) => setTimeout(r, 100));
+    return await attempt();
+  }
 }

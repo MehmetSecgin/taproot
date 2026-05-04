@@ -14,6 +14,11 @@ describe('error classification', () => {
     expect(exitCodeForClass('ACCESS_DENIED')).toBe(EXIT_CODES.ACCESS_DENIED);
   });
 
+  it('maps missing partition predicates to bad input', () => {
+    expect(classifyError('MISSING_PARTITION_PREDICATE: order_items is partitioned')).toBe('MISSING_PARTITION_PREDICATE');
+    expect(exitCodeForClass('MISSING_PARTITION_PREDICATE')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
   it('maps executor doctor failures to machine-readable codes', () => {
     expect(classifyExecutorDoctorCode('connect ECONNREFUSED 127.0.0.1:4406')).toBe('executor_connectivity');
     expect(classifyExecutorDoctorCode('Access denied for user')).toBe('executor_access_denied');

@@ -1,28 +1,29 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
 
-  kb.command('resolve-connection').requiredOption('--service <service>').requiredOption('--env <env>').action((opts) => {
+  kb.command('resolve-connection').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
     const ctx = getCtx();
     const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveConnection(service, opts.env);
+    const out = ctx.kbStore.resolveConnection(service, opts.env, normalizeNamespace(opts.namespace) || undefined);
     if (!out) throw new Error('No KB connection match.');
     if (ctx.jsonMode) printJson(out);
     else console.log(renderRecord(out));
   });
 
-  kb.command('resolve-credentials').requiredOption('--service <service>').requiredOption('--env <env>').action((opts) => {
+  kb.command('resolve-credentials').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
     const ctx = getCtx();
     const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveConnection(service, opts.env);
+    const out = ctx.kbStore.resolveConnection(service, opts.env, normalizeNamespace(opts.namespace) || undefined);
     if (!out) throw new Error('No KB credentials match.');
     const rows = {
       service,
       env: opts.env,
+      namespace: normalizeNamespace(opts.namespace) || undefined,
       target: out.target,
       database: out.database,
       db_user: out.db_user,
@@ -34,12 +35,12 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     else console.log(renderRecord(rows));
   });
 
-  kb.command('resolve-database-name').requiredOption('--service <service>').requiredOption('--env <env>').action((opts) => {
+  kb.command('resolve-database-name').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
     const ctx = getCtx();
     const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveConnection(service, opts.env);
+    const out = ctx.kbStore.resolveConnection(service, opts.env, normalizeNamespace(opts.namespace) || undefined);
     if (!out) throw new Error('No KB database match.');
-    const row = { service, env: opts.env, database: out.database, verified_at_utc: out.verified_at_utc };
+    const row = { service, env: opts.env, namespace: normalizeNamespace(opts.namespace) || undefined, database: out.database, verified_at_utc: out.verified_at_utc };
     if (ctx.jsonMode) printJson(row);
     else console.log(renderRecord(row));
   });

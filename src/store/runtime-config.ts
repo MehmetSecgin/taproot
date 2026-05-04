@@ -1,5 +1,5 @@
 import { readJsonFile } from '../core/json.js';
-import type { EnvironmentPolicy, RuntimeConfig } from '../types/core.js';
+import type { EnvironmentPolicy, LedgerRedactionTier, RuntimeConfig } from '../types/core.js';
 import { RuntimeConfigSchema } from './schemas.js';
 
 const DEFAULT_ENVIRONMENT_POLICY: EnvironmentPolicy = {
@@ -33,6 +33,26 @@ export class RuntimeConfigStore {
       ...DEFAULT_ENVIRONMENT_POLICY,
       ...(current || {}),
     };
+  }
+
+  ledgerRedactionTier(env?: string): LedgerRedactionTier {
+    const config = this.get();
+    const key = normalizeKey(env);
+    const policyTier = key ? (config.environmentPolicies || {})[key]?.ledgerRedactionTier : undefined;
+    const defaultTier = config.defaults?.ledger?.redactionTier;
+    if (policyTier) return policyTier;
+    if (defaultTier) return defaultTier;
+    if (/^(prod|production)$/.test(key)) return 'strict';
+    if (/^(qa|stage|staging|uat|preprod|pre-prod)$/.test(key)) return 'redact';
+    if (/^(dev|develop|development|local|sandbox)$/.test(key)) return 'raw';
+    return 'redact';
+  }
+
+  cardRoots(): string[] {
+    const config = this.get();
+    return [...(config.defaults?.cardRoots || []), ...(config.cardRoots || [])]
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
   }
 
   serviceAliases(): Record<string, string> {

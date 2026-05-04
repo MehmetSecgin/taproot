@@ -204,4 +204,30 @@ describe('kb resolution', () => {
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ service: 'orders', database: 'orders' });
   });
+
+  it('kb resolve-connection honors namespace when provided', () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kb-ns-'));
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({}));
+    const memoryRoot = path.join(stateRoot, 'memory-root');
+    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    fs.mkdirSync(kbDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(kbDir, 'services.json'),
+      JSON.stringify([
+        {
+          service: 'orders',
+          connections: [
+            { env: 'qa', namespace: 'develop', engine: 'mysql', database: 'orders_dev', access_method: 'qa-portforward', status: 'active', verified_at_utc: '2026-03-01T00:00:00Z' },
+            { env: 'qa', namespace: 'test', engine: 'mysql', database: 'orders_test', access_method: 'qa-portforward', status: 'active', verified_at_utc: '2026-03-02T00:00:00Z' },
+          ],
+        },
+      ]),
+    );
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', OBSIDIAN_MEMORY_ROOT: memoryRoot };
+    const out = runCli(['--json', 'kb', 'resolve-connection', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
+  });
 });

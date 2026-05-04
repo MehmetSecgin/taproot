@@ -1,11 +1,12 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { classifyError, normalizeService, runDatasourceConnectors } from '../core/app.js';
+import { classifyError, defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
+import { ensureStarterRuntime } from '../core/runtime-init.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
@@ -99,7 +100,7 @@ function credentialRepairHint(datasource: DatasourceProfile): string {
 
 function datasourceRepairHint(datasource: DatasourceProfile): string {
   if (datasource.env && datasource.service) {
-    return `taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`;
+    return `taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`;
   }
   return `taproot datasource show --name ${datasource.name}`;
 }
@@ -336,7 +337,7 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
 function misconfiguredDatasourceNextActions(datasource: DatasourceProfile): DoctorNextAction[] {
   return [
     {
-      command: `taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`,
+      command: `taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`,
       priority: ACTION_PRIORITIES.datasourceRepair,
       reasons: ['The datasource routing conflicts with KB-backed resolution and must be repaired before doctor can continue.'],
       checks: ['kb routing consistency'],
@@ -351,12 +352,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .description('Preflight checks against resolved datasource/plugin')
     .option('--datasource <name>')
     .option('--env <env>')
+    .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--connect', 'run connector connect steps during doctor', false)
     .option('--verbose-detail', 'print full check details in table mode', false)
     .option('--all', 'print all checks in table mode (default: warnings/failures only)', false)
     .action(async (opts) => {
       const ctx = getCtx();
+      ensureStarterRuntime(ctx);
       const progress = createProgress({
         enabled: !ctx.jsonMode && !ctx.verbose,
         noAnimations: ctx.noAnimations,
@@ -374,9 +377,10 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         const warnings: string[] = [];
         if (!datasource && opts.env && opts.service) {
           const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-          datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service);
+          const namespace = normalizeNamespace(opts.namespace);
+          datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
           if (!datasource) {
-            const bootstrapped = await bootstrapDatasource(ctx, opts.env, service, `${opts.env}-${service}`);
+            const bootstrapped = await bootstrapDatasource(ctx, opts.env, service, defaultDatasourceName(opts.env, service, namespace || undefined), namespace || undefined);
             if (bootstrapped) {
               datasource = bootstrapped.profile;
               logVerbose(`bootstrapped datasource from KB (${bootstrapped.profile.name})`);
@@ -394,7 +398,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
         }
         if (datasource.env && datasource.service) {
-          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env);
+          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
           if (kb) {
             const critical = criticalDatasourceKbConflicts(datasource as any, kb);
             if (critical.length) {
@@ -424,7 +428,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               } else {
                 console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
                 console.log('Next actions:');
-                console.log(`- taproot --json init datasource --env ${datasource.env} --service ${datasource.service}`);
+                console.log(`- taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`);
               }
               process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
               return;

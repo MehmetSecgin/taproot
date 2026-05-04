@@ -1,9 +1,10 @@
 import { Command } from 'commander';
-import { normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/app.js';
 import type { AppContext } from '../core/app.js';
 import { EXIT_CODES } from '../core/exit-codes.js';
 import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot, nextCommandForReadiness } from '../core/readiness.js';
+import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from '../core/version.js';
 
 export function registerSelfCheck(program: Command, getCtx: () => AppContext): void {
@@ -13,18 +14,21 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
     .option('--agent', 'emit agent-readiness summary', false)
     .option('--datasource <name>')
     .option('--env <env>')
+    .option('--namespace <namespace>')
     .option('--service <service>')
     .action(async (opts) => {
       const ctx = getCtx();
+      const createdConfig = ensureStarterRuntime(ctx);
       const target =
         opts.datasource || (opts.env && opts.service)
           ? {
               ...(opts.datasource ? { datasource: String(opts.datasource) } : {}),
               ...(opts.env ? { env: String(opts.env) } : {}),
+              ...(opts.namespace ? { namespace: normalizeNamespace(String(opts.namespace)) } : {}),
               ...(opts.service ? { service: normalizeService(String(opts.service), ctx.runtimeConfigStore.serviceAliases()) } : {}),
             }
           : undefined;
-      const snapshot = await collectReadinessSnapshot(ctx, { target });
+      const snapshot = await collectReadinessSnapshot(ctx, { target, createdConfig });
       if (opts.agent) {
         const data = {
           readiness: snapshot.readiness,
