@@ -181,6 +181,41 @@ describe('kb resolution', () => {
     expect(parsed[0].tables).toEqual(['orders', 'order_items']);
   });
 
+  it('kb resolve-connection unknown env returns hint listing available envs', () => {
+    const { env } = setupKbState();
+    const out = runCli(['kb', 'resolve-connection', '--service', 'orders', '--env', 'prod'], env);
+    expect(out.status).not.toBe(0);
+    const message = out.stderr + out.stdout;
+    expect(message).toContain('orders');
+    expect(message).toContain('not for env=prod');
+    expect(message).toContain('qa');
+  });
+
+  it('kb resolve-connection unknown service hints known services', () => {
+    const { env } = setupKbState();
+    const out = runCli(['kb', 'resolve-connection', '--service', 'unknown-svc', '--env', 'qa'], env);
+    expect(out.status).not.toBe(0);
+    const message = out.stderr + out.stdout;
+    expect(message).toContain('not registered in KB');
+    expect(message).toContain('orders');
+    expect(message).toContain('payments');
+  });
+
+  it('kb tables --match alias filters table names', () => {
+    const { env } = setupKbState();
+    const out = runCli(['--json', 'kb', 'tables', '--service', 'orders', '--match', 'item'], env);
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)[0].tables).toEqual(['order_items']);
+  });
+
+  it('kb tables --list returns flat table-name rows', () => {
+    const { env } = setupKbState();
+    const out = runCli(['--json', 'kb', 'tables', '--service', 'orders', '--list'], env);
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout) as Array<{ table: string }>;
+    expect(parsed.map((r) => r.table).sort()).toEqual(['order_items', 'orders']);
+  });
+
   it('kb related shows relationships', () => {
     const { env } = setupKbState();
     const out = runCli(['--json', 'kb', 'related', '--service', 'orders'], env);

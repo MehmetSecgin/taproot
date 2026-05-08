@@ -85,6 +85,26 @@ describe('datasource CRUD', () => {
     expect(JSON.parse(out.stdout).some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
   });
 
+  it('datasource add --probe rolls back when plugin doctor fails', () => {
+    const { env } = setupState();
+    const out = runCli(
+      [
+        'datasource', 'add',
+        '--name', 'qa-probe',
+        '--kind', 'mysql',
+        '--credential-ref', 'qa:probe',
+        '--env', 'qa', '--service', 'probe',
+        '--host', '127.0.0.1', '--port', '1', '--database', 'probedb',
+        '--probe',
+      ],
+      env,
+    );
+    expect(out.status).not.toBe(0);
+    expect(out.stderr + out.stdout).toContain('PROBE_FAILED');
+    const showOut = runCli(['datasource', 'show', '--name', 'qa-probe'], env);
+    expect(showOut.status).toBe(1);
+  });
+
   it('datasource list orders rows by env, namespace, service, name', () => {
     const { env } = setupState();
     runCli(['datasource', 'add', '--name', 'qa-zeta', '--kind', 'mysql', '--credential-ref', 'qa:zeta', '--env', 'qa', '--service', 'zeta'], env);

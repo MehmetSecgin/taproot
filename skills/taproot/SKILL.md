@@ -27,6 +27,8 @@ Use TapRoot as the canonical DB/operator path.
 - Use `taproot --json init` at the start of a new machine or repo setup to create starter runtime state and get the current readiness summary.
 - Use `taproot --json self-check --agent` for machine-readable readiness, and prefer targeted runs with `--datasource <name>` or `--env <env> --service <service>` when checking a real query path.
 - Use `taproot --json init datasource --env <env> --service <service>` as the explicit KB-backed create/repair path for datasource profiles.
+- Pass `--probe` to `taproot datasource add` to run plugin `doctor()` on the new profile and roll back on failure. Catches host/port/credential typos at save-time instead of next query.
+- Pass `--explain` to `taproot query` to wrap the SQL in `EXPLAIN` and report the plan instead of running it. Required arg: `--query` (raw SQL); does not work with `--card`/`--template`/`--intent`.
 - Treat `nextActionDetails` as the preferred remediation contract in `init --json`, `self-check --agent --json`, and `doctor --json`; keep `nextActions` and `nextCommand` only for compatibility.
 - Use `taproot --json creds set --ref <ref> --user <u> --password <p>` to store credentials, or add connector-specific keys such as `--status-command`, `--connect-command`, `--disconnect-command`, and `--login-command`.
 - Use `taproot --json creds show --ref <ref>` to verify a credential ref. Sensitive values are redacted.

@@ -97,9 +97,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--template <id>')
     .option('--query <native>')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
-    .option('--allow-discovery', 'allow non-deterministic datasource discovery', false)
+    .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
     .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
+    .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -125,7 +126,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const logVerbose = (msg: string): void => {
         if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
-      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || allowDiscovery;
+      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || allowDiscovery || Boolean(opts.explain);
+      if (opts.explain && !opts.query) {
+        throw new Error('Invalid argument: --explain requires --query (raw SQL). Resolve --card/--template/--intent first, then re-run with --query and --explain.');
+      }
       try {
         if (allowDiscovery && !ctx.jsonMode) {
           progress.update('discovery mode enabled, bypassing daemon');
@@ -172,6 +176,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                   `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
                 );
                 console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+                const daemonSchemaContext = (rpc.data as any)?.meta?.schemaContext || (rpc.meta as any)?.schemaContext;
+                const daemonSchemaCount = daemonSchemaContext?.tables ? Object.keys(daemonSchemaContext.tables).length : 0;
+                if (daemonSchemaCount) {
+                  console.log(`[schemaContext: ${daemonSchemaCount} table${daemonSchemaCount === 1 ? '' : 's'} cached — pass --json for full detail]`);
+                }
                 const renderedMemory = renderQueryMemoryTty(rpc.meta?.queryMemory || (rpc.data?.queryMemory as any));
                 if (renderedMemory) console.log(renderedMemory);
               }
@@ -335,6 +344,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
 
       const referencedTables = collectReferencedTables(query);
       if (supportsSchemaRefresh(datasource as any) && referencedTables.length) {
+        const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.name).length;
+        if (priorSnapshotRows === 0 && !ctx.jsonMode) {
+          process.stderr.write(`[taproot] first query against ${datasource.name} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
+        }
         try {
           await ensureSchemaSnapshot(ctx, {
             datasource: datasource.name,
@@ -379,6 +392,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             allowPartitionScan: Boolean(opts.allowPartitionScan),
           }),
         );
+        const executedQuery = opts.explain ? `EXPLAIN ${query}` : query;
         progress.update('checking connectors');
         const preflightBudgetMs = Math.max(timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
         const connectorChecks = await withQueryTimeout({
@@ -405,7 +419,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
               execute(
                 {
                   datasource: datasource as any,
-                  query,
+                  query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
                 },
@@ -436,7 +450,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
               execute(
                 {
                   datasource: datasource as any,
-                  query,
+                  query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
                 },
@@ -479,6 +493,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
           console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
+          const schemaTableCount = Object.keys(schemaContext.tables || {}).length;
+          if (schemaTableCount) {
+            console.log(`[schemaContext: ${schemaTableCount} table${schemaTableCount === 1 ? '' : 's'} cached — pass --json for full detail]`);
+          }
           const renderedMemory = renderQueryMemoryTty(queryMemory);
           if (renderedMemory) console.log(renderedMemory);
         }

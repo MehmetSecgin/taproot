@@ -96,7 +96,8 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
     .option('--confidence <n>', 'confidence 0..1', '0.8')
-    .action((opts) => {
+    .option('--probe', 'after save, run plugin doctor() against the new profile; rollback on failure', false)
+    .action(async (opts) => {
       const ctx = getCtx();
       const profile = {
         name: opts.name,
@@ -126,7 +127,35 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         updatedAt: nowIso(),
         confidence: Number(opts.confidence),
       };
+      const existed = Boolean(ctx.datasourceStore.get(opts.name));
       const saved = ctx.datasourceStore.save(profile as any);
+      if (opts.probe) {
+        const plugin = ctx.pluginRegistry.get(saved.kind);
+        if (!plugin?.doctor) {
+          if (!existed) ctx.datasourceStore.remove(saved.name);
+          throw new Error(`PROBE_UNSUPPORTED: plugin '${saved.kind}' does not implement doctor(); cannot probe.`);
+        }
+        try {
+          const creds = await ctx.credentialStore.get(saved.credentialRef);
+          const checks = await plugin.doctor({ datasource: saved as any, credentials: creds });
+          const failures = checks.filter((c) => c.status === 'fail');
+          if (failures.length) {
+            if (!existed) ctx.datasourceStore.remove(saved.name);
+            const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
+            throw new Error(`PROBE_FAILED: profile rolled back. ${detail}`);
+          }
+          if (ctx.jsonMode) printJson({ ...saved, probe: { ok: true, checks } });
+          else {
+            console.log(`Saved datasource ${saved.name} (probe ok: ${checks.map((c) => c.check).join(', ')})`);
+          }
+          return;
+        } catch (err) {
+          const message = (err as Error).message || String(err);
+          if (message.startsWith('PROBE_FAILED') || message.startsWith('PROBE_UNSUPPORTED')) throw err;
+          if (!existed) ctx.datasourceStore.remove(saved.name);
+          throw new Error(`PROBE_FAILED: profile rolled back. ${message}`);
+        }
+      }
       if (ctx.jsonMode) printJson(saved);
       else console.log(`Saved datasource ${saved.name}`);
     });
