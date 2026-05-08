@@ -85,6 +85,19 @@ describe('datasource CRUD', () => {
     expect(JSON.parse(out.stdout).some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
   });
 
+  it('datasource list orders rows by env, namespace, service, name', () => {
+    const { env } = setupState();
+    runCli(['datasource', 'add', '--name', 'qa-zeta', '--kind', 'mysql', '--credential-ref', 'qa:zeta', '--env', 'qa', '--service', 'zeta'], env);
+    runCli(['datasource', 'add', '--name', 'qa-alpha', '--kind', 'mysql', '--credential-ref', 'qa:alpha', '--env', 'qa', '--service', 'alpha'], env);
+    runCli(['datasource', 'add', '--name', 'prod-billing', '--kind', 'mysql', '--credential-ref', 'prod:billing', '--env', 'prod', '--service', 'billing'], env);
+    runCli(['datasource', 'add', '--name', 'qa-beta-dev', '--kind', 'mysql', '--credential-ref', 'qa:beta', '--env', 'qa', '--namespace', 'develop', '--service', 'beta'], env);
+
+    const out = runCli(['--json', 'datasource', 'list'], env);
+    expect(out.status).toBe(0);
+    const rows = JSON.parse(out.stdout) as Array<{ name: string; env: string; namespace: string; service: string }>;
+    expect(rows.map((r) => r.name)).toEqual(['prod-billing', 'qa-alpha', 'qa-zeta', 'qa-beta-dev']);
+  });
+
   it('datasource remove deletes profile', () => {
     const { env } = setupState();
     addProfile(env);

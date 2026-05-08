@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderRecord } from '../core/output.js';
+import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 function parseKv(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -59,6 +59,17 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     if (redacted.token) redacted.token = '[REDACTED]';
     if (ctx.jsonMode) printJson({ ref: opts.ref, values: redacted });
     else console.log(renderRecord({ ref: opts.ref, ...redacted }));
+  });
+
+  c.command('list').action(async () => {
+    const ctx = getCtx();
+    const entries = await ctx.credentialStore.list();
+    if (ctx.jsonMode) {
+      printJson(entries.map((e) => ({ ref: e.ref, keys: e.keys, source: e.source })));
+      return;
+    }
+    const rows = entries.map((e) => ({ ref: e.ref, source: e.source, keys: e.keys.join(',') }));
+    console.log(renderTable(rows));
   });
 
   c.command('unset').requiredOption('--ref <ref>').action(async (opts) => {

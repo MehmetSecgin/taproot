@@ -30,6 +30,7 @@ Use TapRoot as the canonical DB/operator path.
 - Treat `nextActionDetails` as the preferred remediation contract in `init --json`, `self-check --agent --json`, and `doctor --json`; keep `nextActions` and `nextCommand` only for compatibility.
 - Use `taproot --json creds set --ref <ref> --user <u> --password <p>` to store credentials, or add connector-specific keys such as `--status-command`, `--connect-command`, `--disconnect-command`, and `--login-command`.
 - Use `taproot --json creds show --ref <ref>` to verify a credential ref. Sensitive values are redacted.
+- Use `taproot --json creds list` to enumerate stored credential refs (redacted; values never returned). Helpful when the right `--credential-ref` for a datasource is unknown.
 - Use `taproot --json creds unset --ref <ref>` only when the user explicitly wants to remove a saved credential ref.
 - Use `taproot --json connector setup --datasource <name> --connector <name> --ref <ref>` to wire a connector to a datasource.
 - Use `taproot --json connector status --datasource <name>` to check connector health.

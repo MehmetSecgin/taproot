@@ -78,6 +78,31 @@ describe('credential lifecycle', () => {
     expect(out.stdout).toContain('us-east-1');
   });
 
+  it('creds list enumerates refs without exposing secrets', () => {
+    const { env } = setupState();
+    runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret123'], env);
+    runCli(['creds', 'set', '--ref', 'prod:billing', '--token', 'mysecrettokenval'], env);
+    const out = runCli(['creds', 'list'], env);
+    expect(out.status).toBe(0);
+    expect(out.stdout).toContain('qa:orders');
+    expect(out.stdout).toContain('prod:billing');
+    expect(out.stdout).not.toContain('secret123');
+    expect(out.stdout).not.toContain('mysecrettokenval');
+
+    const jsonOut = runCli(['--json', 'creds', 'list'], env);
+    expect(jsonOut.status).toBe(0);
+    const parsed = JSON.parse(jsonOut.stdout) as Array<{ ref: string; keys: string[]; source: string }>;
+    expect(parsed.map((e) => e.ref).sort()).toEqual(['prod:billing', 'qa:orders']);
+    for (const entry of parsed) {
+      for (const key of entry.keys) {
+        expect(['user', 'dbUser', 'password', 'token', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']).toContain(
+          // sanity: keys are key names, not values
+          key.length > 0 ? key : 'user',
+        );
+      }
+    }
+  });
+
   it('creds set with connector commands', () => {
     const { env } = setupState();
     runCli(['creds', 'set', '--ref', 'x', '--status-command', 'tsh status', '--connect-command', 'tsh db login'], env);

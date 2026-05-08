@@ -36,7 +36,17 @@ program
   .option('--profile <name>', 'Runtime profile name')
   .option('--memory-root <path>', 'Memory root override')
   .option('--verbose', 'Verbose progress and diagnostics', false)
+  .option('--datetime-format <fmt>', 'Render Date columns as iso|js|epoch (default iso)')
   .option('--skill-version', 'Print skill version and exit', false);
+
+program.hook('preAction', () => {
+  const fmt = String(program.opts().datetimeFormat || '').trim().toLowerCase();
+  if (fmt === 'iso' || fmt === 'js' || fmt === 'epoch') {
+    process.env.TAPROOT_DATETIME_FORMAT = fmt;
+  } else if (fmt) {
+    throw new Error(`Invalid --datetime-format '${fmt}'. Expected iso|js|epoch.`);
+  }
+});
 
 program.exitOverride((error) => {
   throw error;

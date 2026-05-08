@@ -23,15 +23,22 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
   ds.command('list').action(() => {
     const ctx = getCtx();
-    const rows = ctx.datasourceStore.list().map((d) => ({
-      name: d.name,
-      kind: d.kind,
-      env: d.env || '',
-      namespace: d.namespace || '',
-      service: d.service || '',
-      confidence: d.confidence,
-      updatedAt: d.updatedAt,
-    }));
+    const rows = ctx.datasourceStore.list()
+      .map((d) => ({
+        name: d.name,
+        kind: d.kind,
+        env: d.env || '',
+        namespace: d.namespace || '',
+        service: d.service || '',
+        confidence: d.confidence,
+        updatedAt: d.updatedAt,
+      }))
+      .sort((a, b) =>
+        a.env.localeCompare(b.env)
+        || a.namespace.localeCompare(b.namespace)
+        || a.service.localeCompare(b.service)
+        || a.name.localeCompare(b.name),
+      );
     if (ctx.jsonMode) printJson(rows);
     else console.log(renderTable(rows));
   });

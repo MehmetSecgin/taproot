@@ -95,6 +95,32 @@ export class CredentialStore {
     this.saveFallback(payload);
   }
 
+  async list(): Promise<Array<{ ref: string; keys: string[]; source: 'keychain' | 'fallback' }>> {
+    const out = new Map<string, { ref: string; keys: string[]; source: 'keychain' | 'fallback' }>();
+    try {
+      const keytar = await import('keytar');
+      const found = await keytar.findCredentials(SERVICE_NAME);
+      for (const entry of found || []) {
+        let keys: string[] = [];
+        try {
+          const parsed = JSON.parse(entry.password) as Record<string, unknown>;
+          keys = Object.keys(parsed || {});
+        } catch {
+          keys = [];
+        }
+        out.set(entry.account, { ref: entry.account, keys, source: 'keychain' });
+      }
+    } catch {
+      // keytar unavailable; fall through to fallback file
+    }
+    const fallback = this.loadFallback();
+    for (const [ref, value] of Object.entries(fallback)) {
+      if (out.has(ref)) continue;
+      out.set(ref, { ref, keys: Object.keys(value || {}), source: 'fallback' });
+    }
+    return Array.from(out.values()).sort((a, b) => a.ref.localeCompare(b.ref));
+  }
+
   async remove(ref: string): Promise<void> {
     try {
       const keytar = await import('keytar');
