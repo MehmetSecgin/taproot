@@ -8,7 +8,7 @@ import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandid
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson, renderTableSmart } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy, enforcePartitionPredicate } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -101,6 +101,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--allow-mutate', 'allow mutating query', false)
     .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
+    .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -176,7 +177,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 logVerbose(
                   `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
                 );
-                console.log(renderTable(rows.map((r) => rowFromArray(columns, r))));
+                console.log(renderTableSmart(rows.map((r) => rowFromArray(columns, r)), { full: Boolean(opts.full) }));
                 const daemonSchemaContext = (rpc.data as any)?.meta?.schemaContext || (rpc.meta as any)?.schemaContext;
                 const daemonSchemaCount = daemonSchemaContext?.tables ? Object.keys(daemonSchemaContext.tables).length : 0;
                 if (daemonSchemaCount) {
@@ -493,7 +494,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (ctx.jsonMode) printJson(result);
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
-          console.log(renderTable(result.result.rows.map((r) => rowFromArray(result.result.columns, r))));
+          console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
           const schemaTableCount = Object.keys(schemaContext.tables || {}).length;
           if (schemaTableCount) {
             console.log(`[schemaContext: ${schemaTableCount} table${schemaTableCount === 1 ? '' : 's'} cached — pass --json for full detail]`);

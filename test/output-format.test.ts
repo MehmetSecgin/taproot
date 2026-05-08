@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { renderTable } from '../src/core/output.js';
+import { renderTable, renderTableSmart, renderTableSummary } from '../src/core/output.js';
 
 const ORIGINAL_ENV = process.env.TAPROOT_DATETIME_FORMAT;
 
@@ -48,5 +48,66 @@ describe('renderTable value formatting', () => {
     const out = renderTable([{ big: BigInt('9007199254740993'), bin: Buffer.from('hi') }]);
     expect(out).toContain('9007199254740993');
     expect(out).toContain(Buffer.from('hi').toString('base64'));
+  });
+});
+
+describe('renderTableSmart big-result handling', () => {
+  function makeRows(count: number, payloadSize = 200): Array<Record<string, unknown>> {
+    const rows: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < count; i += 1) {
+      rows.push({ id: i, group: i % 3, payload: 'x'.repeat(payloadSize) });
+    }
+    return rows;
+  }
+
+  it('returns full table when output is below threshold', () => {
+    const rows = makeRows(3);
+    const smart = renderTableSmart(rows);
+    expect(smart).toBe(renderTable(rows));
+    expect(smart).not.toContain('summarized');
+  });
+
+  it('summarizes when rendered output exceeds threshold', () => {
+    const rows = makeRows(500);
+    const smart = renderTableSmart(rows);
+    expect(smart).toContain('summarized');
+    expect(smart).toContain(`Rows: ${rows.length}`);
+    expect(smart).toContain('Distinct values per column');
+    expect(smart).toContain('First 10 rows');
+    expect(smart.length).toBeLessThan(renderTable(rows).length);
+  });
+
+  it('honors --full by returning full table even when oversized', () => {
+    const rows = makeRows(500);
+    const smart = renderTableSmart(rows, { full: true });
+    expect(smart).toBe(renderTable(rows));
+    expect(smart).not.toContain('summarized');
+  });
+
+  it('respects custom thresholdBytes', () => {
+    const rows = makeRows(5, 50);
+    const smart = renderTableSmart(rows, { thresholdBytes: 50 });
+    expect(smart).toContain('summarized');
+  });
+
+  it('renderTableSummary reports accurate distinct counts', () => {
+    const rows = [
+      { kind: 'a', value: 1 },
+      { kind: 'a', value: 2 },
+      { kind: 'b', value: 2 },
+      { kind: 'b', value: 3 },
+    ];
+    const summary = renderTableSummary(rows);
+    expect(summary).toContain('Rows: 4');
+    expect(summary).toContain('Distinct values per column');
+    const expectedDistinctTable = renderTable([
+      { column: 'kind', distinct: 2 },
+      { column: 'value', distinct: 3 },
+    ]);
+    expect(summary).toContain(expectedDistinctTable);
+  });
+
+  it('renderTableSummary on empty rows returns no-rows marker', () => {
+    expect(renderTableSummary([])).toBe('Rows: 0\n(no rows)');
   });
 });
