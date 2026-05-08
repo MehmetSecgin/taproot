@@ -68,6 +68,50 @@ describe('query resolution', () => {
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
+  it('explicit --datasource with non-conventional name uses profile env/service for KB conflict checks', () => {
+    // Profile name 'nudge-test' would naively parse as env='nudge' service='test'. The
+    // profile's actual env is 'prod' / service 'orders'. KB has a conflicting prod/orders
+    // entry. Conflict can only fire when env and service are taken from the profile, not
+    // from the parsed name.
+    const { env } = setupState({
+      datasources: [
+        {
+          name: 'nudge-test',
+          kind: 'mysql',
+          env: 'prod',
+          service: 'orders',
+          tags: [],
+          connection: { host: '127.0.0.1', port: 3306, database: 'orders', target: 'wrong-target' },
+          credentialRef: 'prod:orders',
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: {},
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ],
+      kbServices: [
+        {
+          service: 'orders',
+          connections: [
+            {
+              env: 'prod',
+              engine: 'mysql',
+              database: 'orders',
+              db_user: 'reader',
+              access_method: 'tsh',
+              target: 'orders-tidb',
+              status: 'active',
+              verified_at_utc: '2026-03-01T00:00:00Z',
+            },
+          ],
+        },
+      ],
+    });
+    const out = runCli(['query', '--datasource', 'nudge-test', '--query', 'SELECT 1'], env);
+    expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
+  });
+
   it('resolves --env + --service from store', () => {
     const { env } = setupState();
     const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--query', 'SELECT 1'], env);

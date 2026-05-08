@@ -111,9 +111,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       ensureStarterRuntime(ctx);
       const timeoutMs = parseTimeoutMs(opts.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const aliases = ctx.runtimeConfigStore.serviceAliases();
-      const alias = parseDatasourceAlias(opts.datasource, aliases);
-      const env = String(opts.env || alias?.env || '').trim();
-      const namespace = normalizeNamespace(String(opts.namespace || ''));
+      const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
+      const alias = explicitProfile ? null : parseDatasourceAlias(opts.datasource, aliases);
+      const env = String(opts.env || explicitProfile?.env || alias?.env || '').trim();
+      const namespace = normalizeNamespace(String(opts.namespace || explicitProfile?.namespace || ''));
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
@@ -209,7 +210,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           }
         }
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-      const service = normalizeService(opts.service || alias?.service || '', aliases);
+      const service = normalizeService(opts.service || explicitProfile?.service || alias?.service || '', aliases);
       progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
       let resolutionSource: 'explicit' | 'store' | 'learning' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
       const deterministicRequired = policy.deterministicRequired;
