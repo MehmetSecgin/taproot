@@ -31,21 +31,21 @@ function overlaps(left: string[], right: string[]): boolean {
   return right.some((item) => set.has(item.toLowerCase()));
 }
 
-function toPastRun(row: RunsLedgerEntry): QueryMemoryPastRun {
-  return {
+function toPastRun(row: RunsLedgerEntry, currentDatasource?: string): QueryMemoryPastRun {
+  const out: QueryMemoryPastRun = {
     runId: row.runId,
     ts: row.ts,
-    datasource: row.datasource,
-    intent: row.intent,
-    reason: row.reason,
-    fingerprint: row.fingerprint,
     outcomeCode: row.outcomeCode,
-    errorClass: row.errorClass,
-    lesson: row.lesson,
     tables: row.tables,
-    durationMs: row.durationMs,
-    rowCount: row.rowCount,
   };
+  if (row.datasource && row.datasource !== currentDatasource) out.datasource = row.datasource;
+  if (row.intent) out.intent = row.intent;
+  if (row.reason) out.reason = row.reason;
+  if (row.errorClass) out.errorClass = row.errorClass;
+  if (row.lesson) out.lesson = row.lesson;
+  if (typeof row.durationMs === 'number') out.durationMs = row.durationMs;
+  if (typeof row.rowCount === 'number') out.rowCount = row.rowCount;
+  return out;
 }
 
 function recurringFailureHints(rows: RunsLedgerEntry[], tables: string[]): string[] {
@@ -106,8 +106,8 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   });
   const similarPastRuns = rows
     .filter((row) => row.fingerprint === fingerprint || overlaps(tables, row.tables) || (input.intent && row.intent === input.intent))
-    .slice(0, 5)
-    .map(toPastRun);
+    .slice(0, 3)
+    .map((row) => toPastRun(row, input.datasource));
 
   const cardMatches = input.cardStore
     ? input.cardStore.match({ datasource: input.datasource, env: input.env, service: input.service, intent: input.intent, tables }).slice(0, 3)
@@ -133,29 +133,34 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   }
   hints.push(...recurringFailureHints(rows, tables));
 
-  return {
-    matchedCards,
-    similarPastRuns,
-    warnings,
-    hints: Array.from(new Set(hints)),
-  };
+  const dedupedHints = Array.from(new Set(hints));
+  const out: QueryMemory = {};
+  if (matchedCards.length) out.matchedCards = matchedCards;
+  if (similarPastRuns.length) out.similarPastRuns = similarPastRuns;
+  if (warnings.length) out.warnings = warnings;
+  if (dedupedHints.length) out.hints = dedupedHints;
+  return out;
 }
 
 export function renderQueryMemoryTty(memory?: QueryMemory): string {
   if (!memory) return '';
   const lines: string[] = [];
-  if (memory.matchedCards.length) {
-    lines.push(`matched cards: ${memory.matchedCards.map((card) => card.id).join(', ')}`);
+  const matchedCards = memory.matchedCards || [];
+  const similarPastRuns = memory.similarPastRuns || [];
+  const warnings = memory.warnings || [];
+  const hints = memory.hints || [];
+  if (matchedCards.length) {
+    lines.push(`matched cards: ${matchedCards.map((card) => card.id).join(', ')}`);
   }
-  if (memory.similarPastRuns.length) {
+  if (similarPastRuns.length) {
     lines.push(
-      `similar runs: ${memory.similarPastRuns
+      `similar runs: ${similarPastRuns
         .slice(0, 3)
         .map((run) => `${run.outcomeCode}${run.reason ? ` (${run.reason})` : ''}`)
         .join(' | ')}`,
     );
   }
-  if (memory.warnings.length) lines.push(`warnings: ${memory.warnings.join(' | ')}`);
-  if (memory.hints.length) lines.push(`hints: ${memory.hints.join(' | ')}`);
+  if (warnings.length) lines.push(`warnings: ${warnings.join(' | ')}`);
+  if (hints.length) lines.push(`hints: ${hints.join(' | ')}`);
   return lines.length ? `queryMemory:\n${lines.map((line) => `  ${line}`).join('\n')}` : '';
 }

@@ -21,27 +21,35 @@ function parseConnectorRefPairs(values: string[]): Record<string, string> {
 export function registerDatasource(program: Command, getCtx: () => AppContext): void {
   const ds = program.command('datasource').description('Datasource profile operations');
 
-  ds.command('list').action(() => {
-    const ctx = getCtx();
-    const rows = ctx.datasourceStore.list()
-      .map((d) => ({
-        name: d.name,
-        kind: d.kind,
-        env: d.env || '',
-        namespace: d.namespace || '',
-        service: d.service || '',
-        confidence: d.confidence,
-        updatedAt: d.updatedAt,
-      }))
-      .sort((a, b) =>
-        a.env.localeCompare(b.env)
-        || a.namespace.localeCompare(b.namespace)
-        || a.service.localeCompare(b.service)
-        || a.name.localeCompare(b.name),
-      );
-    if (ctx.jsonMode) printJson(rows);
-    else console.log(renderTable(rows));
-  });
+  ds.command('list')
+    .option('--detailed', 'include confidence and updatedAt', false)
+    .action((opts) => {
+      const ctx = getCtx();
+      const detailed = Boolean(opts.detailed);
+      const rows = ctx.datasourceStore.list()
+        .map((d) => {
+          const row: Record<string, unknown> = {
+            name: d.name,
+            kind: d.kind,
+            env: d.env || '',
+            namespace: d.namespace || '',
+            service: d.service || '',
+          };
+          if (detailed) {
+            row.confidence = d.confidence;
+            row.updatedAt = d.updatedAt;
+          }
+          return row;
+        })
+        .sort((a, b) =>
+          String(a.env).localeCompare(String(b.env))
+          || String(a.namespace).localeCompare(String(b.namespace))
+          || String(a.service).localeCompare(String(b.service))
+          || String(a.name).localeCompare(String(b.name)),
+        );
+      if (ctx.jsonMode) printJson(rows);
+      else console.log(renderTable(rows));
+    });
 
   ds.command('show').requiredOption('--name <name>').action((opts) => {
     const ctx = getCtx();

@@ -130,7 +130,7 @@ describe('query cards', () => {
       cardStore: store,
     });
 
-    expect(memory.matchedCards[0]).toMatchObject({ id: 'orders.by-id' });
+    expect(memory.matchedCards?.[0]).toMatchObject({ id: 'orders.by-id' });
     expect(memory.warnings).toContain('card_requires_must_filter:orders.by-id:id');
     expect(memory.warnings).toContain('card_requires_max_range_days_unverified:orders.by-id:7');
   });

@@ -181,6 +181,7 @@ export class LearningStore {
   private readonly schemaObservationFile: string;
   private readonly schemaJoinFile: string;
   private readonly schemaShapeFile: string;
+  private schemaKeysMigrated = false;
 
   constructor(private readonly dir: string) {
     fs.mkdirSync(dir, { recursive: true });
@@ -191,6 +192,138 @@ export class LearningStore {
     this.schemaObservationFile = path.join(dir, 'schema-observations.json');
     this.schemaJoinFile = path.join(dir, 'schema-joins.json');
     this.schemaShapeFile = path.join(dir, 'schema-query-shapes.json');
+  }
+
+  private mergeColumnStats(a: SchemaTableColumnStat[], b: SchemaTableColumnStat[]): SchemaTableColumnStat[] {
+    const map = new Map<string, SchemaTableColumnStat>();
+    for (const stat of [...a, ...b]) {
+      const prev = map.get(stat.column);
+      if (!prev) {
+        map.set(stat.column, { ...stat });
+        continue;
+      }
+      map.set(stat.column, {
+        column: stat.column,
+        selectedCount: prev.selectedCount + stat.selectedCount,
+        filterCount: prev.filterCount + stat.filterCount,
+        groupCount: prev.groupCount + stat.groupCount,
+        orderCount: prev.orderCount + stat.orderCount,
+        lastSeenAt: prev.lastSeenAt > stat.lastSeenAt ? prev.lastSeenAt : stat.lastSeenAt,
+      });
+    }
+    return [...map.values()].sort((x, y) => x.column.localeCompare(y.column));
+  }
+
+  private mergeObservation(existing: SchemaObservationEntry, incoming: SchemaObservationEntry, newKey: string): SchemaObservationEntry {
+    const completePrev = schemaObservationHasCurrentMetadata(existing);
+    const completeNext = schemaObservationHasCurrentMetadata(incoming);
+    const winner = completeNext && !completePrev
+      ? incoming
+      : completePrev && !completeNext
+        ? existing
+        : Date.parse(incoming.lastSeenAt) >= Date.parse(existing.lastSeenAt)
+          ? incoming
+          : existing;
+    return {
+      ...winner,
+      key: newKey,
+      aliases: Array.from(new Set([...(existing.aliases || []), ...(incoming.aliases || [])])).sort(),
+      columns: this.mergeColumnStats(existing.columns || [], incoming.columns || []),
+      sightings: (existing.sightings || 0) + (incoming.sightings || 0),
+      confidence: Math.max(existing.confidence || 0, incoming.confidence || 0),
+      sources: Array.from(new Set([...(existing.sources || []), ...(incoming.sources || [])])).sort() as SchemaProvenance[],
+      firstSeenAt: existing.firstSeenAt < incoming.firstSeenAt ? existing.firstSeenAt : incoming.firstSeenAt,
+      lastSeenAt: existing.lastSeenAt > incoming.lastSeenAt ? existing.lastSeenAt : incoming.lastSeenAt,
+    };
+  }
+
+  private migrateSchemaKeysIfNeeded(): void {
+    if (this.schemaKeysMigrated) return;
+    this.schemaKeysMigrated = true;
+
+    const observations = readJsonFile<SchemaObservationEntry[]>(this.schemaObservationFile, []);
+    if (observations.length) {
+      const merged = new Map<string, SchemaObservationEntry>();
+      let changed = false;
+      for (const row of observations) {
+        if (!row.service || !row.table) {
+          if (!changed) changed = true;
+          continue;
+        }
+        const tableLower = String(row.table).toLowerCase();
+        if (tableLower.startsWith('information_schema.') || tableLower.startsWith('performance_schema.') || tableLower.startsWith('mysql.')) {
+          changed = true;
+          continue;
+        }
+        const bareTable = String(row.table).replace(/`/g, '').trim().split('.').pop() || '';
+        if (!bareTable) {
+          changed = true;
+          continue;
+        }
+        if (bareTable !== row.table) {
+          changed = true;
+          row.table = bareTable;
+        }
+        const newKey = `${row.service}|${row.table}`;
+        if (row.key !== newKey) changed = true;
+        const existing = merged.get(newKey);
+        if (existing) {
+          changed = true;
+          merged.set(newKey, this.mergeObservation(existing, row, newKey));
+        } else {
+          merged.set(newKey, { ...row, key: newKey });
+        }
+      }
+      if (changed) {
+        const next = [...merged.values()].sort((a, b) => a.key.localeCompare(b.key));
+        writeJsonFile(this.schemaObservationFile, next);
+      }
+    }
+
+    const joins = readJsonFile<SchemaJoinEntry[]>(this.schemaJoinFile, []);
+    if (joins.length) {
+      const merged = new Map<string, SchemaJoinEntry>();
+      let changed = false;
+      for (const row of joins) {
+        if (!row.service || !row.leftTable || !row.rightTable) {
+          if (!changed) changed = true;
+          continue;
+        }
+        const leftBare = String(row.leftTable).replace(/`/g, '').trim().split('.').pop() || '';
+        const rightBare = String(row.rightTable).replace(/`/g, '').trim().split('.').pop() || '';
+        if (!leftBare || !rightBare) {
+          changed = true;
+          continue;
+        }
+        if (leftBare !== row.leftTable || rightBare !== row.rightTable) {
+          changed = true;
+          row.leftTable = leftBare;
+          row.rightTable = rightBare;
+        }
+        const newKey = [row.service, row.leftTable, row.rightTable, row.conditionNormalized].join('|');
+        if (row.key !== newKey) changed = true;
+        const existing = merged.get(newKey);
+        if (existing) {
+          changed = true;
+          merged.set(newKey, {
+            ...existing,
+            ...row,
+            key: newKey,
+            sightings: (existing.sightings || 0) + (row.sightings || 0),
+            confidence: Math.max(existing.confidence || 0, row.confidence || 0),
+            sources: Array.from(new Set([...(existing.sources || []), ...(row.sources || [])])).sort() as SchemaProvenance[],
+            firstSeenAt: existing.firstSeenAt < row.firstSeenAt ? existing.firstSeenAt : row.firstSeenAt,
+            lastSeenAt: existing.lastSeenAt > row.lastSeenAt ? existing.lastSeenAt : row.lastSeenAt,
+          });
+        } else {
+          merged.set(newKey, { ...row, key: newKey });
+        }
+      }
+      if (changed) {
+        const next = [...merged.values()].sort((a, b) => a.key.localeCompare(b.key));
+        writeJsonFile(this.schemaJoinFile, next);
+      }
+    }
   }
 
   private loadResolution(): ResolutionEntry[] {
@@ -210,10 +343,12 @@ export class LearningStore {
   }
 
   private loadSchemaObservations(): SchemaObservationEntry[] {
+    this.migrateSchemaKeysIfNeeded();
     return readJsonFile<SchemaObservationEntry[]>(this.schemaObservationFile, []);
   }
 
   private loadSchemaJoins(): SchemaJoinEntry[] {
+    this.migrateSchemaKeysIfNeeded();
     return readJsonFile<SchemaJoinEntry[]>(this.schemaJoinFile, []);
   }
 
@@ -268,21 +403,30 @@ export class LearningStore {
     const database = String(datasource.connection.database || '');
     const target = String(datasource.connection.target || '');
 
+    const bare = (value: string): string => String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
+    const isSystemTable = (value: string): boolean => {
+      const lower = String(value || '').toLowerCase();
+      return lower.startsWith('information_schema.') || lower.startsWith('performance_schema.') || lower.startsWith('mysql.')
+        || lower === 'information_schema' || lower === 'performance_schema' || lower === 'mysql';
+    };
     const aliasesByTable = new Map<string, string[]>();
     for (const t of schema.tables) {
-      const key = t.table;
-      if (!aliasesByTable.has(key)) aliasesByTable.set(key, []);
-      if (t.alias && !aliasesByTable.get(key)?.includes(t.alias)) aliasesByTable.get(key)?.push(t.alias);
+      if (isSystemTable(t.table)) continue;
+      const baseTable = bare(t.table);
+      if (!baseTable) continue;
+      if (!aliasesByTable.has(baseTable)) aliasesByTable.set(baseTable, []);
+      if (t.alias && !aliasesByTable.get(baseTable)?.includes(t.alias)) aliasesByTable.get(baseTable)?.push(t.alias);
     }
 
-    const columnTableFallback = schema.tables.length === 1 ? schema.tables[0].table : '';
+    const columnTableFallback = aliasesByTable.size === 1 ? [...aliasesByTable.keys()][0] : '';
     for (const [table, aliases] of aliasesByTable.entries()) {
-      const key = [datasource.name, database, table].join('|');
+      const key = [service, table].join('|');
       const idx = observations.findIndex((o) => o.key === key);
       const prev = idx >= 0 ? observations[idx] : undefined;
       const nextColumns = [...(prev?.columns || [])];
       for (const c of schema.columns) {
-        const colTable = c.table || columnTableFallback;
+        const colTableRaw = c.table || columnTableFallback;
+        const colTable = bare(colTableRaw);
         if (!colTable || colTable !== table) continue;
         this.upsertColumnStat(nextColumns, c.column, c.role, input.now);
       }
@@ -312,7 +456,11 @@ export class LearningStore {
     }
 
     for (const j of schema.joins) {
-      const key = [datasource.name, database, j.leftTable, j.rightTable, j.conditionNormalized].join('|');
+      if (isSystemTable(j.leftTable) || isSystemTable(j.rightTable)) continue;
+      const leftBare = bare(j.leftTable);
+      const rightBare = bare(j.rightTable);
+      if (!leftBare || !rightBare) continue;
+      const key = [service, leftBare, rightBare, j.conditionNormalized].join('|');
       const idx = joins.findIndex((o) => o.key === key);
       const prev = idx >= 0 ? joins[idx] : undefined;
       const next: SchemaJoinEntry = {
@@ -322,8 +470,8 @@ export class LearningStore {
         service,
         kind: datasource.kind,
         database,
-        leftTable: j.leftTable,
-        rightTable: j.rightTable,
+        leftTable: leftBare,
+        rightTable: rightBare,
         directionHint: j.directionHint,
         conditionRaw: j.conditionRaw,
         conditionNormalized: j.conditionNormalized,
@@ -367,16 +515,16 @@ export class LearningStore {
     });
   }
 
-  schemaTables(datasourceName?: string): SchemaObservationEntry[] {
+  schemaTables(service?: string): SchemaObservationEntry[] {
     const rows = this.loadSchemaObservations();
-    if (!datasourceName) return rows;
-    return rows.filter((r) => r.datasource === datasourceName);
+    if (!service) return rows;
+    return rows.filter((r) => r.service === service);
   }
 
-  schemaJoins(datasourceName?: string): SchemaJoinEntry[] {
+  schemaJoins(service?: string): SchemaJoinEntry[] {
     const rows = this.loadSchemaJoins();
-    if (!datasourceName) return rows;
-    return rows.filter((r) => r.datasource === datasourceName);
+    if (!service) return rows;
+    return rows.filter((r) => r.service === service);
   }
 
   schemaQueryShapes(datasourceName?: string): SchemaQueryShapeEntry[] {
@@ -402,7 +550,7 @@ export class LearningStore {
     const target = String(datasource.connection.target || '');
 
     for (const table of input.tables) {
-      const key = [datasource.name, database, table.table].join('|');
+      const key = [service, table.table].join('|');
       const idx = observations.findIndex((row) => row.key === key);
       const prev = idx >= 0 ? observations[idx] : undefined;
       const nextColumns = table.columns.map((column) => {
@@ -442,7 +590,7 @@ export class LearningStore {
     }
 
     for (const item of input.joins) {
-      const key = [datasource.name, database, item.leftTable, item.rightTable, item.conditionNormalized].join('|');
+      const key = [service, item.leftTable, item.rightTable, item.conditionNormalized].join('|');
       const idx = joins.findIndex((row) => row.key === key);
       const prev = idx >= 0 ? joins[idx] : undefined;
       const next: SchemaJoinEntry = {

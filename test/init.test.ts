@@ -134,7 +134,6 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.checks)).toBe(true);
     expect(typeof parsed.readiness).toBe('string');
-    expect(Array.isArray(parsed.nextActions)).toBe(true);
     expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
     expect(parsed.nextActionDetails[0]).toMatchObject({
       command: expect.any(String),
@@ -361,7 +360,6 @@ describe('init command', () => {
     expect(typeof parsed.readiness).toBe('string');
     expect(parsed).toHaveProperty('missing');
     expect(parsed).toHaveProperty('nextCommand');
-    expect(Array.isArray(parsed.nextActions)).toBe(true);
     expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
   });
 

@@ -5,6 +5,16 @@ import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
 const LOGIN_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs;
 
+function summarizeTshStatus(detail: string, ok: boolean): string {
+  if (!ok) return String(detail || '').slice(0, 400);
+  const text = String(detail || '');
+  if (!text || text === 'ok') return 'ok';
+  const want = /^\s*(Cluster|Logged in as|Valid until|Profile URL):/;
+  const lines = text.split(/\r?\n/).filter((line) => want.test(line)).map((line) => line.trim());
+  if (!lines.length) return text.slice(0, 200);
+  return lines.join(' | ');
+}
+
 async function run(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
   return await new Promise((resolve) => {
     const proc = spawn('/bin/zsh', ['-lc', command], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -61,7 +71,7 @@ export const teleportPlugin: TapRootPlugin = {
   async doctor(input): Promise<DoctorCheck[]> {
     const statusCommand = input.credentials.statusCommand || 'tsh status';
     const r = await run(statusCommand, STATUS_TIMEOUT_MS);
-    return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
+    return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: summarizeTshStatus(r.detail, r.ok), ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
   },
 
   async connect(input): Promise<DoctorCheck[]> {

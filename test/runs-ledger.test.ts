@@ -137,9 +137,9 @@ describe('runs ledger', () => {
       sql: 'SELECT id FROM order_items WHERE customer_id = 2',
       tables: ['order_items'],
     });
-    expect(memory.hints.some((hint) => hint.startsWith('reason_missing'))).toBe(true);
-    expect(memory.hints.some((hint) => hint.includes('partition predicate'))).toBe(true);
-    expect(memory.similarPastRuns).toHaveLength(2);
+    expect((memory.hints || []).some((hint) => hint.startsWith('reason_missing'))).toBe(true);
+    expect((memory.hints || []).some((hint) => hint.includes('partition predicate'))).toBe(true);
+    expect(memory.similarPastRuns || []).toHaveLength(2);
   });
 
   it('uses env-aware default redaction tiers from runtime config', () => {

@@ -169,10 +169,11 @@ function matchesTable(row: SchemaObservationEntry, table: string): boolean {
   return bareName(row.table).toLowerCase() === bareName(table).toLowerCase();
 }
 
-export function buildSchemaContext(sql: string, datasourceName: string, store: LearningStore): SchemaContext {
+export function buildSchemaContext(sql: string, target: string | { service?: string }, store: LearningStore): SchemaContext {
   const referenced = collectReferencedTables(sql);
   if (!referenced.length) return { tables: {} };
-  const rows = store.schemaTables(datasourceName);
+  const service = typeof target === 'string' ? target : String(target?.service || '');
+  const rows = store.schemaTables(service || undefined);
   const out: Record<string, TableContext> = {};
   for (const table of referenced) {
     const row = rows
@@ -183,13 +184,21 @@ export function buildSchemaContext(sql: string, datasourceName: string, store: L
         return b.columns.length - a.columns.length || String(b.lastSeenAt).localeCompare(String(a.lastSeenAt));
       })[0];
     if (!row) continue;
+    const trimmedIndexes = (row.indexes || []).map((index) => {
+      const o: { name: string; columns: string[]; unique?: boolean; type?: string } = {
+        name: index.name,
+        columns: index.columns || [],
+      };
+      if (index.unique) o.unique = true;
+      if (index.type && String(index.type).toUpperCase() !== 'BTREE') o.type = index.type;
+      return o;
+    });
     out[row.table] = {
       database: row.database,
       columns: row.columns.map((column) => column.column),
       primaryKey: row.primaryKey || [],
-      indexes: row.indexes || [],
+      indexes: trimmedIndexes,
       partition: row.partition,
-      lastSeenAt: row.lastSeenAt,
     };
   }
   return { tables: out };

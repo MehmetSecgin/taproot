@@ -107,11 +107,11 @@ describe('schema refresh', () => {
     ]);
     expect(refreshed.joins).toHaveLength(1);
 
-    const tables = ctx.learningStore.schemaTables('qa-orders');
+    const tables = ctx.learningStore.schemaTables('orders');
     expect(tables.map((row) => row.table).sort()).toEqual(['customers', 'orders']);
     expect(tables.every((row) => row.sources.includes('refreshed-metadata'))).toBe(true);
 
-    const joins = ctx.learningStore.schemaJoins('qa-orders');
+    const joins = ctx.learningStore.schemaJoins('orders');
     expect(joins[0].sources).toContain('refreshed-metadata');
 
     const shapes = ctx.learningStore.schemaQueryShapes('qa-orders');

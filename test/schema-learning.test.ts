@@ -68,11 +68,11 @@ describe('schema learning store', () => {
     store.saveSuccess({ datasource, queryIntent: 'orders join', sql, result });
     store.saveSuccess({ datasource, queryIntent: 'orders join', sql, result });
 
-    const tables = store.schemaTables('qa-orders');
+    const tables = store.schemaTables('orders');
     expect(tables.length).toBe(2);
     expect(tables.every((t) => t.sightings === 2)).toBe(true);
 
-    const joins = store.schemaJoins('qa-orders');
+    const joins = store.schemaJoins('orders');
     expect(joins.length).toBe(1);
     expect(joins[0].sightings).toBe(2);
 

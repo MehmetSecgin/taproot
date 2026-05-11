@@ -48,7 +48,7 @@ describe('schema context', () => {
     const store = makeStore();
     const out = buildSchemaContext(
       'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
-      'qa-orders',
+      { service: 'orders' },
       store,
     );
 
@@ -85,7 +85,7 @@ describe('schema context', () => {
       },
     });
 
-    const out = buildSchemaContext('SELECT id FROM orders', 'qa-orders', store);
+    const out = buildSchemaContext('SELECT id FROM orders', { service: 'orders' }, store);
 
     expect(out.tables.orders.columns).toContain('order_date');
     expect(out.tables.orders.partition?.key).toBe('order_date');
@@ -108,6 +108,6 @@ describe('schema context', () => {
 
   it('returns empty context for unparseable SQL', () => {
     const store = makeStore();
-    expect(buildSchemaContext('SELECT FROM WHERE', 'qa-orders', store)).toEqual({ tables: {} });
+    expect(buildSchemaContext('SELECT FROM WHERE', { service: 'orders' }, store)).toEqual({ tables: {} });
   });
 });

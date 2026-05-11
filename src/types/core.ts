@@ -154,7 +154,7 @@ export interface TableContext {
   primaryKey?: string[];
   indexes: SchemaIndex[];
   partition?: SchemaPartition;
-  lastSeenAt: string;
+  lastSeenAt?: string;
 }
 
 export interface SchemaContext {
@@ -166,10 +166,10 @@ export type LedgerRedactionTier = 'raw' | 'redact' | 'strict';
 export interface QueryMemoryPastRun {
   runId: string;
   ts: string;
-  datasource: string;
+  datasource?: string;
   intent?: string;
   reason?: string;
-  fingerprint: string;
+  fingerprint?: string;
   outcomeCode: string;
   errorClass?: string;
   lesson?: string;
@@ -186,10 +186,10 @@ export interface QueryMemoryMatchedCard {
 }
 
 export interface QueryMemory {
-  matchedCards: QueryMemoryMatchedCard[];
-  similarPastRuns: QueryMemoryPastRun[];
-  warnings: string[];
-  hints: string[];
+  matchedCards?: QueryMemoryMatchedCard[];
+  similarPastRuns?: QueryMemoryPastRun[];
+  warnings?: string[];
+  hints?: string[];
 }
 
 export type DoctorCheckCode =

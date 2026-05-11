@@ -49,6 +49,41 @@ function isWarnOnlyPartitionKind(partition: SchemaPartition): boolean {
   return ['HASH', 'KEY'].includes(partitionKind(partition));
 }
 
+const REDUNDANT_INTROSPECTION_RE = /^\s*(show\s+create\s+table|show\s+(full\s+)?columns\s+from|show\s+index(es)?\s+from|describe\s+|desc\s+)/i;
+
+export function isRedundantIntrospectionQuery(sql: string): boolean {
+  return REDUNDANT_INTROSPECTION_RE.test(String(sql || ''));
+}
+
+export function enforceSchemaIntrospectionPolicy(input: {
+  sql: string;
+  service: string;
+  hasRefreshedSchema: boolean;
+  allowSchemaIntrospection?: boolean;
+}): string[] {
+  const warnings: string[] = [];
+  if (!input.service || !input.hasRefreshedSchema) return warnings;
+  if (!isRedundantIntrospectionQuery(input.sql)) return warnings;
+
+  const allowByEnv = process.env.TAPROOT_ALLOW_SCHEMA_INTROSPECTION === '1';
+  const allow = Boolean(input.allowSchemaIntrospection || allowByEnv);
+  if (allow) {
+    warnings.push('schema_introspection_bypassed');
+    return warnings;
+  }
+
+  const err = new Error(
+    `REDUNDANT_INTROSPECTION: service ${input.service} schema is already cached; use 'taproot --json learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
+  );
+  (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'REDUNDANT_INTROSPECTION';
+  (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+    service: input.service,
+    nextAction: `taproot --json learn ensure-schema --service ${input.service}`,
+    nextCommand: `taproot --json learn ensure-schema --service ${input.service}`,
+  };
+  throw err;
+}
+
 export function enforcePartitionPredicate(input: {
   sql: string;
   schemaContext: SchemaContext;

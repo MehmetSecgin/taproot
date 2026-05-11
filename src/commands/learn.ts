@@ -35,8 +35,12 @@ function unresolvedNextCommand(opts: { datasource?: string; env?: string; namesp
   return null;
 }
 
-function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted: boolean; load: (datasourceName?: string) => T[] }): T[] {
-  if (input.datasource) return input.load(input.datasource.name);
+function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted: boolean; load: (key?: string) => T[]; keyKind?: 'service' | 'datasource' }): T[] {
+  if (input.datasource) {
+    const kind = input.keyKind || 'service';
+    const key = kind === 'service' ? String(input.datasource.service || '') : input.datasource.name;
+    return input.load(key || undefined);
+  }
   if (input.targeted) return [];
   return input.load(undefined);
 }
@@ -66,41 +70,99 @@ function printEmptyState(kind: 'tables' | 'joins' | 'shapes', state: { emptyReas
   if (state.suggestedNextCommand) console.log(`next: ${state.suggestedNextCommand}`);
 }
 
-function buildSchemaSnapshot(input: { tables: SchemaObservationEntry[]; joins: SchemaJoinEntry[]; limit: number }) {
-  const tables = [...input.tables]
+type SchemaIndexProjection = {
+  name: string;
+  columns: string[];
+  unique?: boolean;
+  type?: string;
+};
+
+type TableSnapshot = {
+  datasource: string;
+  table: string;
+  database: string;
+  columns: string[];
+  primaryKey: string[];
+  indexes: SchemaIndexProjection[];
+  partition?: SchemaObservationEntry['partition'];
+  // detailed-only:
+  columnStats?: SchemaObservationEntry['columns'];
+  metadataVersion?: number;
+  sightings?: number;
+  confidence?: number;
+  source?: SchemaObservationEntry['sources'];
+  lastSeenAt?: string;
+};
+
+type JoinSnapshot = {
+  leftTable: string;
+  rightTable: string;
+  condition: string;
+  datasource?: string;
+  sightings?: number;
+  confidence?: number;
+  source?: SchemaJoinEntry['sources'];
+  lastSeenAt?: string;
+};
+
+function trimIndex(index: { name?: string; columns?: string[]; unique?: boolean; type?: string }): SchemaIndexProjection {
+  const out: SchemaIndexProjection = {
+    name: String(index.name || ''),
+    columns: index.columns || [],
+  };
+  if (index.unique) out.unique = true;
+  if (index.type && String(index.type).toUpperCase() !== 'BTREE') out.type = index.type;
+  return out;
+}
+
+function buildSchemaSnapshot(input: { tables: SchemaObservationEntry[]; joins: SchemaJoinEntry[]; limit: number; detailed?: boolean }): { tables: TableSnapshot[]; joins: JoinSnapshot[] } {
+  const detailed = Boolean(input.detailed);
+  const tables: TableSnapshot[] = [...input.tables]
     .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
     .slice(0, input.limit)
-    .map((row) => ({
-      datasource: row.datasource,
-      table: row.table,
-      database: row.database,
-      columns: row.columns.map((column) => column.column),
-      columnStats: row.columns,
-      primaryKey: row.primaryKey || [],
-      indexes: row.indexes || [],
-      partition: row.partition,
-      metadataVersion: row.metadataVersion,
-      sightings: row.sightings,
-      confidence: row.confidence,
-      source: row.sources,
-      lastSeenAt: row.lastSeenAt,
-    }));
+    .map((row) => {
+      const compact: TableSnapshot = {
+        datasource: row.datasource,
+        table: row.table,
+        database: row.database,
+        columns: row.columns.map((column) => column.column),
+        primaryKey: row.primaryKey || [],
+        indexes: (row.indexes || []).map(trimIndex),
+        partition: row.partition,
+      };
+      if (!detailed) return compact;
+      return {
+        ...compact,
+        columnStats: row.columns,
+        metadataVersion: row.metadataVersion,
+        sightings: row.sightings,
+        confidence: row.confidence,
+        source: row.sources,
+        lastSeenAt: row.lastSeenAt,
+      };
+    });
 
   const visibleTables = new Set(tables.map((row) => row.table));
-  const joins = [...input.joins]
+  const joins: JoinSnapshot[] = [...input.joins]
     .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
     .filter((row) => visibleTables.size === 0 || visibleTables.has(row.leftTable) || visibleTables.has(row.rightTable))
     .slice(0, input.limit)
-    .map((row) => ({
-      datasource: row.datasource,
-      leftTable: row.leftTable,
-      rightTable: row.rightTable,
-      condition: row.conditionNormalized,
-      sightings: row.sightings,
-      confidence: row.confidence,
-      source: row.sources,
-      lastSeenAt: row.lastSeenAt,
-    }));
+    .map((row) => {
+      const compact: JoinSnapshot = {
+        leftTable: row.leftTable,
+        rightTable: row.rightTable,
+        condition: row.conditionNormalized,
+      };
+      if (!detailed) return compact;
+      return {
+        ...compact,
+        datasource: row.datasource,
+        sightings: row.sightings,
+        confidence: row.confidence,
+        source: row.sources,
+        lastSeenAt: row.lastSeenAt,
+      };
+    });
 
   return { tables, joins };
 }
@@ -112,21 +174,6 @@ export interface EnsureSchemaResult {
   emptyReason: string | null;
   suggestedNextCommand: string | null;
   ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
-}
-
-function effectiveLearningTtlHours(ctx: AppContext): number {
-  const cfg = (ctx.runtimeConfigStore as { get?: () => { defaults?: { learning?: { ttlHours?: number } } } }).get?.();
-  const raw = cfg?.defaults?.learning?.ttlHours;
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : 0;
-}
-
-function isAllStale(rows: { lastSeenAt: string }[], ttlHours: number): boolean {
-  if (!ttlHours || !rows.length) return false;
-  const cutoff = Date.now() - ttlHours * 3600 * 1000;
-  return rows.every((row) => {
-    const seen = Date.parse(row.lastSeenAt);
-    return Number.isFinite(seen) && seen < cutoff;
-  });
 }
 
 function normalizeRequestedTable(value: string): string {
@@ -156,17 +203,18 @@ export async function ensureSchemaSnapshot(
     limit?: number | string;
     tables?: string[];
     metadataTimeoutMs?: number;
+    detailed?: boolean;
   },
 ): Promise<EnsureSchemaResult> {
   const datasource = await resolveDatasource(ctx, opts);
   const targeted = isTargetedRequest(opts);
   const limit = Math.max(1, Number(opts.limit || 50));
-  const ttlHours = effectiveLearningTtlHours(ctx);
   const snapshotFromStore = () =>
     buildSchemaSnapshot({
       tables: filterRequestedTables(scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) }), opts.tables),
       joins: scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaJoins(name) }),
       limit,
+      detailed: Boolean(opts.detailed),
     });
 
   let snapshot = snapshotFromStore();
@@ -179,13 +227,18 @@ export async function ensureSchemaSnapshot(
   });
 
   const currentRows = filterRequestedTables(scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) }), opts.tables);
-  const stale = datasource && supportsSchemaRefresh(datasource) && isAllStale(snapshot.tables, ttlHours);
   const missingRequestedTables = hasMissingRequestedTables(currentRows, opts.tables);
-  const incompleteMetadata = currentRows.some((row) => !schemaObservationHasCurrentMetadata(row));
+  // Service-keyed cache: full refresh runs at most once per service. Subsequent calls return the cached schema.
+  // Refresh triggers only when (a) no rows for this service, (b) requested tables are missing,
+  // or (c) cached rows lack current introspection metadata (only observed by ad-hoc queries, never refreshed).
+  // First-time introspection trigger: cache exists but no row has been properly refreshed yet.
+  // Subsequent observed-only rows (CTE aliases, qualified-name dupes) do not force re-refresh.
+  const hasAnyRefreshed = currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
+  const incompleteMetadata = currentRows.length > 0 && !hasAnyRefreshed;
   const shouldRefresh =
     Boolean(datasource) &&
     supportsSchemaRefresh(datasource) &&
-    (state.emptyReason === 'schema_refresh_required' || (stale && !!snapshot.tables.length) || missingRequestedTables || incompleteMetadata);
+    (state.emptyReason === 'schema_refresh_required' || missingRequestedTables || incompleteMetadata);
 
   if (shouldRefresh && datasource) {
     await refreshSchemaForDatasource(ctx, datasource, {
@@ -205,10 +258,7 @@ export async function ensureSchemaSnapshot(
   let ensuredBy: EnsureSchemaResult['ensuredBy'] = 'empty';
   if (state.emptyReason === 'datasource_unresolved') ensuredBy = 'unresolved';
   else if (snapshot.tables.length && state.emptyReason === null) {
-    ensuredBy =
-      shouldRefresh || snapshot.tables.some((row) => row.source.includes('refreshed-metadata'))
-        ? 'refreshed-introspection'
-        : 'cached-learning';
+    ensuredBy = shouldRefresh ? 'refreshed-introspection' : 'cached-learning';
   }
 
   return {
@@ -322,14 +372,16 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
+    .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
       const limit = Math.max(1, Number(opts.limit || 50));
+      const detailed = Boolean(opts.detailed);
       const allTables = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) });
       const allJoins = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaJoins(name) });
-      const snapshot = buildSchemaSnapshot({ tables: allTables, joins: allJoins, limit });
+      const snapshot = buildSchemaSnapshot({ tables: allTables, joins: allJoins, limit, detailed });
       const state = emptyState({
         datasource,
         rows: snapshot.tables,
@@ -350,26 +402,38 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           printEmptyState('tables', state);
           return;
         }
-        console.log(renderTable(snapshot.tables.map((row) => ({
-          datasource: row.datasource,
-          table: row.table,
-          columns: row.columns.join(','),
-          sightings: row.sightings,
-          confidence: row.confidence.toFixed(2),
-          source: row.source.join(','),
-          lastSeenAt: row.lastSeenAt,
-        }))));
+        console.log(renderTable(snapshot.tables.map((row) => {
+          const out: Record<string, unknown> = {
+            datasource: row.datasource,
+            table: row.table,
+            columns: row.columns.length,
+            indexes: row.indexes.length,
+            primaryKey: row.primaryKey.join(','),
+          };
+          if (detailed) {
+            out.sightings = row.sightings ?? '';
+            out.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
+            out.source = (row.source || []).join(',');
+            out.lastSeenAt = row.lastSeenAt ?? '';
+          }
+          return out;
+        })));
         if (snapshot.joins.length) {
           console.log('');
-          console.log(renderTable(snapshot.joins.map((row) => ({
-            datasource: row.datasource,
-            edge: `${row.leftTable} -> ${row.rightTable}`,
-            condition: row.condition,
-            sightings: row.sightings,
-            confidence: row.confidence.toFixed(2),
-            source: row.source.join(','),
-            lastSeenAt: row.lastSeenAt,
-          }))));
+          console.log(renderTable(snapshot.joins.map((row) => {
+            const out: Record<string, unknown> = {
+              edge: `${row.leftTable} -> ${row.rightTable}`,
+              condition: row.condition,
+            };
+            if (detailed) {
+              out.datasource = row.datasource ?? '';
+              out.sightings = row.sightings ?? '';
+              out.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
+              out.source = (row.source || []).join(',');
+              out.lastSeenAt = row.lastSeenAt ?? '';
+            }
+            return out;
+          })));
         }
       }
     });
@@ -381,9 +445,11 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
+    .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
     .action(async (opts) => {
       const ctx = getCtx();
-      const out = await ensureSchemaSnapshot(ctx, opts);
+      const detailed = Boolean(opts.detailed);
+      const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed });
       if (ctx.jsonMode) {
         printJson(out);
       } else {
@@ -392,26 +458,38 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           return;
         }
         console.log(renderRecord({ datasource: out.datasource || '', ensuredBy: out.ensuredBy }));
-        console.log(renderTable(out.tables.map((row) => ({
-          datasource: row.datasource,
-          table: row.table,
-          columns: row.columns.join(','),
-          sightings: row.sightings,
-          confidence: row.confidence.toFixed(2),
-          source: row.source.join(','),
-          lastSeenAt: row.lastSeenAt,
-        }))));
+        console.log(renderTable(out.tables.map((row) => {
+          const o: Record<string, unknown> = {
+            datasource: row.datasource,
+            table: row.table,
+            columns: row.columns.length,
+            indexes: row.indexes.length,
+            primaryKey: row.primaryKey.join(','),
+          };
+          if (detailed) {
+            o.sightings = row.sightings ?? '';
+            o.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
+            o.source = (row.source || []).join(',');
+            o.lastSeenAt = row.lastSeenAt ?? '';
+          }
+          return o;
+        })));
         if (out.joins.length) {
           console.log('');
-          console.log(renderTable(out.joins.map((row) => ({
-            datasource: row.datasource,
-            edge: `${row.leftTable} -> ${row.rightTable}`,
-            condition: row.condition,
-            sightings: row.sightings,
-            confidence: row.confidence.toFixed(2),
-            source: row.source.join(','),
-            lastSeenAt: row.lastSeenAt,
-          }))));
+          console.log(renderTable(out.joins.map((row) => {
+            const o: Record<string, unknown> = {
+              edge: `${row.leftTable} -> ${row.rightTable}`,
+              condition: row.condition,
+            };
+            if (detailed) {
+              o.datasource = row.datasource ?? '';
+              o.sightings = row.sightings ?? '';
+              o.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
+              o.source = (row.source || []).join(',');
+              o.lastSeenAt = row.lastSeenAt ?? '';
+            }
+            return o;
+          })));
         }
       }
     });
@@ -422,13 +500,15 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--limit <n>', 'max rows', '200')
+    .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
-      const rows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) });
+      const detailed = Boolean(opts.detailed);
+      const rawRows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) });
       const limit = Math.max(1, Number(opts.limit || 200));
-      const sliced = rows
+      const sliced = rawRows
         .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
         .slice(0, limit);
       const state = emptyState({
@@ -438,22 +518,49 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         unresolved: Boolean(targeted && !datasource),
         suggestedNextCommand: unresolvedNextCommand(opts),
       });
+      const projected = sliced.map((r) => {
+        const out: Record<string, unknown> = {
+          datasource: r.datasource,
+          table: r.table,
+          database: r.database,
+          columns: r.columns.map((c) => c.column),
+          primaryKey: r.primaryKey || [],
+          indexes: (r.indexes || []).map(trimIndex),
+          partition: r.partition,
+        };
+        if (detailed) {
+          out.columnStats = r.columns;
+          out.metadataVersion = r.metadataVersion;
+          out.sightings = r.sightings;
+          out.confidence = r.confidence;
+          out.source = r.sources;
+          out.lastSeenAt = r.lastSeenAt;
+        }
+        return out;
+      });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: sliced, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
       } else {
         if (!sliced.length) {
           printEmptyState('tables', state);
           return;
         }
-        console.log(renderTable(sliced.map((r) => ({
-          datasource: r.datasource,
-          table: r.table,
-          columns: r.columns.length,
-          sightings: r.sightings,
-          confidence: r.confidence.toFixed(2),
-          source: (r.sources || []).join(','),
-          lastSeenAt: r.lastSeenAt,
-        }))));
+        console.log(renderTable(sliced.map((r) => {
+          const out: Record<string, unknown> = {
+            datasource: r.datasource,
+            table: r.table,
+            columns: r.columns.length,
+            indexes: (r.indexes || []).length,
+            primaryKey: (r.primaryKey || []).join(','),
+          };
+          if (detailed) {
+            out.sightings = r.sightings;
+            out.confidence = r.confidence.toFixed(2);
+            out.source = (r.sources || []).join(',');
+            out.lastSeenAt = r.lastSeenAt;
+          }
+          return out;
+        })));
       }
     });
 
@@ -463,10 +570,12 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--limit <n>', 'max rows', '200')
+    .option('--detailed', 'include sightings, confidence, source, and lastSeenAt', false)
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
+      const detailed = Boolean(opts.detailed);
       const rows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaJoins(name) });
       const limit = Math.max(1, Number(opts.limit || 200));
       const sliced = rows
@@ -479,22 +588,42 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         unresolved: Boolean(targeted && !datasource),
         suggestedNextCommand: unresolvedNextCommand(opts),
       });
+      const projected = sliced.map((r) => {
+        const out: Record<string, unknown> = {
+          leftTable: r.leftTable,
+          rightTable: r.rightTable,
+          condition: r.conditionNormalized,
+        };
+        if (detailed) {
+          out.datasource = r.datasource;
+          out.sightings = r.sightings;
+          out.confidence = r.confidence;
+          out.source = r.sources;
+          out.lastSeenAt = r.lastSeenAt;
+        }
+        return out;
+      });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: sliced, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
       } else {
         if (!sliced.length) {
           printEmptyState('joins', state);
           return;
         }
-        console.log(renderTable(sliced.map((r) => ({
-          datasource: r.datasource,
-          edge: `${r.leftTable} -> ${r.rightTable}`,
-          condition: r.conditionNormalized,
-          sightings: r.sightings,
-          confidence: r.confidence.toFixed(2),
-          source: (r.sources || []).join(','),
-          lastSeenAt: r.lastSeenAt,
-        }))));
+        console.log(renderTable(sliced.map((r) => {
+          const out: Record<string, unknown> = {
+            edge: `${r.leftTable} -> ${r.rightTable}`,
+            condition: r.conditionNormalized,
+          };
+          if (detailed) {
+            out.datasource = r.datasource;
+            out.sightings = r.sightings;
+            out.confidence = r.confidence.toFixed(2);
+            out.source = (r.sources || []).join(',');
+            out.lastSeenAt = r.lastSeenAt;
+          }
+          return out;
+        })));
       }
     });
 
@@ -504,11 +633,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--limit <n>', 'max rows', '200')
+    .option('--detailed', 'include normalizedSql, sightings, confidence, source, and lastSeenAt', false)
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
-      const rows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaQueryShapes(name) });
+      const detailed = Boolean(opts.detailed);
+      const rows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaQueryShapes(name), keyKind: 'datasource' });
       const limit = Math.max(1, Number(opts.limit || 200));
       const sliced = rows
         .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
@@ -520,23 +651,44 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         unresolved: Boolean(targeted && !datasource),
         suggestedNextCommand: unresolvedNextCommand(opts),
       });
+      const projected = sliced.map((r) => {
+        const out: Record<string, unknown> = {
+          datasource: r.datasource,
+          operation: r.operation,
+          tables: r.tables,
+          joins: r.joins,
+        };
+        if (detailed) {
+          out.normalizedSql = r.normalizedSql;
+          out.sightings = r.sightings;
+          out.confidence = r.confidence;
+          out.source = r.sources;
+          out.lastSeenAt = r.lastSeenAt;
+        }
+        return out;
+      });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: sliced, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
       } else {
         if (!sliced.length) {
           printEmptyState('shapes', state);
           return;
         }
-        console.log(renderTable(sliced.map((r) => ({
-          datasource: r.datasource,
-          operation: r.operation,
-          tables: r.tables.join(','),
-          joins: r.joins.length,
-          sightings: r.sightings,
-          confidence: r.confidence.toFixed(2),
-          source: (r.sources || []).join(','),
-          lastSeenAt: r.lastSeenAt,
-        }))));
+        console.log(renderTable(sliced.map((r) => {
+          const out: Record<string, unknown> = {
+            datasource: r.datasource,
+            operation: r.operation,
+            tables: r.tables.join(','),
+            joins: r.joins.length,
+          };
+          if (detailed) {
+            out.sightings = r.sightings;
+            out.confidence = r.confidence.toFixed(2);
+            out.source = (r.sources || []).join(',');
+            out.lastSeenAt = r.lastSeenAt;
+          }
+          return out;
+        })));
       }
     });
 }

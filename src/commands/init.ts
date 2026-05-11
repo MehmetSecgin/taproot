@@ -23,10 +23,12 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
     const ctx = getCtx();
     const createdConfig = ensureStarterRuntime(ctx);
     const snapshot = await collectReadinessSnapshot(ctx, { createdConfig });
+    const trimmedChecks = snapshot.checks.map((check) => check.status === 'ok'
+      ? { check: check.check, status: check.status }
+      : check);
     const data = {
-      checks: snapshot.checks,
+      checks: trimmedChecks,
       readiness: snapshot.readiness,
-      nextActions: snapshot.nextActions,
       nextActionDetails: snapshot.nextActionDetails,
     };
     if (ctx.jsonMode) printJson(data);

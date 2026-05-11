@@ -30,6 +30,9 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
           : undefined;
       const snapshot = await collectReadinessSnapshot(ctx, { target, createdConfig });
       if (opts.agent) {
+        const trimmedChecks = snapshot.checks.map((check) => check.status === 'ok'
+          ? { check: check.check, status: check.status }
+          : check);
         const data = {
           readiness: snapshot.readiness,
           missing: snapshot.readiness === 'ready' ? null : snapshot.readiness,
@@ -40,9 +43,8 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
               ...(target ? { target } : {}),
               checks: snapshot.checks,
             }),
-          nextActions: snapshot.nextActions,
           nextActionDetails: snapshot.nextActionDetails,
-          checks: snapshot.checks,
+          checks: trimmedChecks,
           ...(snapshot.target ? { target: snapshot.target } : {}),
         };
         if (ctx.jsonMode) printJson(data);

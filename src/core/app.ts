@@ -104,6 +104,7 @@ export function nextAction(errorCode: string): string {
   const mapping: Record<string, string> = {
     QUERY_TIMEOUT: 'Retry with a narrower query or raise --timeout-ms if the longer runtime is intentional.',
     MISSING_PARTITION_PREDICATE: 'Add the table partition column to WHERE or JOIN predicates and retry through TapRoot.',
+    REDUNDANT_INTROSPECTION: 'Read the cached schema with "taproot --json learn ensure-schema --service <svc>" instead of re-issuing SHOW CREATE/DESCRIBE/SHOW COLUMNS. Pass --allow-schema-introspection to force re-introspection.',
     MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',

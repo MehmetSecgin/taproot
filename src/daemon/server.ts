@@ -8,7 +8,7 @@ import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifa
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
-import { enforceMutationPolicy, enforcePartitionPredicate } from '../core/safety.js';
+import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
 import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import type { DatasourceProfile } from '../types/core.js';
@@ -294,7 +294,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                     // Query execution must not depend on metadata refresh succeeding.
                   }
                 }
-                const schemaContext = buildSchemaContext(query, datasource.name, ctx.learningStore);
+                const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
                 const reason = resolveReason(String(req.params.reason || ''));
                 const queryMemory = buildQueryMemory({
                   ledgerDir: ctx.paths.runsLedgerDir,
@@ -322,6 +322,18 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 appendEvent(artifacts.runDir, `daemon query started capability=${capability} requestId=${req.requestId}`);
                 try {
                   enforceMutationPolicy({ sql: query, allowMutate, datasource: datasource as DatasourceProfile });
+                  {
+                    const cachedRows = ctx.learningStore.schemaTables(datasource.service);
+                    const hasRefreshedSchema = cachedRows.some((row) => row.sources.includes('refreshed-metadata') || row.sources.includes('manual'));
+                    warnings.push(
+                      ...enforceSchemaIntrospectionPolicy({
+                        sql: query,
+                        service: String(datasource.service || ''),
+                        hasRefreshedSchema,
+                        allowSchemaIntrospection: Boolean(req.params.allowSchemaIntrospection),
+                      }),
+                    );
+                  }
                   warnings.push(
                     ...enforcePartitionPredicate({
                       sql: query,
@@ -386,16 +398,24 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   writeRunSummary(artifacts.runDir, result);
                   appendEvent(artifacts.runDir, `daemon query succeeded requestId=${req.requestId}`);
                   ctx.learningStore.saveSuccess({ datasource: datasource as DatasourceProfile, queryIntent: effectiveIntent, sql: query, result });
-                  base.ok = true;
-                  base.data = {
-                    columns: result.result.columns,
-                    rows: result.result.rows,
+                  const rowsObject = Boolean(req.params.rowsObject);
+                  const cols = result.result.columns || [];
+                  const projectedRows = rowsObject
+                    ? result.result.rows
+                    : result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null));
+                  const baseData: Record<string, unknown> = {
+                    columns: cols,
+                    rows: projectedRows,
                     datasource: datasource.name,
                     plugin: result.plugin,
                     classification: result.classification,
-                    warnings: [...(result.warnings || []), ...warnings],
                     queryMemory,
                   };
+                  if (!rowsObject) baseData.rowsForm = 'array';
+                  const combinedWarnings = [...(result.warnings || []), ...warnings];
+                  if (combinedWarnings.length) baseData.warnings = combinedWarnings;
+                  base.ok = true;
+                  base.data = baseData;
                 } catch (error) {
                   const message = (error as Error).message;
                   const code = classifyError(message);

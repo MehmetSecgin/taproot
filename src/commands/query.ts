@@ -10,7 +10,7 @@ import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifa
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { printJson, renderTableSmart } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
-import { enforceMutationPolicy, enforcePartitionPredicate } from '../core/safety.js';
+import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
@@ -100,8 +100,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
     .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
+    .option('--allow-schema-introspection', 'allow SHOW CREATE/DESCRIBE/SHOW COLUMNS even when the service schema is already cached', false)
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
+    .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -155,6 +157,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 allowDiscovery,
                 allowMutate: Boolean(opts.allowMutate),
                 allowPartitionScan: Boolean(opts.allowPartitionScan),
+                allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
+                rowsObject: Boolean(opts.rowsObject),
                 timeoutMs,
                 param: opts.param || [],
               },
@@ -346,9 +350,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
 
       const referencedTables = collectReferencedTables(query);
       if (supportsSchemaRefresh(datasource as any) && referencedTables.length) {
-        const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.name).length;
+        const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.service).length;
         if (priorSnapshotRows === 0 && !ctx.jsonMode) {
-          process.stderr.write(`[taproot] first query against ${datasource.name} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
+          process.stderr.write(`[taproot] first query against service ${datasource.service} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
         }
         try {
           await ensureSchemaSnapshot(ctx, {
@@ -360,7 +364,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           logVerbose(`schema prime skipped: ${(err as Error).message}`);
         }
       }
-      const schemaContext = buildSchemaContext(query, datasource.name, ctx.learningStore);
+      const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
       const reason = resolveReason(opts.reason);
       const queryMemory = buildQueryMemory({
         ledgerDir: ctx.paths.runsLedgerDir,
@@ -387,6 +391,18 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
         enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
+        {
+          const cachedRows = ctx.learningStore.schemaTables(datasource.service);
+          const hasRefreshedSchema = cachedRows.some((row) => row.sources.includes('refreshed-metadata') || row.sources.includes('manual'));
+          warnings.push(
+            ...enforceSchemaIntrospectionPolicy({
+              sql: query,
+              service: String(datasource.service || ''),
+              hasRefreshedSchema,
+              allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
+            }),
+          );
+        }
         warnings.push(
           ...enforcePartitionPredicate({
             sql: query,
@@ -491,7 +507,30 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: effectiveIntent, sql: query, result });
         progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
 
-        if (ctx.jsonMode) printJson(result);
+        if (ctx.jsonMode) {
+          const trimmed: Record<string, unknown> = {
+            ...result,
+            query: undefined,
+            timings: { durationMs: result.timings.durationMs },
+          };
+          if (!Boolean(opts.rowsObject)) {
+            const cols = result.result.columns || [];
+            trimmed.result = {
+              columns: cols,
+              rows: result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
+              rowsForm: 'array',
+            };
+          }
+          if (Array.isArray(result.warnings) && result.warnings.length === 0) delete trimmed.warnings;
+          if (trimmed.meta && typeof trimmed.meta === 'object') {
+            const meta = trimmed.meta as Record<string, unknown>;
+            const qm = meta.queryMemory as Record<string, unknown> | undefined;
+            if (qm && Object.keys(qm).length === 0) delete meta.queryMemory;
+            const sc = meta.schemaContext as { tables?: Record<string, unknown> } | undefined;
+            if (sc && (!sc.tables || Object.keys(sc.tables).length === 0)) delete meta.schemaContext;
+          }
+          printJson(trimmed);
+        }
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
           console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
@@ -526,7 +565,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             errorClass: code,
             redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
           });
-          const wrapped = new Error(`${code}: ${message}`);
+          const wrapped = new Error(message.startsWith(`${code}:`) ? message : `${code}: ${message}`);
           (wrapped as Error & { details?: unknown }).details = (error as Error & { details?: unknown }).details;
           (wrapped as Error & { meta?: Record<string, unknown> }).meta = { runId: artifacts.runId, schemaContext, queryMemory };
           throw wrapped;
