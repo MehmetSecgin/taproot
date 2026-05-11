@@ -78,4 +78,34 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     if (ctx.jsonMode) printJson({ removed: true, ref: opts.ref });
     else console.log(`removed credential ref ${opts.ref}`);
   });
+
+  c.command('migrate-to-fallback')
+    .description('Copy every keychain-stored credential into the encrypted fallback file and delete the keychain copy. Stops macOS keychain ACL prompts on each rebuilt binary. After migration, set TAPROOT_NO_KEYCHAIN=1 to keep new creds out of keychain too.')
+    .action(async () => {
+      const ctx = getCtx();
+      const store = ctx.credentialStore as unknown as { migrateKeychainToFallback?: () => Promise<{ migrated: string[]; failed: Array<{ ref: string; reason: string }>; alreadyInFallback: string[] }> };
+      if (typeof store.migrateKeychainToFallback !== 'function') {
+        throw new Error('Credential store does not support migrateKeychainToFallback in this build.');
+      }
+      const result = await store.migrateKeychainToFallback();
+      const summary = {
+        migrated: result.migrated,
+        alreadyInFallback: result.alreadyInFallback,
+        failed: result.failed,
+        nextSteps: [
+          'export TAPROOT_NO_KEYCHAIN=1 (skip keychain entirely for future reads/writes)',
+          'taproot creds list (verify all refs now show source=fallback)',
+        ],
+      };
+      if (ctx.jsonMode) printJson(summary);
+      else {
+        console.log(`migrated ${result.migrated.length} refs from keychain to fallback file`);
+        if (result.alreadyInFallback.length) console.log(`overlapped with existing fallback entries: ${result.alreadyInFallback.join(', ')}`);
+        if (result.failed.length) {
+          console.log('failures:');
+          for (const item of result.failed) console.log(`- ${item.ref}: ${item.reason}`);
+        }
+        console.log('next: export TAPROOT_NO_KEYCHAIN=1');
+      }
+    });
 }

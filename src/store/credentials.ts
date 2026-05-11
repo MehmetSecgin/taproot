@@ -42,7 +42,13 @@ function decryptJson(input: FallbackFileShape): Record<string, Record<string, st
   return JSON.parse(out) as Record<string, Record<string, string>>;
 }
 
+function keychainDisabled(): boolean {
+  const raw = String(process.env.TAPROOT_NO_KEYCHAIN || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 async function tryKeychainGet(ref: string): Promise<Record<string, string> | null> {
+  if (keychainDisabled()) return null;
   try {
     const keytar = await import('keytar');
     const raw = await keytar.getPassword(SERVICE_NAME, ref);
@@ -54,6 +60,7 @@ async function tryKeychainGet(ref: string): Promise<Record<string, string> | nul
 }
 
 async function tryKeychainSet(ref: string, value: Record<string, string>): Promise<boolean> {
+  if (keychainDisabled()) return false;
   try {
     const keytar = await import('keytar');
     await keytar.setPassword(SERVICE_NAME, ref, JSON.stringify(value));
@@ -97,21 +104,28 @@ export class CredentialStore {
 
   async list(): Promise<Array<{ ref: string; keys: string[]; source: 'keychain' | 'fallback' }>> {
     const out = new Map<string, { ref: string; keys: string[]; source: 'keychain' | 'fallback' }>();
-    try {
-      const keytar = await import('keytar');
-      const found = await keytar.findCredentials(SERVICE_NAME);
-      for (const entry of found || []) {
-        let keys: string[] = [];
-        try {
-          const parsed = JSON.parse(entry.password) as Record<string, unknown>;
-          keys = Object.keys(parsed || {});
-        } catch {
-          keys = [];
+    if (!keychainDisabled()) {
+      try {
+        const mod = (await import('keytar')) as unknown as Record<string, unknown>;
+        type FindFn = (service: string) => Promise<Array<{ account: string; password: string }>>;
+        const find = (typeof (mod as { findCredentials?: FindFn }).findCredentials === 'function'
+          ? (mod as { findCredentials: FindFn }).findCredentials
+          : ((mod.default as { findCredentials?: FindFn } | undefined)?.findCredentials));
+        if (typeof find !== 'function') throw new Error('keytar.findCredentials missing');
+        const found = await find(SERVICE_NAME);
+        for (const entry of found || []) {
+          let keys: string[] = [];
+          try {
+            const parsed = JSON.parse(entry.password) as Record<string, unknown>;
+            keys = Object.keys(parsed || {});
+          } catch {
+            keys = [];
+          }
+          out.set(entry.account, { ref: entry.account, keys, source: 'keychain' });
         }
-        out.set(entry.account, { ref: entry.account, keys, source: 'keychain' });
+      } catch {
+        // keytar unavailable; fall through to fallback file
       }
-    } catch {
-      // keytar unavailable; fall through to fallback file
     }
     const fallback = this.loadFallback();
     for (const [ref, value] of Object.entries(fallback)) {
@@ -122,14 +136,67 @@ export class CredentialStore {
   }
 
   async remove(ref: string): Promise<void> {
-    try {
-      const keytar = await import('keytar');
-      await keytar.deletePassword(SERVICE_NAME, ref);
-    } catch {
-      // ignore
+    if (!keychainDisabled()) {
+      try {
+        const keytar = await import('keytar');
+        await keytar.deletePassword(SERVICE_NAME, ref);
+      } catch {
+        // ignore
+      }
     }
     const payload = this.loadFallback();
     delete payload[ref];
     this.saveFallback(payload);
+  }
+
+  async migrateKeychainToFallback(): Promise<{ migrated: string[]; failed: Array<{ ref: string; reason: string }>; alreadyInFallback: string[]; }> {
+    const migrated: string[] = [];
+    const failed: Array<{ ref: string; reason: string }> = [];
+    const alreadyInFallback: string[] = [];
+    type KeytarApi = {
+      findCredentials: (service: string) => Promise<Array<{ account: string; password: string }>>;
+      deletePassword: (service: string, account: string) => Promise<boolean>;
+    };
+    const resolveKeytar = async (): Promise<KeytarApi> => {
+      const mod = (await import('keytar')) as unknown as Record<string, unknown>;
+      const candidate = (typeof (mod as KeytarApi).findCredentials === 'function'
+        ? mod
+        : (mod.default as Record<string, unknown> | undefined)) as KeytarApi | undefined;
+      if (!candidate || typeof candidate.findCredentials !== 'function' || typeof candidate.deletePassword !== 'function') {
+        throw new Error('keytar.findCredentials/deletePassword not available in this build');
+      }
+      return candidate;
+    };
+
+    let entries: Array<{ account: string; password: string }> = [];
+    let keytar: KeytarApi;
+    try {
+      keytar = await resolveKeytar();
+      entries = (await keytar.findCredentials(SERVICE_NAME)) || [];
+    } catch (error) {
+      throw new Error(`keytar unavailable: ${(error as Error).message || error}`);
+    }
+    const fallback = this.loadFallback();
+    for (const entry of entries) {
+      try {
+        const parsed = JSON.parse(entry.password) as Record<string, string>;
+        if (fallback[entry.account]) alreadyInFallback.push(entry.account);
+        fallback[entry.account] = parsed;
+      } catch (error) {
+        failed.push({ ref: entry.account, reason: `parse: ${(error as Error).message || error}` });
+        continue;
+      }
+    }
+    this.saveFallback(fallback);
+    for (const entry of entries) {
+      if (failed.some((f) => f.ref === entry.account)) continue;
+      try {
+        await keytar.deletePassword(SERVICE_NAME, entry.account);
+        migrated.push(entry.account);
+      } catch (error) {
+        failed.push({ ref: entry.account, reason: `delete: ${(error as Error).message || error}` });
+      }
+    }
+    return { migrated, failed, alreadyInFallback };
   }
 }
