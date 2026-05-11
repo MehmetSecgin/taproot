@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
@@ -74,6 +74,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .option('--text <text>', 'substring filter on table names (alias: --match)')
     .option('--match <text>', 'substring filter on table names (alias of --text)')
     .option('--list', 'render flat list of matching table names instead of per-database counts', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
@@ -85,9 +86,10 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         tables: matchText ? (r.tables || []).filter((t: string) => t.toLowerCase().includes(matchText.toLowerCase())) : r.tables,
       }));
       if (ctx.jsonMode) {
-        printJson(opts.list
+        const payload = opts.list
           ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
-          : filtered);
+          : filtered;
+        printJsonPluck(payload, opts.pluck ? String(opts.pluck) : undefined);
         return;
       }
       if (opts.list) {
@@ -124,10 +126,12 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     }
   });
 
-  kb.command('list-services').action(() => {
-    const ctx = getCtx();
-    const rows = ctx.kbStore.listServices();
-    if (ctx.jsonMode) printJson(rows);
-    else console.log(renderTable(rows.map((service) => ({ service }))));
-  });
+  kb.command('list-services')
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
+      const ctx = getCtx();
+      const rows = ctx.kbStore.listServices();
+      if (ctx.jsonMode) printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      else console.log(renderTable(rows.map((service) => ({ service }))));
+    });
 }

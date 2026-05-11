@@ -50,7 +50,7 @@ describe('doctor executor codes', () => {
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
-    expect(parsed.nextActions[0]).toBe('taproot datasource show --name qa-demo');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name qa-demo');
     expect(parsed.nextActionDetails[0]).toMatchObject({
       command: 'taproot datasource show --name qa-demo',
       priority: 60,
@@ -99,7 +99,7 @@ describe('doctor executor codes', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
       'executor_connectivity',
     );
-    expect(parsed.nextActions[0]).toBe('taproot datasource show --name prod-orders');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name prod-orders');
     expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name prod-orders');
   });
 
@@ -139,8 +139,8 @@ describe('doctor executor codes', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql doctor')?.code).toBe(
       'executor_configuration_missing',
     );
-    expect(parsed.nextActions[0]).toBe('taproot --json init datasource --env prod --service orders');
-    expect(parsed.nextActions[1]).toBe('taproot --json creds set --ref prod:orders --db-user <user> --password <password>');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot --json init datasource --env prod --service orders');
+    expect(parsed.nextActionDetails[1].command).toBe('taproot --json creds set --ref prod:orders --db-user <user> --password <password>');
     expect(parsed.nextActionDetails[0]).toMatchObject({
       command: 'taproot --json init datasource --env prod --service orders',
       priority: 20,
@@ -183,8 +183,8 @@ describe('doctor executor codes', () => {
     const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
-    expect(parsed.nextActions[0]).toBe('taproot doctor --datasource qa-demo --connect');
-    expect(parsed.nextActions).toContain('taproot datasource show --name qa-demo');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot doctor --datasource qa-demo --connect');
+    expect(parsed.nextActionDetails.map((d: { command: string }) => d.command)).toContain('taproot datasource show --name qa-demo');
     expect(parsed.nextActionDetails[0]).toMatchObject({
       command: 'taproot doctor --datasource qa-demo --connect',
       priority: 30,

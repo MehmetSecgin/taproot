@@ -3,7 +3,7 @@ import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
-import { renderRecord, renderTable, printJson } from '../core/output.js';
+import { renderRecord, renderTable, printJson, printJsonPluck } from '../core/output.js';
 
 function parseConnectorRefPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -23,6 +23,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
   ds.command('list')
     .option('--detailed', 'include confidence and updatedAt', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
@@ -47,15 +48,18 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           || String(a.service).localeCompare(String(b.service))
           || String(a.name).localeCompare(String(b.name)),
         );
-      if (ctx.jsonMode) printJson(rows);
+      if (ctx.jsonMode) printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
       else console.log(renderTable(rows));
     });
 
-  ds.command('show').requiredOption('--name <name>').action((opts) => {
+  ds.command('show')
+    .requiredOption('--name <name>')
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
     const ctx = getCtx();
     const item = ctx.datasourceStore.get(opts.name);
     if (!item) throw new Error(`Datasource not found: ${opts.name}`);
-    if (ctx.jsonMode) printJson(item);
+    if (ctx.jsonMode) printJsonPluck(item, opts.pluck ? String(opts.pluck) : undefined);
     else {
       console.log(renderRecord({
         name: item.name,

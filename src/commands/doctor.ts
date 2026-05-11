@@ -4,7 +4,7 @@ import { classifyError, defaultDatasourceName, normalizeNamespace, normalizeServ
 import { bootstrapDatasource } from '../core/bootstrap.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
-import { renderTable, printJson } from '../core/output.js';
+import { renderTable, printJson, printJsonPluck } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
@@ -357,6 +357,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--connect', 'run connector connect steps during doctor', false)
     .option('--verbose-detail', 'print full check details in table mode', false)
     .option('--all', 'print all checks in table mode (default: warnings/failures only)', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope')
     .action(async (opts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
@@ -416,15 +417,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               });
               const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
               if (ctx.jsonMode) {
-                printJson({
+                printJsonPluck({
                   datasource: datasource.name,
                   plugin: plugin.manifest.name,
                   warnings,
                   checks,
-                  nextActions: nextActionDetails.map((item) => item.command),
                   nextActionDetails,
                   summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
-                });
+                }, opts.pluck ? String(opts.pluck) : undefined);
               } else {
                 console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
                 console.log('Next actions:');
@@ -470,18 +470,16 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         }));
         const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== 'ok');
         const nextActionDetails = doctorNextActions(datasource, checks);
-        const nextActions = nextActionDetails.map((item) => item.command);
 
         if (ctx.jsonMode) {
-          printJson({
+          printJsonPluck({
             datasource: datasource.name,
             plugin: plugin.manifest.name,
             warnings,
             checks,
-            nextActions,
             nextActionDetails,
             summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
-          });
+          }, opts.pluck ? String(opts.pluck) : undefined);
         } else {
           if (warnings.length) progress.warn(`warnings: ${warnings.join(' | ')}`);
           const summary = `doctor summary: ok=${okCount} warn=${warnCount} fail=${failCount} total=${checks.length}`;
@@ -497,9 +495,9 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           } else if (opts.all || ctx.verbose) {
             console.log('No checks to display.');
           }
-          if (nextActions.length) {
+          if (nextActionDetails.length) {
             console.log('Next actions:');
-            for (const action of nextActions) console.log(`- ${action}`);
+            for (const action of nextActionDetails) console.log(`- ${action.command}`);
           }
         }
 
