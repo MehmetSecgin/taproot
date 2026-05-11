@@ -8,7 +8,7 @@ import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandid
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
-import { printJson, renderTableSmart } from '../core/output.js';
+import { printJson, printJsonPluck, renderTableSmart } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -104,6 +104,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope (e.g. result.rows, meta.schemaContext, error.details). Full record is still persisted to ~/.taproot/runs/<runId>/summary.json — use "taproot --json run show --run-id <id> --pluck <other-path>" to fetch other fields later.')
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -529,7 +530,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             const sc = meta.schemaContext as { tables?: Record<string, unknown> } | undefined;
             if (sc && (!sc.tables || Object.keys(sc.tables).length === 0)) delete meta.schemaContext;
           }
-          printJson(trimmed);
+          printJsonPluck(trimmed, opts.pluck ? String(opts.pluck) : undefined);
         }
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);

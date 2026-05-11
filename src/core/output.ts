@@ -25,6 +25,39 @@ export function printJson(data: unknown): void {
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 }
 
+export function pluckPath(obj: unknown, path: string): unknown {
+  const trimmed = String(path || '').trim();
+  if (!trimmed) return obj;
+  const parts = trimmed.split('.').filter(Boolean);
+  let cur: unknown = obj;
+  for (const part of parts) {
+    if (cur === null || cur === undefined) return undefined;
+    const arrayMatch = part.match(/^(\w*)\[(\d+)\]$/);
+    if (arrayMatch) {
+      const key = arrayMatch[1];
+      const idx = Number(arrayMatch[2]);
+      if (key) {
+        cur = (cur as Record<string, unknown>)[key];
+        if (cur === null || cur === undefined) return undefined;
+      }
+      if (!Array.isArray(cur)) return undefined;
+      cur = cur[idx];
+      continue;
+    }
+    if (typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+export function printJsonPluck(data: unknown, path?: string): void {
+  if (!path) {
+    printJson(data);
+    return;
+  }
+  printJson(pluckPath(data, path));
+}
+
 export function printEnvelope(
   ok: boolean,
   data: unknown,

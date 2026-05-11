@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshSchemaForDatasource, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
@@ -373,6 +373,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
@@ -390,13 +391,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         suggestedNextCommand: unresolvedNextCommand(opts),
       });
       if (ctx.jsonMode) {
-        printJson({
+        printJsonPluck({
           datasource: datasource?.name || null,
           tables: snapshot.tables,
           joins: snapshot.joins,
           emptyReason: state.emptyReason,
           suggestedNextCommand: state.suggestedNextCommand,
-        });
+        }, opts.pluck ? String(opts.pluck) : undefined);
       } else {
         if (!snapshot.tables.length) {
           printEmptyState('tables', state);
@@ -446,12 +447,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
       const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed });
       if (ctx.jsonMode) {
-        printJson(out);
+        printJsonPluck(out, opts.pluck ? String(opts.pluck) : undefined);
       } else {
         if (!out.tables.length) {
           printEmptyState('tables', { emptyReason: out.emptyReason, suggestedNextCommand: out.suggestedNextCommand });
@@ -501,6 +503,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max rows', '200')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
@@ -539,7 +542,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         return out;
       });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
       } else {
         if (!sliced.length) {
           printEmptyState('tables', state);
@@ -604,7 +607,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         return out;
       });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
       } else {
         if (!sliced.length) {
           printEmptyState('joins', state);
@@ -668,7 +671,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         return out;
       });
       if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
+        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
       } else {
         if (!sliced.length) {
           printEmptyState('shapes', state);

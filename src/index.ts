@@ -19,6 +19,7 @@ import { registerSession } from './commands/session.js';
 import { registerInit } from './commands/init.js';
 import { registerOnboard } from './commands/onboard.js';
 import { registerCard } from './commands/card.js';
+import { registerRun } from './commands/run.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
@@ -85,6 +86,7 @@ registerSession(program, context);
 registerInit(program, context);
 registerOnboard(program, context);
 registerCard(program, context);
+registerRun(program, context);
 
 program.configureOutput({
   outputError: () => {
