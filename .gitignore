@@ -1,5 +1,6 @@
 node_modules/
 dist/
 run-output/
+.taproot-state/
 .DS_Store
 *.log
