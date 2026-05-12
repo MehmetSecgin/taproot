@@ -30,8 +30,22 @@ export interface QueryShapeObservation {
   confidence: number;
 }
 
-const { Parser } = parserPkg as unknown as { Parser: new () => { astify: (sql: string) => unknown } };
+const { Parser } = parserPkg as unknown as {
+  Parser: new () => { astify: (sql: string, opt?: { database?: string }) => unknown };
+};
 const parser = new Parser();
+
+export type SqlDialect = 'mysql' | 'postgres';
+
+function dialectFromKind(kind: string | undefined): SqlDialect {
+  const value = (kind || '').toLowerCase();
+  if (value === 'postgres' || value === 'postgresql' || value === 'pg') return 'postgres';
+  return 'mysql';
+}
+
+function parserDatabaseOption(dialect: SqlDialect): string {
+  return dialect === 'postgres' ? 'PostgresQL' : 'MySQL';
+}
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -67,11 +81,20 @@ function safeAlias(node: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function extractColumnName(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const node = value as Record<string, unknown>;
+  if (typeof node.value === 'string') return node.value;
+  if (node.expr) return extractColumnName(node.expr);
+  return '';
+}
+
 function emitColumnRef(expr: unknown, role: ColumnRole, out: ColumnObservation[]): void {
   if (!expr || typeof expr !== 'object') return;
   const node = expr as Record<string, unknown>;
   if (node.type === 'column_ref') {
-    const column = typeof node.column === 'string' ? node.column : '';
+    const column = extractColumnName(node.column);
     if (!column) return;
     const table = typeof node.table === 'string' && node.table ? node.table : undefined;
     out.push({ table, column, role });
@@ -94,7 +117,7 @@ function expressionToString(expr: unknown): string {
 
   if (type === 'column_ref') {
     const table = typeof node.table === 'string' && node.table ? `${node.table}.` : '';
-    const column = typeof node.column === 'string' ? node.column : '';
+    const column = extractColumnName(node.column);
     return `${table}${column}`;
   }
 
@@ -264,12 +287,13 @@ function fallbackExtract(sql: string): QueryShapeObservation {
   };
 }
 
-export function extractQueryShape(sql: string): QueryShapeObservation {
+export function extractQueryShape(sql: string, options?: { dialect?: SqlDialect | string }): QueryShapeObservation {
   const normalizedSql = normalizeSqlShape(sql);
   const operation = operationFromSql(sql);
+  const dialect = dialectFromKind(options?.dialect);
 
   try {
-    const astRaw = parser.astify(sql);
+    const astRaw = parser.astify(sql, { database: parserDatabaseOption(dialect) });
     const ast = Array.isArray(astRaw) ? astRaw[0] : astRaw;
     if (!ast || typeof ast !== 'object') return fallbackExtract(sql);
 

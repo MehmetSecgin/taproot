@@ -393,7 +393,7 @@ export class LearningStore {
   }
 
   private observeSchema(input: { datasource: DatasourceProfile; sql: string; now: string }): void {
-    const schema = extractQueryShape(input.sql);
+    const schema = extractQueryShape(input.sql, { dialect: input.datasource.kind });
     const observations = this.loadSchemaObservations();
     const joins = this.loadSchemaJoins();
     const shapes = this.loadSchemaShapes();
