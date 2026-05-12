@@ -1,4 +1,4 @@
-import type { QueryMemory, SchemaContext } from '../types/core.js';
+import type { QueryMemory, QueryPhaseTimings, SchemaContext } from '../types/core.js';
 
 export interface RpcRequest {
   protocolVersion: number;
@@ -27,6 +27,7 @@ export interface RpcResponse {
     timings?: {
       durationMs: number;
     };
+    phases?: QueryPhaseTimings;
   };
 }
 

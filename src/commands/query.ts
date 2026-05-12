@@ -215,6 +215,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             logVerbose(`daemon RPC unavailable (${msg})`);
           }
         }
+      const phaseStart = Date.now();
+      let phaseResolveMs = 0;
+      let phaseConnectMs = 0;
+      let phaseExecuteMs = 0;
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const service = normalizeService(opts.service || explicitProfile?.service || alias?.service || '', aliases);
       progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
@@ -317,7 +321,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           }
         }
       }
+      phaseResolveMs = Date.now() - phaseStart;
       progress.update(`datasource ready (${datasource.name})`);
+      logVerbose(`phase resolve: ${phaseResolveMs}ms`);
 
       const params = parseParamPairs(opts.param || []);
       let selectedCard: QueryCard | undefined;
@@ -413,6 +419,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         );
         const executedQuery = opts.explain ? `EXPLAIN ${query}` : query;
         progress.update('checking connectors');
+        const connectStart = Date.now();
         const preflightBudgetMs = Math.max(timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
         const connectorChecks = await withQueryTimeout({
           timeoutMs: preflightBudgetMs,
@@ -424,12 +431,15 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
               mode: 'connect',
             }),
         });
+        phaseConnectMs = Date.now() - connectStart;
+        logVerbose(`phase connect: ${phaseConnectMs}ms`);
         for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
         for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
         if (connectorChecks.some((c) => c.status === 'fail')) {
           throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
         }
         progress.update(`executing query via ${plugin.manifest.name}`);
+        const executeStart = Date.now();
         let result;
         try {
           result = await withQueryTimeout({
@@ -477,8 +487,19 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
               ),
           });
         }
+        phaseExecuteMs = Date.now() - executeStart;
+        logVerbose(`phase execute: ${phaseExecuteMs}ms`);
         result.runId = artifacts.runId;
         if (warnings.length) result.warnings = [...result.warnings, ...warnings];
+        result.timings = {
+          ...result.timings,
+          phases: {
+            resolveMs: phaseResolveMs,
+            connectMs: phaseConnectMs,
+            executeMs: phaseExecuteMs,
+            totalMs: Date.now() - phaseStart,
+          },
+        };
         result.resolved = {
           source: resolutionSource,
           env,
@@ -506,13 +527,18 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         appendEvent(artifacts.runDir, 'query succeeded');
 
         ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: effectiveIntent, sql: query, result });
-        progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)`);
+        const phaseSummary = ctx.verbose
+          ? ` [resolve ${phaseResolveMs}ms · connect ${phaseConnectMs}ms · execute ${phaseExecuteMs}ms]`
+          : '';
+        progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)${phaseSummary}`);
 
         if (ctx.jsonMode) {
+          const trimmedTimings: Record<string, unknown> = { durationMs: result.timings.durationMs };
+          if (result.timings.phases) trimmedTimings.phases = result.timings.phases;
           const trimmed: Record<string, unknown> = {
             ...result,
             query: undefined,
-            timings: { durationMs: result.timings.durationMs },
+            timings: trimmedTimings,
           };
           if (!Boolean(opts.rowsObject)) {
             const cols = result.result.columns || [];

@@ -180,6 +180,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = true;
               base.data = { closedCount };
             } else if (req.method === 'query.execute') {
+              const phaseStart = Date.now();
+              let phaseResolveMs = 0;
+              let phaseConnectMs = 0;
+              let phaseExecuteMs = 0;
               const allowDiscovery = Boolean(req.params.allowDiscovery);
               const rawDs = String(req.params.datasource || '').trim();
               const alias = rawDs.match(/^([a-z0-9]+)-([a-z0-9-]+)$/i);
@@ -210,6 +214,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 throw new Error('Datasource resolution failed.');
               }
 
+              phaseResolveMs = Date.now() - phaseStart;
               const timeoutMs = parseTimeoutMs(req.params.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
               const timeoutController = new AbortController();
               const timeoutTimer = setTimeout(() => {
@@ -341,17 +346,20 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       allowPartitionScan: Boolean(req.params.allowPartitionScan),
                     }),
                   );
+                  const connectStart = Date.now();
                   const connectorChecks = await runDatasourceConnectors({
                     datasource: datasource as DatasourceProfile,
                     credentialStore: ctx.credentialStore,
                     pluginRegistry: ctx.pluginRegistry,
                     mode: 'connect',
                   });
+                  phaseConnectMs = Date.now() - connectStart;
                   for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
                   if (connectorChecks.some((c) => c.status === 'fail')) {
                     throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
                   }
                   const testHoldMs = Number(req.params._testHoldMs || 0);
+                  const executeStart = Date.now();
                   const result = await withQueryTimeout({
                     timeoutMs: remainingTimeoutMs(),
                     run: async () => {
@@ -379,8 +387,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                     database: String(datasource.connection.database || ''),
                     engine: datasource.kind,
                   };
+                  phaseExecuteMs = Date.now() - executeStart;
                   result.runId = artifacts.runId;
                   if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
+                  const phases = {
+                    resolveMs: phaseResolveMs,
+                    connectMs: phaseConnectMs,
+                    executeMs: phaseExecuteMs,
+                    totalMs: Date.now() - phaseStart,
+                  };
+                  result.timings = { ...result.timings, phases };
+                  (base.meta as Record<string, unknown>).phases = phases;
                   result.meta = { ...(result.meta || {}), schemaContext, queryMemory };
                   appendRunsLedgerEntry(
                     ledgerInputFromResult({

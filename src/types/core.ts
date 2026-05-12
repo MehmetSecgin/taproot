@@ -99,6 +99,13 @@ export interface QueryRequest {
   timeoutMs?: number;
 }
 
+export interface QueryPhaseTimings {
+  resolveMs?: number;
+  connectMs?: number;
+  executeMs?: number;
+  totalMs?: number;
+}
+
 export interface QueryResult {
   runId: string;
   datasource: string;
@@ -113,6 +120,7 @@ export interface QueryResult {
     startedAt: string;
     endedAt: string;
     durationMs: number;
+    phases?: QueryPhaseTimings;
   };
   warnings: string[];
   classification: 'success' | 'error';
@@ -249,6 +257,7 @@ export interface CliOutputEnvelope<T = unknown> {
     timings?: {
       durationMs: number;
     };
+    phases?: QueryPhaseTimings;
   };
   error?: {
     code: string;
