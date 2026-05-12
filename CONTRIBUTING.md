@@ -57,6 +57,28 @@ If you have to break a contract during prerelease, bump the version field refere
 - One coherent change per PR. Refactors and feature changes go in separate PRs.
 - Reference the issue in the PR body (`Closes #N`) when applicable.
 
+## Pre-Push Security Checks
+
+CI runs `gitleaks` and `trufflehog` on every push and PR. To catch findings locally before pushing, install both and run them against your working tree:
+
+```bash
+# gitleaks — scan tracked files + uncommitted changes
+brew install gitleaks
+gitleaks detect --source . --verbose
+
+# trufflehog — scan committed history for verified secrets only
+brew install trufflehog
+trufflehog filesystem . --only-verified
+```
+
+For a quick repo-tree check using TapRoot's own scanner (catches common cred/topology patterns):
+
+```bash
+taproot --json sanitize check-repo
+```
+
+If a finding is a false positive, document the exemption rather than disabling the scanner.
+
 ## Reporting Issues
 
 - Bug reports: include the failing command, the JSON envelope output, the TapRoot version, and the platform.
