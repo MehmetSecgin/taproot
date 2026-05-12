@@ -146,3 +146,5 @@ Expected structure:
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`
+- Porcelain vs plumbing contract: `references/porcelain-plumbing-contract.md`
+- JSON envelope contract: `references/json-envelope-contract.md`
