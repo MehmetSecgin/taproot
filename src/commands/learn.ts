@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../core/app.js';
-import { normalizeNamespace, normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshSchemaForDatasource, supportsSchemaRefresh } from '../core/schema-refresh.js';
@@ -25,14 +25,24 @@ function isTargetedRequest(opts: { datasource?: string; env?: string; namespace?
   return Boolean(opts.datasource || opts.env || opts.namespace || opts.service);
 }
 
-function unresolvedNextCommand(opts: { datasource?: string; env?: string; namespace?: string; service?: string }): string | null {
+function unresolvedNextCommand(opts: { datasource?: string; env?: string; namespace?: string; service?: string }, ctx?: AppContext): string | null {
   const datasource = String(opts.datasource || '').trim();
   if (datasource) return `taproot --json datasource show --name ${datasource}`;
   const env = String(opts.env || '').trim();
   const namespace = normalizeNamespace(String(opts.namespace || ''));
   const service = String(opts.service || '').trim();
-  if (env && service) return `taproot --json init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}`;
-  return null;
+  if (!env || !service) return null;
+  // If a datasource for this service already exists, prefer pointing the caller at it
+  // (e.g. user passed `--env qa-develop` instead of `--env qa --namespace develop`).
+  if (ctx) {
+    const candidates = ctx.datasourceStore.candidatesByService(service);
+    if (candidates.length) {
+      const tagged = candidates.map((d) => `${d.name} (env=${d.env}${d.namespace ? ` ns=${d.namespace}` : ''})`).slice(0, 4).join(', ');
+      const first = candidates[0];
+      return `taproot --json learn ensure-schema --datasource ${first.name}  # available: ${tagged}`;
+    }
+  }
+  return `taproot --json init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}`;
 }
 
 function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted: boolean; load: (key?: string) => T[]; keyKind?: 'service' | 'datasource' }): T[] {
@@ -204,6 +214,7 @@ export async function ensureSchemaSnapshot(
     tables?: string[];
     metadataTimeoutMs?: number;
     detailed?: boolean;
+    refresh?: boolean;
   },
 ): Promise<EnsureSchemaResult> {
   const datasource = await resolveDatasource(ctx, opts);
@@ -223,7 +234,7 @@ export async function ensureSchemaSnapshot(
     rows: snapshot.tables,
     kind: 'tables',
     unresolved: Boolean(targeted && !datasource),
-    suggestedNextCommand: unresolvedNextCommand(opts),
+    suggestedNextCommand: unresolvedNextCommand(opts, ctx),
   });
 
   const currentRows = filterRequestedTables(scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) }), opts.tables);
@@ -235,10 +246,11 @@ export async function ensureSchemaSnapshot(
   // Subsequent observed-only rows (CTE aliases, qualified-name dupes) do not force re-refresh.
   const hasAnyRefreshed = currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
   const incompleteMetadata = currentRows.length > 0 && !hasAnyRefreshed;
+  const forceRefresh = Boolean((opts as { refresh?: boolean }).refresh);
   const shouldRefresh =
     Boolean(datasource) &&
     supportsSchemaRefresh(datasource) &&
-    (state.emptyReason === 'schema_refresh_required' || missingRequestedTables || incompleteMetadata);
+    (forceRefresh || state.emptyReason === 'schema_refresh_required' || missingRequestedTables || incompleteMetadata);
 
   if (shouldRefresh && datasource) {
     await refreshSchemaForDatasource(ctx, datasource, {
@@ -251,7 +263,7 @@ export async function ensureSchemaSnapshot(
       rows: snapshot.tables,
       kind: 'tables',
       unresolved: false,
-      suggestedNextCommand: unresolvedNextCommand(opts),
+      suggestedNextCommand: unresolvedNextCommand(opts, ctx),
     });
   }
 
@@ -345,6 +357,31 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
+      // Preflight connectors: schema refresh hits the real DB host, so VPN/telepresence/teleport must be ready.
+      // Surface CONNECTIVITY: errors with a remediation hint instead of letting getaddrinfo ENOTFOUND bubble.
+      try {
+        const connectorChecks = await runDatasourceConnectors({
+          datasource,
+          credentialStore: ctx.credentialStore,
+          pluginRegistry: ctx.pluginRegistry,
+          mode: 'doctor',
+        });
+        const failures = connectorChecks.filter((check) => check.status === 'fail');
+        if (failures.length) {
+          const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
+          const err = new Error(`CONNECTIVITY: ${detail}; ensure VPN/teleport/telepresence are up before retrying`);
+          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'CONNECTIVITY';
+          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+            failures,
+            nextCommand: `taproot --json doctor --datasource ${datasource.name} --connect`,
+          };
+          throw err;
+        }
+      } catch (error) {
+        const e = error as Error & { code?: string };
+        if (e.code === 'CONNECTIVITY') throw e;
+        // ignore preflight infra errors and let refresh attempt itself
+      }
       const refreshed = await refreshSchemaForDatasource(ctx, datasource);
       if (ctx.jsonMode) {
         printJson({
@@ -388,7 +425,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         rows: snapshot.tables,
         kind: 'tables',
         unresolved: Boolean(targeted && !datasource),
-        suggestedNextCommand: unresolvedNextCommand(opts),
+        suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
       if (ctx.jsonMode) {
         printJsonPluck({
@@ -447,11 +484,12 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
+    .option('--refresh', 'force a fresh introspection even when the service schema cache is already populated (use after migrations that change columns or indexes)', false)
     .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
-      const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed });
+      const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
       if (ctx.jsonMode) {
         printJsonPluck(out, opts.pluck ? String(opts.pluck) : undefined);
       } else {
@@ -519,7 +557,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         rows: sliced,
         kind: 'tables',
         unresolved: Boolean(targeted && !datasource),
-        suggestedNextCommand: unresolvedNextCommand(opts),
+        suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
       const projected = sliced.map((r) => {
         const out: Record<string, unknown> = {
@@ -589,7 +627,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         rows: sliced,
         kind: 'joins',
         unresolved: Boolean(targeted && !datasource),
-        suggestedNextCommand: unresolvedNextCommand(opts),
+        suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
       const projected = sliced.map((r) => {
         const out: Record<string, unknown> = {
@@ -652,7 +690,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         rows: sliced,
         kind: 'shapes',
         unresolved: Boolean(targeted && !datasource),
-        suggestedNextCommand: unresolvedNextCommand(opts),
+        suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
       const projected = sliced.map((r) => {
         const out: Record<string, unknown> = {

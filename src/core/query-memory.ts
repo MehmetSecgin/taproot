@@ -124,7 +124,14 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   for (const match of cards.slice(0, 3)) warnings.push(...cardRequirementWarnings(match.card, input.sql));
   const hints: string[] = [];
   if (!String(input.reason || '').trim()) {
-    hints.push('reason_missing: pass --reason or TAPROOT_REASON so future agents can understand why this query ran');
+    // Only nag when the same caller has run multiple queries in the recent ledger without a reason.
+    // One-off interactive queries shouldn't trigger the hint.
+    const recentNoReason = rows
+      .filter((row) => !String(row.reason || '').trim())
+      .filter((row) => row.datasource === input.datasource);
+    if (recentNoReason.length >= 2) {
+      hints.push('reason_missing: pass --reason or TAPROOT_REASON so future agents can understand why this query ran');
+    }
   }
   const sameFingerprintSuccesses = rows.filter((row) => row.fingerprint === fingerprint && row.outcomeCode === 'ok');
   const distinctSessions = new Set(sameFingerprintSuccesses.map((row) => row.sessionId || row.runId));

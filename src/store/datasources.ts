@@ -31,12 +31,33 @@ export class DatasourceStore {
   }
 
   resolveByEnvService(env: string, service: string, namespace?: string): DatasourceProfile | undefined {
-    const filtered = this.list().filter((d) => {
-      if (d.env !== env || d.service !== service) return false;
-      if (namespace == null || namespace === '') return true;
-      return String(d.namespace || '') === namespace;
-    });
-    if (!filtered.length) return undefined;
-    return filtered.sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
+    const all = this.list();
+    const tryMatch = (envValue: string, nsValue?: string): DatasourceProfile | undefined => {
+      const filtered = all.filter((d) => {
+        if (d.env !== envValue || d.service !== service) return false;
+        if (nsValue == null || nsValue === '') return true;
+        return String(d.namespace || '') === nsValue;
+      });
+      if (!filtered.length) return undefined;
+      return filtered.sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
+    };
+
+    const direct = tryMatch(env, namespace);
+    if (direct) return direct;
+
+    // Fallback: callers commonly pass `qa-develop` or `qa-test` as a single token.
+    // Split on the first `-` and retry as env+namespace before declaring no match.
+    if (!namespace && env.includes('-')) {
+      const dashIdx = env.indexOf('-');
+      const envPart = env.slice(0, dashIdx);
+      const nsPart = env.slice(dashIdx + 1);
+      const splitMatch = tryMatch(envPart, nsPart);
+      if (splitMatch) return splitMatch;
+    }
+    return undefined;
+  }
+
+  candidatesByService(service: string): DatasourceProfile[] {
+    return this.list().filter((d) => d.service === service);
   }
 }
