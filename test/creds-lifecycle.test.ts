@@ -21,6 +21,7 @@ function setupState() {
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
+      TAPROOT_NO_KEYCHAIN: '1',
     },
   };
 }
