@@ -148,3 +148,9 @@ Expected structure:
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`
 - Porcelain vs plumbing contract: `references/porcelain-plumbing-contract.md`
 - JSON envelope contract: `references/json-envelope-contract.md`
+
+## Project Governance
+- License: [MIT](LICENSE)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Code of Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Security: [SECURITY.md](SECURITY.md)

@@ -4,6 +4,12 @@
   "description": "Universal query orchestration CLI with plugin runtime (DB-first v1)",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "author": "Mehmet Secgin <mehmetascgn@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MehmetSecgin/taproot.git"
+  },
   "bin": {
     "taproot": "dist/index.js",
     "taprootd": "dist/daemon-main.js"
