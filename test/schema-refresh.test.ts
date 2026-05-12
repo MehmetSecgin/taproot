@@ -243,7 +243,7 @@ describe('schema refresh', () => {
 
     expect(refreshed.tables[0]).toMatchObject({
       table: 'order_items',
-      columns: ['order_date', 'id', 'customer_id'],
+      columns: ['customer_id', 'id', 'order_date'],
       primaryKey: ['id'],
       indexes: [
         { name: 'PRIMARY', columns: ['id'], unique: true },
