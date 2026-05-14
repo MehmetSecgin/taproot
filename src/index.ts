@@ -21,6 +21,7 @@ import { registerOnboard } from './commands/onboard.js';
 import { registerCard } from './commands/card.js';
 import { registerRun } from './commands/run.js';
 import { registerBench } from './commands/bench.js';
+import { registerIdea } from './commands/idea.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
@@ -89,6 +90,7 @@ registerOnboard(program, context);
 registerCard(program, context);
 registerRun(program, context);
 registerBench(program, context);
+registerIdea(program, context);
 
 program.configureOutput({
   outputError: () => {
