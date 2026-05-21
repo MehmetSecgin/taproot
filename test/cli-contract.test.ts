@@ -34,13 +34,12 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('daemon');
     expect(out.stdout).toContain('session');
     expect(out.stdout).toContain('init');
-    expect(out.stdout).toContain('onboard');
   });
 
   it('prints skill version', () => {
     const out = runCli(['--skill-version']);
     expect(out.status).toBe(0);
-    expect(out.stdout.trim()).toBe('taproot-skill@0.2.0');
+    expect(out.stdout.trim()).toBe('taproot-skill@0.3.0');
   });
 
   it('completion zsh includes command name', () => {

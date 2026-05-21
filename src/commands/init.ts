@@ -7,16 +7,12 @@ import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 
-function printHumanInit(checks: Array<{ check: string; status: string; detail: string }>, readiness: string, nextActions: string[], createdConfig: boolean): void {
+function printHumanInit(checks: Array<{ check: string; status: string; detail: string }>, readiness: string, nextActions: string[]): void {
   checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
   console.log(`readiness: ${readiness}`);
   if (nextActions.length) {
     console.log('next actions:');
     for (const action of nextActions) console.log(`- ${action}`);
-  }
-  if (createdConfig || readiness !== 'ready') {
-    console.log('');
-    console.log('Tip: run `taproot onboard` for an interactive setup wizard (tooling checks, datasource creation, credentials).');
   }
 }
 
@@ -36,7 +32,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       nextActionDetails: snapshot.nextActionDetails,
     };
     if (ctx.jsonMode) printJson(data);
-    else printHumanInit(snapshot.checks, snapshot.readiness, snapshot.nextActions, createdConfig);
+    else printHumanInit(snapshot.checks, snapshot.readiness, snapshot.nextActions);
   });
 
   init.command('datasource')

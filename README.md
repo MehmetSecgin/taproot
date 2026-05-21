@@ -48,39 +48,44 @@ taproot --version   # 0.2.0
 
 > No npm registry release yet. `npm link` is the supported install path.
 
-### 3. First run — interactive onboarding
+### 3. Initialize local state
 
 ```bash
-taproot onboard
+taproot init
 ```
 
-`onboard` is the recommended first command. It:
+Creates `~/.taproot/` (config, cache, runs, learning). Idempotent.
 
-1. Creates `~/.taproot/` state (config, cache, runs, learning).
-2. Detects local tools (`kubectl`, `tsh`, `openvpn3`, keychain).
-3. Optionally asks for an env/service target and creates a datasource:
-   - From your KB if present (see [Knowledge base](#knowledge-base) below), or
-   - From answers to a small interactive prompt (`native` / `qa-portforward` / `tsh` mode).
-4. Runs a final readiness check.
-
-Non-interactive form (CI / agents):
+### 4. Create a datasource, store credentials, query
 
 ```bash
-taproot --json onboard --yes-local --yes-access --yes-live --env <env> --service <service>
-```
+# native MySQL example (substitute --kind postgres / teleport-mysql as needed)
+taproot datasource add \
+  --name dev-orders \
+  --kind mysql \
+  --env dev \
+  --service orders \
+  --credential-ref dev:orders \
+  --host 127.0.0.1 \
+  --port 3306 \
+  --database orders
 
-### 4. Add credentials and query
+taproot creds set --ref dev:orders --user reader --password '***'
 
-```bash
-# store datasource credentials under the standard ref
-taproot creds set --ref <env>:<service> --user <user> --password '***'
-
-# preflight
-taproot doctor --datasource <env>-<service> --connect
+# preflight: confirm the datasource resolves and connects
+taproot doctor --datasource dev-orders --connect
 
 # read query
-taproot query --datasource <env>-<service> --query "SELECT 1 AS ok"
+taproot query --datasource dev-orders --query "SELECT 1 AS ok"
 ```
+
+If you have a KB (see [Knowledge base](#knowledge-base) below), you can replace `datasource add` with the KB-backed shortcut:
+
+```bash
+taproot init datasource --env <env> --service <service>
+```
+
+For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 
 ---
 
@@ -111,12 +116,11 @@ $OBSIDIAN_MEMORY_ROOT/domains/engineering/references/db-kb/
   ...
 ```
 
-If you do not have a KB, `taproot onboard` falls back to interactive manual datasource entry. Skip this section if you do not use one.
+If you do not have a KB, use `taproot datasource add ...` directly (see [Getting Started](#4-create-a-datasource-store-credentials-query) above). Skip this section if you do not use one.
 
 ---
 
 ## Commands
-- `taproot onboard` — interactive first-run wizard
 - `taproot init` and `taproot init datasource --env <env> --service <service>`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
