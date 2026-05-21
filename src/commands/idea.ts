@@ -11,6 +11,12 @@ import {
   resolveProjectTarget,
   syncToHistoryFile,
 } from '../core/idea-sync.js';
+import {
+  type CardGrouping,
+  diffCardsAgainstProject,
+  resolveCardsRoot,
+  syncCardsToProject,
+} from '../core/idea-cards-sync.js';
 
 function resolveTarget(opts: { target?: string; project?: string }): string {
   if (opts.target) return path.resolve(opts.target);
@@ -21,6 +27,22 @@ function resolveTarget(opts: { target?: string; project?: string }): string {
     );
   }
   return resolveProjectTarget(project);
+}
+
+function resolveProjectDir(opts: { project?: string }): string {
+  const project = opts.project ? path.resolve(opts.project) : findProjectDirUp(process.cwd());
+  if (!project) {
+    throw new Error(
+      `No .idea project found. Pass --project <path> to a directory containing .idea/.`,
+    );
+  }
+  return project;
+}
+
+function parseGrouping(value: unknown): CardGrouping {
+  const raw = String(value || 'service').toLowerCase();
+  if (raw === 'service' || raw === 'datasource' || raw === 'intent' || raw === 'flat') return raw;
+  throw new Error(`Invalid --group-by '${value}'. Expected service|datasource|intent|flat.`);
 }
 
 export function registerIdea(program: Command, getCtx: () => AppContext): void {
@@ -114,6 +136,108 @@ export function registerIdea(program: Command, getCtx: () => AppContext): void {
         }
         console.log(`\nNext: open the project in IntelliJ. Database tool will show entries marked '(taproot)'.`);
       }
+    });
+
+  const cards = idea
+    .command('cards')
+    .description('Sync taproot query cards into the IDEA project as managed .sql files');
+
+  cards
+    .command('sync')
+    .description('Write query cards to <project>/taproot-cards/ as .sql files (idempotent, drift-aware)')
+    .option('--project <dir>', 'IntelliJ project directory (one containing .idea/)')
+    .option('--root <dir>', 'Override cards root (default <project>/taproot-cards)')
+    .option('--group-by <mode>', 'service|datasource|intent|flat', 'service')
+    .option('--datasource <name>', 'Filter cards by datasource')
+    .option('--service <svc>', 'Filter cards by owning service (resolved via datasource profile)')
+    .option('--intent <intent>', 'Filter cards by intent')
+    .option('--force', 'Overwrite locally-edited managed files', false)
+    .option('--adopt', 'Strip the taproot marker from locally-edited files (file remains, no longer managed)', false)
+    .option('--dry-run', 'Print what would change; do not touch files', false)
+    .action((opts) => {
+      const ctx = getCtx();
+      const projectDir = resolveProjectDir(opts);
+      const grouping = parseGrouping(opts.groupBy);
+      const profiles = ctx.datasourceStore.list();
+      const serviceByDatasource = new Map<string, string>();
+      for (const p of profiles) {
+        if (p.service) serviceByDatasource.set(p.name, p.service);
+      }
+      let cardsList = ctx.cardStore.list();
+      if (opts.datasource) cardsList = cardsList.filter((c) => c.datasource === opts.datasource);
+      if (opts.intent) cardsList = cardsList.filter((c) => c.intent === opts.intent);
+      if (opts.service) cardsList = cardsList.filter((c) => c.datasource && serviceByDatasource.get(c.datasource) === opts.service);
+
+      const result = syncCardsToProject({
+        projectDir,
+        rootDir: opts.root,
+        cards: cardsList,
+        grouping,
+        force: Boolean(opts.force),
+        adopt: Boolean(opts.adopt),
+        dryRun: Boolean(opts.dryRun),
+        serviceFor: (ds) => serviceByDatasource.get(ds),
+      });
+
+      if (ctx.jsonMode) {
+        printJson({ ...result, dryRun: Boolean(opts.dryRun) });
+        return;
+      }
+      console.log(`Root: ${result.root}${opts.dryRun ? ' (dry-run)' : ''}`);
+      console.log(
+        renderTable(
+          result.written.map((w) => ({ id: w.id, action: w.action, relPath: w.relPath, prev: w.prevRelPath || '' })),
+        ),
+      );
+      if (result.unchanged.length) console.log(`Unchanged: ${result.unchanged.length}`);
+      if (result.pruned.length) {
+        console.log(`Pruned ${result.pruned.length} file(s):`);
+        for (const p of result.pruned) console.log(`  - ${p}`);
+      }
+      if (result.drifted.length) {
+        console.log(`\nDrift detected (skipped):`);
+        for (const d of result.drifted) console.log(`  - ${d.id} (${d.relPath}): ${d.reason}`);
+        console.log(`Re-run with --force to overwrite or --adopt to keep your edits.`);
+      }
+      if (result.foreign.length) console.log(`\nForeign files (left alone): ${result.foreign.length}`);
+    });
+
+  cards
+    .command('status')
+    .description('Diff taproot cards against files in <project>/taproot-cards/')
+    .option('--project <dir>')
+    .option('--root <dir>', 'Override cards root')
+    .action((opts) => {
+      const ctx = getCtx();
+      const projectDir = resolveProjectDir(opts);
+      const result = diffCardsAgainstProject({
+        projectDir,
+        rootDir: opts.root,
+        cards: ctx.cardStore.list(),
+      });
+      if (ctx.jsonMode) {
+        printJson(result);
+        return;
+      }
+      console.log(`Root: ${result.root}`);
+      console.log(`Matched:    ${result.matched.length}`);
+      console.log(`Cards only: ${result.cardsOnly.length}${result.cardsOnly.length ? ` -> ${result.cardsOnly.join(', ')}` : ''}`);
+      console.log(`Files only: ${result.filesOnly.length}${result.filesOnly.length ? ` -> ${result.filesOnly.join(', ')}` : ''}`);
+      console.log(`Drifted:    ${result.drifted.length}${result.drifted.length ? ` -> ${result.drifted.join(', ')}` : ''}`);
+      console.log(`Foreign:    ${result.foreign.length}${result.foreign.length ? ` -> ${result.foreign.join(', ')}` : ''}`);
+    });
+
+  cards
+    .command('path')
+    .description('Print the resolved cards root for the project')
+    .option('--project <dir>')
+    .option('--root <dir>')
+    .action((opts) => {
+      const ctx = getCtx();
+      const projectDir = resolveProjectDir(opts);
+      const root = resolveCardsRoot(projectDir, opts.root);
+      if (ctx.jsonMode) printJson({ projectDir, root });
+      else console.log(root);
     });
 
   idea
