@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 function run(command: string): { ok: boolean; detail: string } {
-  const proc = spawnSync('/bin/zsh', ['-lc', command], { encoding: 'utf8' });
+  const proc = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
   if (proc.status === 0) return { ok: true, detail: (proc.stdout || '').trim() || 'ok' };
   return { ok: false, detail: ((proc.stderr || proc.stdout || '').trim() || `exit=${proc.status}`).slice(0, 300) };
 }

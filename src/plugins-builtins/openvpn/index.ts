@@ -3,7 +3,7 @@ import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 async function runAsync(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
   return await new Promise((resolve) => {
-    const proc = spawn('/bin/zsh', ['-lc', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn('/bin/sh', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let settled = false;

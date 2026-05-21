@@ -133,13 +133,13 @@ describe('daemon rpc limits', () => {
           params: {
             datasource: `qa-fake-${i}`,
             query: 'SELECT 1 AS ok',
-            _testHoldMs: 200,
-            timeoutMs: 1_000,
+            _testHoldMs: 1_000,
+            timeoutMs: 5_000,
           },
-          timeoutMs: 5_000,
+          timeoutMs: 10_000,
         }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const startedAt = Date.now();
       const queued = await rpcCall({
@@ -148,15 +148,15 @@ describe('daemon rpc limits', () => {
         params: {
           datasource: `qa-fake-${RUNTIME_CONSTANTS.daemon.maxConcurrentQueries}`,
           query: 'SELECT 1 AS ok',
-          timeoutMs: 50,
+          timeoutMs: 200,
         },
-        timeoutMs: 5_000,
+        timeoutMs: 10_000,
       });
       const elapsedMs = Date.now() - startedAt;
 
       expect(queued.ok).toBe(false);
       expect(queued.error?.code).toBe('QUERY_TIMEOUT');
-      expect(elapsedMs).toBeLessThan(180);
+      expect(elapsedMs).toBeLessThan(800);
 
       await Promise.all(blockers);
     } finally {

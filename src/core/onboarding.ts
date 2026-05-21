@@ -71,7 +71,7 @@ function runCommand(command: string, args: string[]): CommandResult {
 }
 
 function commandPath(command: string): string | null {
-  const out = runCommand('/bin/zsh', ['-lc', `command -v ${command}`]);
+  const out = runCommand('/bin/sh', ['-c', `command -v ${command}`]);
   return out.ok ? out.detail.split('\n')[0].trim() : null;
 }
 
@@ -225,7 +225,7 @@ export async function runOnboarding(ctx: AppContext, opts: OnboardRunOptions): P
       details: Object.entries(toolPaths).map(([name, value]) => `${name}: ${value || 'not found'}`),
     });
     const daemon = (await collectReadinessSnapshot(ctx)).checks.find((check) => check.check === 'daemon');
-    const tsh = toolPaths.tsh ? runCommand('/bin/zsh', ['-lc', 'tsh status']) : null;
+    const tsh = toolPaths.tsh ? runCommand('/bin/sh', ['-c', 'tsh status']) : null;
     addStep({
       id: 'access_status',
       title: 'Access status',
