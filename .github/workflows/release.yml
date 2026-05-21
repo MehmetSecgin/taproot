@@ -46,10 +46,15 @@ jobs:
       - name: Build and test
         run: npm test
 
-      - name: Publish to npm
-        run: npm publish
+      - name: Publish to npm (skipped when NPM_TOKEN is not configured)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not configured; skipping npm publish."
+            exit 0
+          fi
+          npm publish
 
       - name: Create GitHub Release
         env:
