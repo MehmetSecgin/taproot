@@ -43,7 +43,7 @@ npm link            # puts `taproot` and `taprootd` on your PATH
 Verify:
 
 ```bash
-taproot --version   # 0.4.0
+taproot --version   # 0.5.0
 ```
 
 > No npm registry release yet. `npm link` is the supported install path.
@@ -133,8 +133,40 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 
 ---
 
+## Discover datasources from local tooling
+
+For setting up a new machine when you do not have a KB, `taproot discover` scans your `kubectl` and `tsh` tooling and proposes datasource profiles.
+
+```bash
+# Scan all kubectl-visible services in the current context, propose DB-shaped ones for env=qa.
+# Dry-run by default; nothing is saved.
+taproot discover kubectl --env qa
+
+# Limit to a namespace and propose qa-portforward wiring (loopback + kubectl-portforward connector).
+taproot discover kubectl --env qa --namespace orders --mode qa-portforward
+
+# Save the proposals into your local datasource store.
+taproot discover kubectl --env qa --namespace orders --mode qa-portforward --apply
+
+# Discover Teleport-managed databases (`tsh db ls`); produces `teleport-mysql` / `postgres` profiles
+# wired with the `teleport` connector.
+taproot discover teleport --env prod --apply
+```
+
+Notes:
+- Heuristics: service port (3306/4000/5432/6432) or service name (mysql/maria/tidb/percona/postgres/pg).
+- System namespaces (`kube-system`, `cert-manager`, ...) are skipped.
+- Credentials are **not** discovered or saved. After `--apply`, set them per datasource:
+  ```bash
+  taproot creds set --ref <env>:<service> --user <user> --password '<***>'
+  ```
+- `--force` overwrites datasources with the same name. Without it, conflicts are reported and skipped.
+
+---
+
 ## Commands
 - `taproot init` and `taproot init datasource --env <env> --service <service>`
+- `taproot discover <kubectl|teleport> --env <env> [--namespace <ns>] [--mode native|qa-portforward] [--apply] [--force]`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
 - `taproot query --datasource <name> [--query | --template | --intent] [--param k=v] [--allow-discovery]`

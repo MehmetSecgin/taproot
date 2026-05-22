@@ -21,6 +21,7 @@ import { registerCard } from './commands/card.js';
 import { registerRun } from './commands/run.js';
 import { registerBench } from './commands/bench.js';
 import { registerIdea } from './commands/idea.js';
+import { registerDiscover } from './commands/discover.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
@@ -99,6 +100,7 @@ registerCard(program, context);
 registerRun(program, context);
 registerBench(program, context);
 registerIdea(program, context);
+registerDiscover(program, context);
 
 program.configureOutput({
   outputError: () => {
