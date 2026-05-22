@@ -40,7 +40,7 @@ describe('cli contract', () => {
   it('prints skill version', () => {
     const out = runCli(['--skill-version']);
     expect(out.status).toBe(0);
-    expect(out.stdout.trim()).toBe('taproot-skill@0.5.0');
+    expect(out.stdout.trim()).toBe('taproot-skill@0.6.0');
   });
 
   it('completion zsh includes command name', () => {

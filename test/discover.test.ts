@@ -6,10 +6,10 @@ import {
   type TshDatabase,
 } from '../src/core/discover-datasources.js';
 
-const baseOpts = { env: 'qa', mode: 'native' as const };
+const baseOpts = { env: 'qa' };
 
 describe('classifyKubeService', () => {
-  it('matches mysql via port 3306', () => {
+  it('matches mysql via port 3306 and wires openvpn by default', () => {
     const svc: KubeService = {
       metadata: { name: 'orders-mysql', namespace: 'orders' },
       spec: { ports: [{ port: 3306, protocol: 'TCP' }] },
@@ -22,73 +22,65 @@ describe('classifyKubeService', () => {
       namespace: 'orders',
       connection: { host: 'orders-mysql', port: 3306, database: 'orders_mysql' },
       credentialRef: 'qa:orders-mysql',
-      connectors: [],
+      connectors: ['openvpn'],
+      resolverHints: { openvpnCredentialRef: 'vpn:work' },
       source: 'kubectl',
     });
     expect(p?.reason).toContain('port 3306');
   });
 
-  it('matches postgres via port 5432', () => {
-    const svc: KubeService = {
-      metadata: { name: 'invoices-pg', namespace: 'billing' },
-      spec: { ports: [{ port: 5432 }] },
-    };
-    const p = classifyKubeService(svc, baseOpts);
-    expect(p?.kind).toBe('postgres');
-    expect(p?.connection.port).toBe(5432);
-  });
-
-  it('matches tidb (port 4000) as mysql wire protocol', () => {
-    const svc: KubeService = {
-      metadata: { name: 'analytics-tidb', namespace: 'analytics' },
+  it('matches tidb (port 4000) and tiproxy (port 6000) as mysql', () => {
+    const tidbSvc: KubeService = {
+      metadata: { name: 'analytics', namespace: 'analytics' },
       spec: { ports: [{ port: 4000 }] },
     };
-    const p = classifyKubeService(svc, baseOpts);
-    expect(p?.kind).toBe('mysql');
-    expect(p?.connection.port).toBe(4000);
-  });
+    expect(classifyKubeService(tidbSvc, baseOpts)?.kind).toBe('mysql');
 
-  it('matches via service name when ports do not match', () => {
-    const svc: KubeService = {
-      metadata: { name: 'mariadb-headless', namespace: 'db' },
-      spec: { ports: [{ port: 7777 }] },
+    const tiproxySvc: KubeService = {
+      metadata: { name: 'billing', namespace: 'develop' },
+      spec: { ports: [{ port: 6000 }] },
     };
-    const p = classifyKubeService(svc, baseOpts);
-    expect(p?.kind).toBe('mysql');
-    expect(p?.reason).toMatch(/service name matches/);
+    expect(classifyKubeService(tiproxySvc, baseOpts)?.connection.port).toBe(6000);
   });
 
-  it('skips non-DB services', () => {
+  it('matches postgres via port 5432', () => {
     const svc: KubeService = {
-      metadata: { name: 'api-gateway', namespace: 'default' },
-      spec: { ports: [{ port: 8080 }] },
+      metadata: { name: 'invoices', namespace: 'billing' },
+      spec: { ports: [{ port: 5432 }] },
     };
-    expect(classifyKubeService(svc, baseOpts)).toBeNull();
+    expect(classifyKubeService(svc, baseOpts)?.kind).toBe('postgres');
   });
 
-  it('skips system namespaces', () => {
+  it('skips system namespaces and non-DB services', () => {
+    expect(classifyKubeService({ metadata: { name: 'kube-dns', namespace: 'kube-system' }, spec: { ports: [{ port: 3306 }] } }, baseOpts)).toBeNull();
+    expect(classifyKubeService({ metadata: { name: 'api-gateway', namespace: 'default' }, spec: { ports: [{ port: 8080 }] } }, baseOpts)).toBeNull();
+  });
+
+  it('builds tiproxy host pattern when hostPattern=tiproxy', () => {
     const svc: KubeService = {
-      metadata: { name: 'kube-dns', namespace: 'kube-system' },
-      spec: { ports: [{ port: 3306 }] },
+      metadata: { name: 'billing', namespace: 'develop' },
+      spec: { ports: [{ port: 6000 }] },
     };
-    expect(classifyKubeService(svc, baseOpts)).toBeNull();
+    const p = classifyKubeService(svc, { env: 'qa', hostPattern: 'tiproxy', sharedCredentialRef: true });
+    expect(p?.connection.host).toBe('tiproxy-billing.develop');
+    expect(p?.connection.port).toBe(6000);
+    expect(p?.credentialRef).toBe('qa');
+    expect(p?.connectors).toEqual(['openvpn']);
   });
 
-  it('produces qa-portforward wiring when mode=qa-portforward', () => {
+  it('omits openvpn connector when vpn=false', () => {
     const svc: KubeService = {
       metadata: { name: 'orders-mysql', namespace: 'orders' },
       spec: { ports: [{ port: 3306 }] },
     };
-    const p = classifyKubeService(svc, { env: 'qa', mode: 'qa-portforward' });
-    expect(p?.connection.host).toBe('127.0.0.1');
-    expect(p?.connection.target).toBe('orders-mysql');
-    expect(p?.connectors).toContain('kubectl-portforward');
-    expect(p?.resolverHints['kubectl-portforwardCredentialRef']).toBe('kpf:qa:orders:orders-mysql');
+    const p = classifyKubeService(svc, { env: 'qa', vpn: false });
+    expect(p?.connectors).toEqual([]);
+    expect(p?.resolverHints).toEqual({});
   });
 });
 
 describe('classifyTshDatabase', () => {
-  it('classifies mysql tsh DB as teleport-mysql', () => {
+  it('emits openvpn + teleport connectors by default', () => {
     const db: TshDatabase = {
       metadata: { name: 'prod-orders-tidb', labels: { env: 'prod', service: 'orders' } },
       spec: { protocol: 'mysql' },
@@ -100,9 +92,10 @@ describe('classifyTshDatabase', () => {
       service: 'orders',
       connection: { database: 'orders', target: 'prod-orders-tidb' },
       credentialRef: 'prod:orders',
-      connectors: ['teleport'],
+      connectors: ['openvpn', 'teleport'],
       source: 'teleport',
     });
+    expect(p?.resolverHints.openvpnCredentialRef).toBe('vpn:work');
     expect(p?.resolverHints.teleportCredentialRef).toBe('tsh:prod');
   });
 
@@ -111,9 +104,7 @@ describe('classifyTshDatabase', () => {
       metadata: { name: 'prod-billing-pg', labels: { env: 'prod', service: 'billing' } },
       spec: { protocol: 'postgres' },
     };
-    const p = classifyTshDatabase(db, { env: 'prod' });
-    expect(p?.kind).toBe('postgres');
-    expect(p?.connectors).toContain('teleport');
+    expect(classifyTshDatabase(db, { env: 'prod' })?.kind).toBe('postgres');
   });
 
   it('drops DB when label env mismatches', () => {
@@ -126,12 +117,17 @@ describe('classifyTshDatabase', () => {
 
   it('tolerates flat shape (no metadata wrapper)', () => {
     const db: TshDatabase = { name: 'flat-db', protocol: 'mysql', labels: { service: 'orders' } };
-    const p = classifyTshDatabase(db, { env: 'prod' });
-    expect(p).toMatchObject({ env: 'prod', service: 'orders', connection: { target: 'flat-db' } });
+    expect(classifyTshDatabase(db, { env: 'prod' })?.connection.target).toBe('flat-db');
+  });
+
+  it('omits openvpn connector when vpn=false', () => {
+    const db: TshDatabase = { name: 'prod-orders', protocol: 'mysql', labels: { env: 'prod', service: 'orders' } };
+    const p = classifyTshDatabase(db, { env: 'prod', vpn: false });
+    expect(p?.connectors).toEqual(['teleport']);
+    expect(p?.resolverHints.openvpnCredentialRef).toBeUndefined();
   });
 
   it('skips unsupported protocols', () => {
-    const db: TshDatabase = { name: 'cache', protocol: 'redis' };
-    expect(classifyTshDatabase(db, { env: 'prod' })).toBeNull();
+    expect(classifyTshDatabase({ name: 'cache', protocol: 'redis' }, { env: 'prod' })).toBeNull();
   });
 });

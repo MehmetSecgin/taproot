@@ -2,12 +2,13 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson, renderTable } from '../core/output.js';
 import {
+  applyKbProposals,
   applyProposals,
+  buildKbProposals,
   classifyKubeService,
   classifyTshDatabase,
   fetchKubeServices,
   fetchTshDatabases,
-  type DiscoveryMode,
   type DiscoveryProposal,
 } from '../core/discover-datasources.js';
 
@@ -31,16 +32,91 @@ function renderProposals(proposals: DiscoveryProposal[]): string {
   );
 }
 
-function parseMode(value: string | undefined, fallback: DiscoveryMode): DiscoveryMode {
-  const v = String(value || '').trim().toLowerCase();
-  if (v === 'native' || v === 'qa-portforward' || v === 'tsh') return v;
-  return fallback;
+function nextStepHints(proposals: DiscoveryProposal[]): void {
+  if (!proposals.length) return;
+  const refs = new Set<string>();
+  for (const p of proposals) {
+    refs.add(p.credentialRef);
+    for (const value of Object.values(p.resolverHints)) refs.add(value);
+  }
+  console.log('\nCredentials to set after applying:');
+  for (const ref of [...refs].sort()) {
+    console.log(`  taproot creds set --ref ${ref} --user <user> --password '<***>'`);
+  }
 }
 
 export function registerDiscover(program: Command, getCtx: () => AppContext): void {
   const discover = program
     .command('discover')
-    .description('Discover candidate datasources from local tooling (kubectl, tsh)');
+    .description('Discover candidate datasources from local tooling (kubectl, tsh, KB)');
+
+  discover
+    .command('kb')
+    .description('Generate datasource proposals from the local KB (services.json) for an env')
+    .requiredOption('--env <env>', 'Environment to materialize datasources for')
+    .option('--namespace <namespace>', 'Limit to a single namespace (matches KB connection.namespace)')
+    .option('--service <service>', 'Limit to a single KB service entry')
+    .option('--apply', 'Save proposals into the datasource store and seed connector credential defaults', false)
+    .option('--force', 'Overwrite existing datasource profiles with the same name', false)
+    .action(async (opts) => {
+      const ctx = getCtx();
+      const kbOpts = { env: opts.env, namespace: opts.namespace, service: opts.service };
+      if (!opts.apply) {
+        const { proposals, skipped } = buildKbProposals(ctx, kbOpts);
+        if (ctx.jsonMode) {
+          printJson({ ok: true, source: 'kb', applied: false, proposals, skipped });
+          return;
+        }
+        console.log(`Source: kb (env=${opts.env}${opts.namespace ? `, namespace=${opts.namespace}` : ''})`);
+        console.log(renderProposals(proposals));
+        if (skipped.length) {
+          console.log(`\nSkipped ${skipped.length} KB entries:`);
+          for (const s of skipped.slice(0, 5)) console.log(`  - ${s.service}: ${s.reason}`);
+        }
+        if (proposals.length) {
+          console.log('\nDry-run. Re-run with --apply to save. Add --force to overwrite existing names.');
+          nextStepHints(proposals);
+        }
+        return;
+      }
+      const result = await applyKbProposals(ctx, { ...kbOpts, force: Boolean(opts.force) });
+      if (ctx.jsonMode) {
+        printJson({
+          ok: true,
+          source: 'kb',
+          applied: true,
+          saved: result.saved.map((s) => s.name),
+          conflicts: result.conflicts.map((c) => ({ name: c.name, reason: 'already exists; re-run with --force' })),
+          skipped: result.skipped,
+          credentialDefaultsApplied: result.credentialDefaultsApplied,
+        });
+        return;
+      }
+      console.log(`Source: kb (env=${opts.env}${opts.namespace ? `, namespace=${opts.namespace}` : ''})`);
+      console.log(`Saved: ${result.saved.length}`);
+      for (const s of result.saved) console.log(`  + ${s.name}`);
+      if (result.conflicts.length) {
+        console.log(`Conflicts (skipped): ${result.conflicts.length}. Re-run with --force to overwrite.`);
+        for (const c of result.conflicts) console.log(`  ! ${c.name}`);
+      }
+      if (result.skipped.length) {
+        console.log(`Skipped (unsupported access_method): ${result.skipped.length}`);
+      }
+      nextStepHints(result.saved.map((s) => ({
+        name: s.name,
+        kind: s.kind as DiscoveryProposal['kind'],
+        env: s.env || opts.env,
+        service: s.service || '',
+        namespace: s.namespace,
+        connection: s.connection || {},
+        credentialRef: s.credentialRef,
+        connectors: s.connectors || [],
+        resolverHints: s.resolverHints || {},
+        source: 'kb',
+        confidence: s.confidence ?? 0.9,
+        reason: '',
+      })));
+    });
 
   discover
     .command('kubectl')
@@ -48,12 +124,13 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
     .requiredOption('--env <env>', 'Environment tag to assign to discovered datasources')
     .option('--namespace <namespace>', 'Limit scan to a single namespace (default: all namespaces)')
     .option('--context <context>', 'kubectl context (defaults to current)')
-    .option('--mode <mode>', 'native|qa-portforward (default native)', 'native')
+    .option('--host-pattern <pattern>', 'service-name (default) | tiproxy (build tiproxy-<svc>.<ns> hosts)', 'service-name')
+    .option('--shared-credential-ref', 'Use a single env-wide credential ref (e.g. `qa`) instead of `env:service`', false)
+    .option('--no-vpn', 'Do not wire the `openvpn` connector (default: wired)')
     .option('--apply', 'Save proposals into the local datasource store', false)
     .option('--force', 'Overwrite existing datasource profiles with the same name', false)
     .action((opts) => {
       const ctx = getCtx();
-      const mode = parseMode(opts.mode, 'native');
       const fetched = fetchKubeServices({ namespace: opts.namespace, context: opts.context });
       if (!fetched.ok) {
         if (ctx.jsonMode) printJson({ ok: false, source: 'kubectl', error: fetched.detail });
@@ -62,8 +139,15 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
         return;
       }
       const aliases = ctx.runtimeConfigStore.serviceAliases();
+      const hostPattern = opts.hostPattern === 'tiproxy' ? 'tiproxy' : 'service-name';
       const proposals = fetched.services
-        .map((svc) => classifyKubeService(svc, { env: opts.env, mode, aliases }))
+        .map((svc) => classifyKubeService(svc, {
+          env: opts.env,
+          aliases,
+          vpn: opts.vpn !== false,
+          hostPattern,
+          sharedCredentialRef: Boolean(opts.sharedCredentialRef),
+        }))
         .filter((p): p is DiscoveryProposal => Boolean(p));
       runApplyOrPrint(ctx, proposals, { apply: Boolean(opts.apply), force: Boolean(opts.force), source: 'kubectl', detail: fetched.detail });
     });
@@ -72,6 +156,7 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
     .command('teleport')
     .description('Scan `tsh db ls` for DB datasources')
     .requiredOption('--env <env>')
+    .option('--no-vpn', 'Do not wire the `openvpn` connector (default: wired alongside teleport)')
     .option('--apply', 'Save proposals into the local datasource store', false)
     .option('--force', 'Overwrite existing datasource profiles with the same name', false)
     .action((opts) => {
@@ -85,7 +170,7 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
       }
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const proposals = fetched.databases
-        .map((db) => classifyTshDatabase(db, { env: opts.env, aliases }))
+        .map((db) => classifyTshDatabase(db, { env: opts.env, aliases, vpn: opts.vpn !== false }))
         .filter((p): p is DiscoveryProposal => Boolean(p));
       runApplyOrPrint(ctx, proposals, { apply: Boolean(opts.apply), force: Boolean(opts.force), source: 'teleport', detail: fetched.detail });
     });
@@ -103,12 +188,8 @@ function runApplyOrPrint(
       console.log(`Source: ${opts.source} (${opts.detail})`);
       console.log(renderProposals(proposals));
       if (proposals.length) {
-        console.log('\nDry-run. Re-run with --apply to save these profiles. Add `--force` to overwrite existing names.');
-        console.log('Credentials are NOT saved by discover. After applying, run:');
-        for (const p of proposals.slice(0, 5)) {
-          console.log(`  taproot creds set --ref ${p.credentialRef} --user <user> --password '<***>'`);
-        }
-        if (proposals.length > 5) console.log(`  ... (${proposals.length - 5} more)`);
+        console.log('\nDry-run. Re-run with --apply to save. Add --force to overwrite existing names.');
+        nextStepHints(proposals);
       }
     }
     return;
@@ -133,10 +214,5 @@ function runApplyOrPrint(
     console.log(`Conflicts (skipped): ${result.conflicts.length}. Re-run with --force to overwrite.`);
     for (const c of result.conflicts) console.log(`  ! ${c.name}`);
   }
-  if (result.saved.length) {
-    console.log('\nNext: set credentials per datasource:');
-    for (const s of result.saved.slice(0, 5)) {
-      console.log(`  taproot creds set --ref ${s.credentialRef} --user <user> --password '<***>'`);
-    }
-  }
+  if (result.saved.length) nextStepHints(proposals);
 }

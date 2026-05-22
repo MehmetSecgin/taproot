@@ -1,10 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { defaultDatasourceName, normalizeService } from './app.js';
+import { buildKbBootstrapCandidate, ensureCredentialDefaults } from './bootstrap.js';
 import { nowIso } from './time.js';
 import type { AppContext } from './app.js';
 import type { DatasourceProfile } from '../types/core.js';
 
-export type DiscoverySource = 'kubectl' | 'teleport';
+export type DiscoverySource = 'kubectl' | 'teleport' | 'kb';
 export type DiscoveryMode = 'native' | 'qa-portforward' | 'tsh';
 
 export interface KubeServicePort {
@@ -56,7 +57,9 @@ const DB_SERVICE_PATTERNS: Array<{ pattern: RegExp; engine: 'mysql' | 'postgres'
 
 const DB_PORT_MAP: Record<number, 'mysql' | 'postgres'> = {
   3306: 'mysql',
-  4000: 'mysql', // tidb wire protocol
+  4000: 'mysql', // tidb
+  6000: 'mysql', // tiproxy (mysql wire)
+  6033: 'mysql', // db-proxy variant
   5432: 'postgres',
   6432: 'postgres', // pgbouncer
 };
@@ -76,10 +79,15 @@ function inferDatabaseName(service: string): string {
   return service.replace(/-/g, '_');
 }
 
-export function classifyKubeService(
-  svc: KubeService,
-  opts: { env: string; mode: DiscoveryMode; aliases?: Record<string, string> },
-): DiscoveryProposal | null {
+export interface KubeClassifyOptions {
+  env: string;
+  aliases?: Record<string, string>;
+  vpn?: boolean;
+  hostPattern?: 'service-name' | 'tiproxy';
+  sharedCredentialRef?: boolean;
+}
+
+export function classifyKubeService(svc: KubeService, opts: KubeClassifyOptions): DiscoveryProposal | null {
   const name = svc.metadata?.name?.trim();
   if (!name) return null;
   const namespace = svc.metadata?.namespace?.trim() || undefined;
@@ -116,24 +124,11 @@ export function classifyKubeService(
 
   const service = normalizeService(name, opts.aliases || {});
   const profileName = defaultDatasourceName(opts.env, service, namespace);
-  const credentialRef = `${opts.env}:${service}`;
-
-  if (opts.mode === 'qa-portforward') {
-    return {
-      name: profileName,
-      kind: engine,
-      env: opts.env,
-      service,
-      namespace,
-      connection: { host: '127.0.0.1', port, database: inferDatabaseName(service), target: name },
-      credentialRef,
-      connectors: ['kubectl-portforward'],
-      resolverHints: { 'kubectl-portforwardCredentialRef': `kpf:${opts.env}:${namespace || 'default'}:${service}` },
-      source: 'kubectl',
-      confidence: 0.7,
-      reason: `${reason}; mode=qa-portforward via svc/${name} in ns ${namespace || 'default'}`,
-    };
-  }
+  const credentialRef = opts.sharedCredentialRef ? opts.env : `${opts.env}:${service}`;
+  const vpn = opts.vpn !== false;
+  const host = opts.hostPattern === 'tiproxy'
+    ? `tiproxy-${service}.${namespace || 'default'}`
+    : name;
 
   return {
     name: profileName,
@@ -141,13 +136,13 @@ export function classifyKubeService(
     env: opts.env,
     service,
     namespace,
-    connection: { host: name, port, database: inferDatabaseName(service) },
+    connection: { host, port, database: inferDatabaseName(service) },
     credentialRef,
-    connectors: [],
-    resolverHints: {},
+    connectors: vpn ? ['openvpn'] : [],
+    resolverHints: vpn ? { openvpnCredentialRef: 'vpn:work' } : {},
     source: 'kubectl',
-    confidence: 0.6,
-    reason: `${reason}; in-cluster DNS svc/${name}.${namespace || 'default'}`,
+    confidence: 0.65,
+    reason: `${reason}; host=${host}:${port}${vpn ? '; openvpn wired' : ''}`,
   };
 }
 
@@ -163,10 +158,13 @@ function tshDbLabels(db: TshDatabase): Record<string, string> {
   return db.metadata?.labels || db.labels || {};
 }
 
-export function classifyTshDatabase(
-  db: TshDatabase,
-  opts: { env: string; aliases?: Record<string, string> },
-): DiscoveryProposal | null {
+export interface TshClassifyOptions {
+  env: string;
+  aliases?: Record<string, string>;
+  vpn?: boolean;
+}
+
+export function classifyTshDatabase(db: TshDatabase, opts: TshClassifyOptions): DiscoveryProposal | null {
   const name = tshDbName(db);
   if (!name) return null;
   const protocol = tshDbProtocol(db);
@@ -183,8 +181,12 @@ export function classifyTshDatabase(
   const service = normalizeService(serviceRaw, opts.aliases || {});
   const profileName = defaultDatasourceName(opts.env, service);
   const credentialRef = `${opts.env}:${service}`;
-
   const kind: DiscoveryProposal['kind'] = engine === 'mysql' ? 'teleport-mysql' : 'postgres';
+  const vpn = opts.vpn !== false;
+
+  const connectors = vpn ? ['openvpn', 'teleport'] : ['teleport'];
+  const resolverHints: Record<string, string> = { teleportCredentialRef: `tsh:${opts.env}` };
+  if (vpn) resolverHints.openvpnCredentialRef = 'vpn:work';
 
   return {
     name: profileName,
@@ -193,11 +195,11 @@ export function classifyTshDatabase(
     service,
     connection: { database: inferDatabaseName(service), target: name },
     credentialRef,
-    connectors: kind === 'teleport-mysql' ? ['teleport'] : ['teleport'],
-    resolverHints: { teleportCredentialRef: `tsh:${opts.env}` },
+    connectors,
+    resolverHints,
     source: 'teleport',
     confidence: 0.75,
-    reason: `tsh db '${name}' protocol=${protocol}${labelEnv ? ` env-label=${labelEnv}` : ''}`,
+    reason: `tsh db '${name}' protocol=${protocol}${labelEnv ? ` env-label=${labelEnv}` : ''}${vpn ? '; openvpn wired' : ''}`,
   };
 }
 
@@ -276,6 +278,116 @@ export function applyProposals(ctx: AppContext, proposals: DiscoveryProposal[], 
     }
     const saved = ctx.datasourceStore.save(proposalToProfile(proposal));
     result.saved.push(saved);
+  }
+  return result;
+}
+
+export interface KbDiscoverOptions {
+  env: string;
+  namespace?: string;
+  service?: string;
+}
+
+interface KbServiceEntry {
+  service?: string;
+  connections?: Array<Record<string, unknown>>;
+}
+
+function kbConnectionToProposal(
+  service: string,
+  conn: Record<string, unknown>,
+  env: string,
+): DiscoveryProposal | null {
+  const namespace = (String(conn.namespace || '').trim() || undefined);
+  const datasourceName = defaultDatasourceName(env, service, namespace);
+  const candidate = buildKbBootstrapCandidate(env, service, datasourceName, conn, { tags: ['discovered', 'source:kb', 'kb-derived'] });
+  if (!candidate) return null;
+  const p = candidate.profile;
+  return {
+    name: p.name,
+    kind: p.kind as DiscoveryProposal['kind'],
+    env: p.env || env,
+    service: p.service || service,
+    namespace: p.namespace,
+    connection: p.connection || {},
+    credentialRef: p.credentialRef,
+    connectors: p.connectors || [],
+    resolverHints: p.resolverHints || {},
+    source: 'kb',
+    confidence: p.confidence ?? 0.9,
+    reason: `KB connection: access_method=${String(conn.access_method || '')} engine=${String(conn.engine || '')} target=${String(conn.target || '')}`.trim(),
+  };
+}
+
+export function buildKbProposals(ctx: AppContext, opts: KbDiscoverOptions): { proposals: DiscoveryProposal[]; skipped: Array<{ service: string; reason: string }> } {
+  const proposals: DiscoveryProposal[] = [];
+  const skipped: Array<{ service: string; reason: string }> = [];
+  const aliases = ctx.runtimeConfigStore.serviceAliases();
+  const services = ctx.kbStore.services() as KbServiceEntry[];
+  for (const entry of services) {
+    const rawService = String(entry.service || '').trim();
+    if (!rawService) continue;
+    if (opts.service && rawService.toLowerCase() !== opts.service.toLowerCase()) continue;
+    const service = normalizeService(rawService, aliases);
+    const conns = Array.isArray(entry.connections) ? entry.connections : [];
+    let matched = 0;
+    for (const conn of conns) {
+      if (String(conn.env || '').trim() !== opts.env) continue;
+      if (String(conn.status || 'active').trim() !== 'active') continue;
+      if (opts.namespace && String(conn.namespace || '').trim() !== opts.namespace) continue;
+      const proposal = kbConnectionToProposal(service, conn, opts.env);
+      if (proposal) {
+        proposals.push(proposal);
+        matched += 1;
+      } else {
+        skipped.push({ service: rawService, reason: `unsupported access_method=${String(conn.access_method || '')}` });
+      }
+    }
+    if (!matched && !opts.service) continue;
+  }
+  return { proposals, skipped };
+}
+
+export interface KbApplyResult extends ApplyResult {
+  credentialDefaultsApplied: number;
+}
+
+export async function applyKbProposals(
+  ctx: AppContext,
+  opts: KbDiscoverOptions & { force?: boolean },
+): Promise<KbApplyResult> {
+  const result: KbApplyResult = { saved: [], skipped: [], conflicts: [], credentialDefaultsApplied: 0 };
+  const aliases = ctx.runtimeConfigStore.serviceAliases();
+  const services = ctx.kbStore.services() as KbServiceEntry[];
+  for (const entry of services) {
+    const rawService = String(entry.service || '').trim();
+    if (!rawService) continue;
+    if (opts.service && rawService.toLowerCase() !== opts.service.toLowerCase()) continue;
+    const service = normalizeService(rawService, aliases);
+    const conns = Array.isArray(entry.connections) ? entry.connections : [];
+    for (const conn of conns) {
+      if (String(conn.env || '').trim() !== opts.env) continue;
+      if (String(conn.status || 'active').trim() !== 'active') continue;
+      if (opts.namespace && String(conn.namespace || '').trim() !== opts.namespace) continue;
+      const namespace = (String(conn.namespace || '').trim() || undefined);
+      const datasourceName = defaultDatasourceName(opts.env, service, namespace);
+      const candidate = buildKbBootstrapCandidate(opts.env, service, datasourceName, conn, { tags: ['discovered', 'source:kb', 'kb-derived'] });
+      if (!candidate) {
+        result.skipped.push({ name: datasourceName, reason: `unsupported access_method=${String(conn.access_method || '')}` });
+        continue;
+      }
+      const existing = ctx.datasourceStore.get(candidate.profile.name);
+      if (existing && !opts.force) {
+        result.conflicts.push({ name: candidate.profile.name, existing, proposed: kbConnectionToProposal(service, conn, opts.env)! });
+        continue;
+      }
+      const saved = ctx.datasourceStore.save(candidate.profile);
+      result.saved.push(saved);
+      for (const credSpec of candidate.credentialDefaults) {
+        await ensureCredentialDefaults(ctx, credSpec.ref, credSpec.defaults, credSpec.overwrite);
+        result.credentialDefaultsApplied += 1;
+      }
+    }
   }
   return result;
 }

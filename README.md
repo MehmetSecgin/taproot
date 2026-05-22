@@ -43,7 +43,7 @@ npm link            # puts `taproot` and `taprootd` on your PATH
 Verify:
 
 ```bash
-taproot --version   # 0.5.0
+taproot --version   # 0.6.0
 ```
 
 > No npm registry release yet. `npm link` is the supported install path.
@@ -133,40 +133,68 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 
 ---
 
-## Discover datasources from local tooling
+## Discover datasources
 
-For setting up a new machine when you do not have a KB, `taproot discover` scans your `kubectl` and `tsh` tooling and proposes datasource profiles.
+`taproot discover` materializes datasource profiles from your local sources of truth — preferring the KB when present, falling back to live `kubectl`/`tsh` scans.
+
+### From KB (preferred when you have one)
 
 ```bash
-# Scan all kubectl-visible services in the current context, propose DB-shaped ones for env=qa.
+# Read TAPROOT_KB_DIR/services.json, generate proposals for the env.
 # Dry-run by default; nothing is saved.
-taproot discover kubectl --env qa
+taproot discover kb --env qa
 
-# Limit to a namespace and propose qa-portforward wiring (loopback + kubectl-portforward connector).
-taproot discover kubectl --env qa --namespace orders --mode qa-portforward
+# Limit by namespace or single service.
+taproot discover kb --env qa --namespace develop
+taproot discover kb --env prod --service billing
 
-# Save the proposals into your local datasource store.
-taproot discover kubectl --env qa --namespace orders --mode qa-portforward --apply
+# Save proposals + seed connector credential defaults (vpn:work statusCommand, tsh:<env> statusCommand).
+taproot discover kb --env qa --apply
+taproot discover kb --env prod --apply
+```
 
-# Discover Teleport-managed databases (`tsh db ls`); produces `teleport-mysql` / `postgres` profiles
-# wired with the `teleport` connector.
+Output matches whatever the KB declares per service / env (host, port, database, target, access_method). Supported KB `access_method`s: `native`, `tsh`, `qa-portforward`. Other methods are reported as skipped.
+
+### From kubectl
+
+```bash
+# Default: classify by service-name / port, wire `openvpn` connector + vpn:work hint.
+taproot discover kubectl --env qa --namespace develop
+
+# Match a tiproxy-style cluster: rewrites host to `tiproxy-<service>.<namespace>` and uses a shared env credential ref.
+taproot discover kubectl --env qa --namespace develop --host-pattern tiproxy --shared-credential-ref
+
+# Apply.
+taproot discover kubectl --env qa --namespace develop --host-pattern tiproxy --shared-credential-ref --apply
+
+# Drop VPN wiring if your team does not VPN.
+taproot discover kubectl --env qa --namespace develop --no-vpn
+```
+
+Heuristics: service port (3306/4000/6000/6033/5432/6432) or service name (mysql/maria/tidb/percona/postgres/pg). System namespaces (`kube-system`, `cert-manager`, ...) are skipped.
+
+### From Teleport
+
+```bash
 taproot discover teleport --env prod --apply
 ```
 
-Notes:
-- Heuristics: service port (3306/4000/5432/6432) or service name (mysql/maria/tidb/percona/postgres/pg).
-- System namespaces (`kube-system`, `cert-manager`, ...) are skipped.
-- Credentials are **not** discovered or saved. After `--apply`, set them per datasource:
+Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profiles with `connectors: [openvpn, teleport]` and matching `resolverHints`. Use `--no-vpn` to skip the VPN wiring.
+
+### Notes
+- Credentials are **never** discovered or saved. After `--apply`, set them per credential ref printed by discover:
   ```bash
   taproot creds set --ref <env>:<service> --user <user> --password '<***>'
+  taproot creds set --ref vpn:work --status-command '<vpn status command>' --connect-command '<vpn connect command>'
+  taproot creds set --ref tsh:<env> --status-command 'tsh status' --login-command 'tsh login --proxy <proxy> --auth <auth>'
   ```
-- `--force` overwrites datasources with the same name. Without it, conflicts are reported and skipped.
+- `--force` overwrites datasources with the same name; without it, conflicts are reported and skipped.
 
 ---
 
 ## Commands
 - `taproot init` and `taproot init datasource --env <env> --service <service>`
-- `taproot discover <kubectl|teleport> --env <env> [--namespace <ns>] [--mode native|qa-portforward] [--apply] [--force]`
+- `taproot discover <kb|kubectl|teleport> --env <env> [--namespace <ns>] [--service <s>] [--host-pattern service-name|tiproxy] [--shared-credential-ref] [--no-vpn] [--apply] [--force]`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
 - `taproot query --datasource <name> [--query | --template | --intent] [--param k=v] [--allow-discovery]`

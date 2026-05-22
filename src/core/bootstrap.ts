@@ -58,7 +58,7 @@ export async function ensureCredentialDefaults(
   if (changed) await ctx.credentialStore.set(ref, merged);
 }
 
-function buildKbBootstrapCandidate(
+export function buildKbBootstrapCandidate(
   env: string,
   service: string,
   datasourceName: string,
@@ -127,6 +127,50 @@ function buildKbBootstrapCandidate(
             connectCommand,
           },
           overwrite: true,
+        },
+      ],
+    };
+  }
+
+  if (accessMethod === 'native') {
+    const host = String(kb.host || '').trim();
+    const port = Number(kb.port || 0) || (engine.includes('postgres') ? 5432 : 3306);
+    if (!host) return undefined;
+    return {
+      kb,
+      profile: {
+        name: datasourceName,
+        kind: engine.includes('postgres') ? 'postgres' : 'mysql',
+        env,
+        namespace,
+        service,
+        tags,
+        connection: {
+          host,
+          port,
+          database,
+        },
+        credentialRef,
+        connectors: ['openvpn'],
+        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+        resolverHints: {
+          openvpnCredentialRef: 'vpn:work',
+        },
+        updatedAt: nowIso(),
+        confidence,
+      },
+      credentialDefaults: [
+        {
+          ref: credentialRef,
+          defaults: {
+            user: dbUser || 'root',
+          },
+        },
+        {
+          ref: 'vpn:work',
+          defaults: {
+            statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
+          },
         },
       ],
     };
