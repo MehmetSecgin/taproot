@@ -36,7 +36,8 @@ program
   .option('--no-color', 'Disable ANSI colors')
   .option('--no-animations', 'Disable animations')
   .option('--profile <name>', 'Runtime profile name')
-  .option('--memory-root <path>', 'Memory root override')
+  .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR.')
+  .option('--memory-root <path>', 'Deprecated alias for --kb-dir (treated as a memory root with the legacy `domains/engineering/references/db-kb` subpath).')
   .option('--verbose', 'Verbose progress and diagnostics', false)
   .option('--datetime-format <fmt>', 'Render Date columns as iso|js|epoch (default iso)')
   .option('--skill-version', 'Print skill version and exit', false);
@@ -59,10 +60,19 @@ if (process.argv.includes('--skill-version')) {
   process.exit(EXIT_CODES.OK);
 }
 
+function legacyMemoryRootToKbDir(memoryRoot: string): string {
+  return `${memoryRoot}/domains/engineering/references/db-kb`;
+}
+
 function context() {
   const opts = program.opts();
+  const kbDir = opts.kbDir
+    ? String(opts.kbDir)
+    : opts.memoryRoot
+      ? legacyMemoryRootToKbDir(String(opts.memoryRoot))
+      : undefined;
   return buildContext({
-    memoryRoot: opts.memoryRoot,
+    kbDir,
     jsonMode: Boolean(opts.json),
     noColor: Boolean(opts.noColor),
     noAnimations: Boolean(opts.noAnimations),

@@ -30,17 +30,17 @@ export interface AppContext {
 }
 
 export function buildContext(opts: {
-  memoryRoot?: string;
+  kbDir?: string;
   jsonMode?: boolean;
   noColor?: boolean;
   noAnimations?: boolean;
   verbose?: boolean;
 }): AppContext {
-  let paths = resolvePaths(opts.memoryRoot);
+  let paths = resolvePaths(opts.kbDir);
   try {
     ensurePaths(paths);
   } catch {
-    paths = resolveFallbackPaths(opts.memoryRoot);
+    paths = resolveFallbackPaths(opts.kbDir);
     ensurePaths(paths);
   }
   const pluginRegistry = new PluginRegistry();

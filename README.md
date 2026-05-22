@@ -43,7 +43,7 @@ npm link            # puts `taproot` and `taprootd` on your PATH
 Verify:
 
 ```bash
-taproot --version   # 0.3.0
+taproot --version   # 0.4.0
 ```
 
 > No npm registry release yet. `npm link` is the supported install path.
@@ -96,7 +96,8 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 | `TAPROOT_STATE_ROOT` | Override state directory | `~/.taproot` |
 | `TAPROOT_MASTER_KEY` | Symmetric key for the encrypted credential fallback file. **Set this for portable, deterministic secrets.** | derived from `$USER@$platform` |
 | `TAPROOT_NO_KEYCHAIN` | Force the encrypted file even when `keytar` is available | unset |
-| `OBSIDIAN_MEMORY_ROOT` | Override KB root | `~/memory-root` or `~/.codex/memory` |
+| `TAPROOT_KB_DIR` | Path to the KB directory (the one containing `services.json`). TapRoot does not care how you author the KB — Obsidian, a git repo, a hand-edited folder, anything. | `<TAPROOT_STATE_ROOT>/kb` |
+| `OBSIDIAN_MEMORY_ROOT` | **Deprecated.** Legacy alias. When set (and `TAPROOT_KB_DIR` is unset), TapRoot appends `domains/engineering/references/db-kb` to it. Prefer `TAPROOT_KB_DIR`. | unset |
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |
 | `TAPROOT_QA_LOCAL_PORT` | Default local port for `qa-portforward` | `4406` |
 | `TAPROOT_DATETIME_FORMAT` | Render Date columns as `iso` / `js` / `epoch` | `iso` |
@@ -108,15 +109,27 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 
 ## Knowledge base
 
-TapRoot can auto-create datasources from a local KB at:
+TapRoot can auto-create datasources from a local KB — a plain directory containing `services.json` and friends. The KB is just files on disk: an Obsidian vault, a checked-out git repo, or any folder you maintain by hand all work.
+
+Point TapRoot at it via `TAPROOT_KB_DIR` (or `--kb-dir <path>`):
+
+```bash
+export TAPROOT_KB_DIR="$HOME/work/team-kb"   # any directory you control
+taproot init datasource --env qa --service orders
+```
+
+Expected layout:
 
 ```
-$OBSIDIAN_MEMORY_ROOT/domains/engineering/references/db-kb/
-  services.json
-  ...
+$TAPROOT_KB_DIR/
+  services.json       # required; service → connection metadata
+  query-templates.json
+  relations.json
 ```
 
 If you do not have a KB, use `taproot datasource add ...` directly (see [Getting Started](#4-create-a-datasource-store-credentials-query) above). Skip this section if you do not use one.
+
+> Legacy: setups that previously used `OBSIDIAN_MEMORY_ROOT` keep working — when set, TapRoot appends `domains/engineering/references/db-kb` to it. New setups should set `TAPROOT_KB_DIR` to the KB directory directly.
 
 ---
 

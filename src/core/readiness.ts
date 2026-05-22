@@ -197,7 +197,7 @@ export function nextActionDetailsForReadiness(
         actionForReadiness({
           command: 'taproot --json init',
           priority: READINESS_ACTION_PRIORITIES.kbSetup,
-          reason: 'TapRoot cannot find the KB, so re-running init after fixing memory-root/KB visibility is the first step.',
+          reason: 'TapRoot cannot find the KB, so set TAPROOT_KB_DIR (or --kb-dir) to your KB directory and re-run init.',
           checks: ['kb_dir'],
         }),
       );
