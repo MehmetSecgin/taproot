@@ -43,7 +43,7 @@ npm link            # puts `taproot` and `taprootd` on your PATH
 Verify:
 
 ```bash
-taproot --version   # 0.2.0
+taproot --version   # 0.3.0
 ```
 
 > No npm registry release yet. `npm link` is the supported install path.
