@@ -146,6 +146,42 @@ taproot --json query --datasource qa-cache-redis \
 # fall through as text.
 ```
 
+- gRPC unary calls:
+```bash
+# register. proto-root must contain the service .proto + transitive imports.
+# build/extracted-protos/main is the single-root option for Java services.
+taproot --json datasource add \
+  --name qa-<svc>-grpc --kind grpc \
+  --env qa --namespace develop --service <svc>-grpc \
+  --host <svc>-grpc.develop --port 6565 \
+  --credential-ref qa:grpc:<svc> \
+  --connector openvpn --openvpn-ref vpn:work \
+  --hint protoRoot=$HOME/proto/<svc> \
+  --hint probeService=<package.Service>
+
+# doctor opens channel
+taproot --json doctor --datasource qa-<svc>-grpc
+
+# unary call. Either --request-json or --param.
+taproot --json query --datasource qa-<svc>-grpc \
+  --query "<package.Service/Method>" \
+  --request-json '{"value":1}'
+
+taproot --json query --datasource qa-<svc>-grpc \
+  --query "<package.Service/Method>" \
+  --param text=United
+
+# response shape: single row, value = full message. pluck nested with:
+taproot --json query --datasource qa-<svc>-grpc \
+  --query "..." --request-json '...' \
+  --pluck result.rows.0.0.<field>
+
+# Example first target (Region):
+taproot --json query --datasource qa-catalog-grpc \
+  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --request-json '{"value":1}' --pluck result.rows.0.0.regions
+```
+
 - Redis writes + flushes (gated):
 ```bash
 # enable mutate on the profile (one-time, off by default)

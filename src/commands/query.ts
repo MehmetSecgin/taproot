@@ -108,6 +108,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
     .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
+    .option('--request-json <json>', 'gRPC plugin: request message body as JSON. Overrides --param-built payloads. Example: \'{"values":[1,2,3]}\'.')
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -168,6 +169,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 proto: opts.proto,
                 protoRoot: opts.protoRoot,
                 allowFlush: Boolean(opts.allowFlush),
+                requestJson: opts.requestJson,
               },
             });
             if (rpc.ok) {
@@ -450,6 +452,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (opts.proto) pluginParams.protoMessage = String(opts.proto);
         if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
         if (opts.allowFlush) pluginParams.allowFlush = true;
+        if (opts.requestJson) pluginParams.requestJson = String(opts.requestJson);
+        if (datasource.kind === 'grpc' && params && Object.keys(params).length) {
+          pluginParams.params = params;
+        }
         let result;
         try {
           result = await withQueryTimeout({

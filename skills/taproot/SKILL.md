@@ -1,6 +1,6 @@
 ---
 name: taproot
-description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB or `redis-cli` scripts.
+description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly, gRPC unary calls), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, call Example gRPC endpoints, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB, `redis-cli`, or `grpcurl` scripts.
 ---
 
 # TapRoot
@@ -36,6 +36,18 @@ Use TapRoot as the canonical DB/operator path.
 - No-auth Redis: leave the cred ref unset (TapRoot reads an empty cred map fine). For AUTH or ACL set `password` (and optionally `user`) via `taproot creds set --ref <ref>`.
 - TLS: set `--ssl true` on the datasource profile to add `--tls` to the `redis-cli` invocation.
 - **Writes / flushes.** Default policy on `datasource add` is read-only (`allowMutate=false`). To enable writes on a profile, re-run `taproot datasource add --name <same> ... --allow-mutate`; the same flag flips the policy. At query time the same write needs `--allow-mutate`. For `FLUSHDB/FLUSHALL/SWAPDB/MIGRATE` add `--allow-flush` as well. Default to read-only for unattended/agent workflows; only request mutate/flush when the user explicitly authorizes destructive Redis work and confirms the target env. Production Redis: do not enable mutate on the profile.
+
+## gRPC
+- Treat `kind: grpc` datasources as RPC endpoints, not databases. There is no schema cache, no `learn ensure-schema`, no card promotion. v1 supports **unary calls only** (server/client/bidi streaming deferred).
+- Query syntax: `--query "<fully.qualified.package.Service/Method>"` mirroring `grpcurl`. The slash separates service from method; method casing must match the `.proto` rpc declaration.
+- Request payload: pass full JSON with `--request-json '{...}'` (takes precedence) or build from `--param key=value` pairs (numeric strings → numbers, `true`/`false` → bool, everything else string). The shape must match the rpc's request message exactly; check the `.proto`.
+- Response: single row, `value` = full decoded message object. Pluck nested fields with `--pluck result.rows.0.0.<field>` (e.g. `.regions`). int64 returned as strings (`longs: String`); oneofs carry a sibling key naming the active branch.
+- `resolverHints.protoRoot` is required — point at a directory containing the service `.proto` and all its transitive imports. For Example repos, the easiest single-root path is the service's `api/<name>-proto-generated/build/extracted-protos/main` (built once via `./gradlew :api:<name>-proto-generated:build`).
+- `resolverHints.probeService` (optional) wires `taproot doctor` to actually open a gRPC channel against that service constructor; without it doctor only validates the proto load.
+- Auth: bearer JWT via credential ref (`taproot creds set --ref <ref> --token '<jwt>'`) adds `authorization: Bearer <token>` metadata. Static headers via `--hint metadata.<key>=<value>` on `datasource add`. TLS: `--ssl true` on the profile. Plaintext h2c is the default (matches in-cluster Spring Boot grpc-server-starter).
+- Example first target: Catalog service registered as `qa-catalog-grpc` (`catalog-grpc.develop:6565`, plaintext h2c, openvpn). Methods: `getItems`, `getItemsByParent`, `getOptionalItem`, `findItemsByNameLike`, etc. The proto package is `com.example.catalog.v1`. Pattern repeats for any service-mesh gRPC endpoint reachable via cluster DNS.
+- No mutate/flush tier yet — gRPC plugin treats every method as `executeRead`. If you suspect a method writes, gate the datasource itself with `policy.allowMutate=false` (the default).
+- Do not bypass with direct `grpcurl` — the plugin handles cluster DNS, openvpn preflight, deadlines, and decoding consistently with everything else in TapRoot.
 
 ## Output Mode
 - Prefer `--json` for agent workflows. The JSON envelope has been compacted across all surfaces (rows as positional arrays, schema-context indexes stripped of defaults, query-memory deduped, empty arrays omitted). Token cost is now roughly equivalent to the box-drawing table form, with type fidelity and unambiguous parsing on top.

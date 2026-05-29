@@ -2,7 +2,7 @@
 
 Node/TypeScript CLI for deterministic querying across plugin-backed datasources.
 
-v1 ships DB plugins (`mysql`, `postgres`, `redis`) and connector/executor adapters for `openvpn`, `teleport`, `teleport-mysql`, `kubectl-portforward`, while architecture supports any queryable backend (kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
+v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector adapters for `openvpn`, `teleport`, `teleport-mysql`, `kubectl-portforward`, while architecture supports any queryable backend (kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
 
 ## Principles
 - Datasource-centric UX.
@@ -26,6 +26,7 @@ v1 ships DB plugins (`mysql`, `postgres`, `redis`) and connector/executor adapte
 - `mysql` CLI — for `mysql`/`teleport-mysql` datasources
 - `psql` — for `postgres` datasources
 - `redis-cli` — for `redis` datasources (Redis or Dragonfly endpoints)
+- _(`grpc` plugin needs no extra CLI — `@grpc/grpc-js` is bundled)_
 - `kubectl` — for `qa-portforward` connector
 - `tsh` (Teleport client) — for `teleport`/`teleport-mysql` datasources
 - `openvpn3` or `openvpn` — for `openvpn` connector
@@ -166,6 +167,47 @@ taproot --json query --datasource qa-order-cache \
   --query "MGET orderCache:v2:102193 orderCache:v2:272308"
 # rows: [[{record_id:"102193", item_id:"category:137"}], [{record_id:"272308", item_id:"category:137"}]]
 ```
+
+---
+
+### gRPC (read-only)
+
+```bash
+# register. proto-root must point at a directory containing the service .proto
+# (and its transitive imports). For Example services, the build/extracted-protos
+# directory is the easiest single-root option.
+taproot datasource add \
+  --name qa-catalog-grpc --kind grpc \
+  --env qa --namespace develop --service catalog-grpc \
+  --host catalog-grpc.develop --port 6565 \
+  --credential-ref qa:grpc:region \
+  --connector openvpn --openvpn-ref vpn:work \
+  --hint protoRoot=$HOME/proto/catalog \
+  --hint probeService=com.example.catalog.v1.CatalogService
+
+# doctor: opens channel + loads proto root
+taproot doctor --datasource qa-catalog-grpc
+
+# unary call: --query is "<package.Service/Method>". Request body in JSON:
+taproot --json query --datasource qa-catalog-grpc \
+  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --request-json '{"value":1}'
+
+# or build the request from --param key=value pairs (numbers/booleans coerced):
+taproot --json query --datasource qa-catalog-grpc \
+  --query "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
+  --param text=United
+```
+
+gRPC plugin notes:
+- Unary calls only in v1. Server/client/bidi streaming deferred.
+- Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
+- `--request-json` takes precedence over `--param`. `--param key=value` builds a flat JSON object; numeric strings → numbers, `true`/`false` → bool.
+- Response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck result.rows.0.0.<field>`.
+- proto-root is loaded recursively via `@grpc/proto-loader`; all imports must be findable under `--proto-root` or beside the loaded files. Use the service repo's `build/extracted-protos/main` for one-shot self-contained loading.
+- Doctor uses `resolverHints.probeService` to actually open a channel; without it doctor only validates the proto root.
+- TLS bearer auth: store `token` on the credential ref (`taproot creds set --ref qa:grpc:region --token '<jwt>'`); the plugin adds `authorization: Bearer <token>` metadata when present. Static metadata via `--hint metadata.<key>=<value>`.
+- No mutate gating yet — all gRPC methods run as `executeRead` regardless of side effects. If you need mutate distinction (because some RPCs write), gate the datasource by `policy.allowMutate` at registration time.
 
 ---
 

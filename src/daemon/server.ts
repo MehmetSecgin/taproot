@@ -370,6 +370,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (req.params.proto) pluginParams.protoMessage = String(req.params.proto);
                       if (req.params.protoRoot) pluginParams.protoRoot = String(req.params.protoRoot);
                       if (req.params.allowFlush) pluginParams.allowFlush = true;
+                      if (req.params.requestJson) pluginParams.requestJson = String(req.params.requestJson);
+                      if (datasource.kind === 'grpc' && req.params.param) {
+                        const grpcParams: Record<string, string> = {};
+                        for (const pair of req.params.param as string[]) {
+                          const idx = pair.indexOf('=');
+                          if (idx > 0) grpcParams[pair.slice(0, idx)] = pair.slice(idx + 1);
+                        }
+                        if (Object.keys(grpcParams).length) pluginParams.params = grpcParams;
+                      }
                       return await execute(
                         {
                           datasource: datasource as DatasourceProfile,
