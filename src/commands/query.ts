@@ -105,6 +105,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
     .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope (e.g. result.rows, meta.schemaContext, error.details). Full record is still persisted to ~/.taproot/runs/<runId>/summary.json — use "taproot --json run show --run-id <id> --pluck <other-path>" to fetch other fields later.')
+    .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
+    .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
+    .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -162,6 +165,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 rowsObject: Boolean(opts.rowsObject),
                 timeoutMs,
                 param: opts.param || [],
+                proto: opts.proto,
+                protoRoot: opts.protoRoot,
+                allowFlush: Boolean(opts.allowFlush),
               },
             });
             if (rpc.ok) {
@@ -440,6 +446,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
         progress.update(`executing query via ${plugin.manifest.name}`);
         const executeStart = Date.now();
+        const pluginParams: Record<string, unknown> = {};
+        if (opts.proto) pluginParams.protoMessage = String(opts.proto);
+        if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
+        if (opts.allowFlush) pluginParams.allowFlush = true;
         let result;
         try {
           result = await withQueryTimeout({
@@ -451,6 +461,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
+                  pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
                 },
                 creds,
               ),
@@ -482,6 +493,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
+                  pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
                 },
                 creds,
               ),

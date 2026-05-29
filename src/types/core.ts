@@ -97,6 +97,7 @@ export interface QueryRequest {
   query: string;
   capability: 'executeRead' | 'executeMutate';
   timeoutMs?: number;
+  pluginParams?: Record<string, unknown>;
 }
 
 export interface QueryPhaseTimings {

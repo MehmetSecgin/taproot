@@ -2,7 +2,7 @@
 
 Node/TypeScript CLI for deterministic querying across plugin-backed datasources.
 
-v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `openvpn`, `teleport`, `teleport-mysql`, while architecture supports any queryable backend (redis, kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
+v1 ships DB plugins (`mysql`, `postgres`, `redis`) and connector/executor adapters for `openvpn`, `teleport`, `teleport-mysql`, `kubectl-portforward`, while architecture supports any queryable backend (kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
 
 ## Principles
 - Datasource-centric UX.
@@ -25,6 +25,7 @@ v1 ships DB plugins (`mysql`, `postgres`) and connector/executor adapters for `o
 **Optional (install only what your datasources need)**
 - `mysql` CLI — for `mysql`/`teleport-mysql` datasources
 - `psql` — for `postgres` datasources
+- `redis-cli` — for `redis` datasources (Redis or Dragonfly endpoints)
 - `kubectl` — for `qa-portforward` connector
 - `tsh` (Teleport client) — for `teleport`/`teleport-mysql` datasources
 - `openvpn3` or `openvpn` — for `openvpn` connector
@@ -78,6 +79,95 @@ taproot doctor --datasource dev-orders --connect
 # read query
 taproot query --datasource dev-orders --query "SELECT 1 AS ok"
 ```
+
+### Redis (read-only)
+
+```bash
+# add a redis datasource — works against Redis or Redis-compatible (Dragonfly, KeyDB)
+taproot datasource add \
+  --name qa-cache-redis \
+  --kind redis \
+  --env qa \
+  --namespace develop \
+  --service cache-redis \
+  --credential-ref qa:redis:cache \
+  --host my-redis.develop \
+  --port 6379 \
+  --database 0 \
+  --connector openvpn \
+  --openvpn-ref vpn:work
+
+# no auth required? leave the cred ref empty. With AUTH set user/password via creds:
+taproot creds set --ref qa:redis:cache --user default --password '***'
+
+# doctor runs PING -> PONG
+taproot doctor --datasource qa-cache-redis
+
+# read query: pass any Redis read command as the query string
+taproot --json query --datasource qa-cache-redis --query "DBSIZE"
+taproot --json query --datasource qa-cache-redis --query "GET orderCache:v2:102193"
+taproot --json query --datasource qa-cache-redis --query "SCAN 0 COUNT 10"
+```
+
+Redis plugin notes:
+- Three-tier command classification:
+  - **read** (`GET/MGET/HGETALL/LRANGE/SMEMBERS/ZRANGE/KEYS/SCAN/INFO/DBSIZE/TYPE/TTL/...` + safe `OBJECT/CONFIG GET/CLIENT/MEMORY/COMMAND/LATENCY` subcommands) — runs by default.
+  - **mutate** (`SET/SETEX/SETNX/MSET/DEL/UNLINK/EXPIRE/RENAME/COPY/INCR/HSET/HDEL/LPUSH/RPUSH/SADD/SREM/ZADD/ZREM/XADD/XDEL/PFADD/BITOP/...`) — requires `--allow-mutate` AND `datasource.policy.allowMutate=true` (set via `taproot datasource add ... --allow-mutate`) AND `executeMutate` in the policy capability list.
+  - **flush** (`FLUSHDB/FLUSHALL/SWAPDB/MIGRATE`) — requires `--allow-flush` on top of the mutate gates.
+- `SORT` without `STORE` is read; `SORT ... STORE` is mutate. Use `SORT_RO` on replicas.
+- Unknown commands are rejected by default.
+- Output shape: single column `value`, one row per reply line (multi-bulk replies → multiple rows).
+- Protobuf decoding (Redis only): pass `--proto <MessageName> --proto-root <dir>` to decode binary replies with `protobufjs`. `--proto-root` is loaded recursively; all `.proto` files inside are registered and imports resolve by basename. Decoded rows carry the message object as `value`; text replies (`SCAN` keys, `(nil)`, integers, `INFO` blocks) pass through unchanged. Printable-ASCII fallback prevents `SCAN`/`KEYS` from being misdecoded. Per-datasource defaults via `resolverHints.protoRoot` / `resolverHints.protoMessage` (set with `--hint key=value` on `datasource add`).
+- Without `--proto`, binary payloads pass through raw — `redis-cli` is not asked to decode them.
+- No schema cache, no card promotion, no partition checks — Redis bypasses the MySQL/Postgres learning paths.
+- Discovery (`taproot discover`) does **not** yet propose Redis datasources; register them with `datasource add`.
+- TLS: pass `--ssl true` on the datasource to add `--tls` to `redis-cli`.
+
+Write + flush example:
+
+```bash
+# 1) profile must opt in to mutate
+taproot datasource add \
+  --name qa-cache-redis --kind redis \
+  --env qa --namespace develop --service cache-redis \
+  --host my-redis.develop --port 6379 --database 0 \
+  --credential-ref qa:redis:cache \
+  --connector openvpn --openvpn-ref vpn:work \
+  --allow-mutate
+
+# 2) write requires --allow-mutate at query time too
+taproot --json query --datasource qa-cache-redis --query "SET taproot:test:key hello" --allow-mutate
+taproot --json query --datasource qa-cache-redis --query "DEL taproot:test:key" --allow-mutate
+
+# 3) FLUSHDB requires --allow-flush AS WELL AS --allow-mutate
+taproot --json query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
+```
+
+Proto-decoding example:
+
+```bash
+# Per-query
+taproot --json query --datasource qa-order-cache \
+  --query "GET orderCache:v2:102193" \
+  --proto OrderProto \
+  --proto-root ~/proto/order-cache
+
+# Bake defaults into the datasource (no flags needed on subsequent queries)
+taproot datasource add \
+  --name qa-order-cache --kind redis \
+  --env qa --namespace develop --service order-cache \
+  --host my-cache.develop --port 6379 --database 14 \
+  --credential-ref qa:redis:my-cache \
+  --connector openvpn --openvpn-ref vpn:work \
+  --hint protoRoot=$HOME/proto/order-cache \
+  --hint protoMessage=OrderProto
+
+taproot --json query --datasource qa-order-cache \
+  --query "MGET orderCache:v2:102193 orderCache:v2:272308"
+# rows: [[{record_id:"102193", item_id:"category:137"}], [{record_id:"272308", item_id:"category:137"}]]
+```
+
+---
 
 If you have a KB (see [Knowledge base](#knowledge-base) below), you can replace `datasource add` with the KB-backed shortcut:
 
@@ -303,6 +393,7 @@ Structure:
 
 ## Notes
 - Built-in DB plugins only expose `executeRead` in v1.
+- The `redis` plugin classifies commands into three tiers (read / mutate / flush) and enforces gates in-process because the shared SQL safety regex does not understand Redis verbs. `--allow-mutate` gates mutates, `--allow-flush` (additive) gates `FLUSHDB`/`FLUSHALL`/`SWAPDB`/`MIGRATE`. Unknown commands are rejected.
 - `prod` defaults to deterministic no-guess datasource resolution (profile/KB); use `--allow-discovery` only when explicitly needed.
 - Mutating queries require `--allow-mutate` **and** datasource policy with `executeMutate`.
 - `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.

@@ -366,12 +366,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
                         await new Promise((r) => setTimeout(r, testHoldMs));
                       }
+                      const pluginParams: Record<string, unknown> = {};
+                      if (req.params.proto) pluginParams.protoMessage = String(req.params.proto);
+                      if (req.params.protoRoot) pluginParams.protoRoot = String(req.params.protoRoot);
+                      if (req.params.allowFlush) pluginParams.allowFlush = true;
                       return await execute(
                         {
                           datasource: datasource as DatasourceProfile,
                           query,
                           capability: capability as any,
                           timeoutMs: remainingTimeoutMs(),
+                          pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
                         },
                         execCreds,
                       );

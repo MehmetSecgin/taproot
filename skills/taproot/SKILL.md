@@ -1,6 +1,6 @@
 ---
 name: taproot
-description: Use TapRoot for deterministic datasource queries, doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/service queries through TapRoot, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB scripts.
+description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB or `redis-cli` scripts.
 ---
 
 # TapRoot
@@ -22,6 +22,20 @@ Use TapRoot as the canonical DB/operator path.
 - Never inspect TapRoot cache, learning, or credential files directly. Use TapRoot commands only.
 - Respect runtime config from `~/.taproot/config/deterministic-config.json`; environment safety and service alias behavior come from config, not hardcoded env names.
 - Service names are normalized through `serviceAliases` in runtime config. Always use the canonical service name when known; aliases resolve transparently but should not be stored.
+- **Redis classifies commands into three tiers (read / mutate / flush) and self-gates** because the shared SQL safety regex does not understand Redis verbs. `read` (GET/HGETALL/LRANGE/SCAN/INFO/...) runs by default. `mutate` (SET/DEL/EXPIRE/RENAME/HSET/LPUSH/SADD/ZADD/XADD/INCR/...) requires `--allow-mutate` AND `datasource.policy.allowMutate=true` (set via `taproot datasource add ... --allow-mutate`). `flush` (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE) requires `--allow-flush` on top. Unknown commands are rejected. Never bypass with direct `redis-cli`.
+
+## Redis / Dragonfly
+- Treat `kind: redis` datasources as cache lookups, not SQL queries. There is no learned schema, no `learn ensure-schema`, no card promotion, and no partition checks — Redis bypasses the relational learning paths entirely.
+- Pass the raw Redis command as `--query`, e.g. `--query "GET <key>"`, `--query "HGETALL <key>"`, `--query "SCAN 0 COUNT 50"`, `--query "INFO keyspace"`. Quote keys with spaces or special characters; the plugin tokenizes shell-style.
+- Result shape: `result.columns = ["value"]`, one row per reply line. Multi-bulk replies (`HGETALL`, `LRANGE`, `SCAN`) produce multiple rows; alternate field/value lines for hashes. Access via `rows[i][0]` (positional, `rowsForm: "array"`).
+- **Protobuf decoding.** Most Example Redis/Dragonfly caches store serialized protobuf payloads. Pass `--proto <Message> --proto-root <dir>` to decode them; the plugin runs `redis-cli --no-raw`, parses the quoted bytes, and decodes via `protobufjs`. `--proto-root` is loaded recursively — point it at the service's `.proto` source tree (e.g. `~/proto/order-cache`). Decoded rows carry the message object as `value` (`record_id`, `item_id`, etc.). Non-binary replies (`SCAN` keys, `(nil)`, integers, `INFO` blocks) fall through as text via a printable-ASCII heuristic, so the same datasource can be used for both decoded GETs and plain SCANs.
+- **Per-datasource proto defaults** via `resolverHints.protoRoot` and `resolverHints.protoMessage`. Set them with `taproot datasource add ... --hint protoRoot=<dir> --hint protoMessage=<Message>` so future queries don't need the flags. The corresponding `.proto` source lives in the owning service's repo (e.g. order-service's `app/cache/src/main/proto/internal.proto`). To find the right message name, grep the service for `ProtobufRedisSerializer<...>` or the equivalent serializer config.
+- Payloads without a configured `--proto` pass through as raw bytes — `redis-cli` is invoked in default mode. If a binary cell appears in the output, you probably want to add `--proto` rather than try to interpret bytes by eye.
+- `taproot doctor --datasource <name>` runs `PING -> PONG` plus any wired connectors (typically `openvpn`).
+- Discovery (`taproot discover kb|kubectl|teleport`) does **not** yet propose Redis datasources. Register them with `taproot datasource add --kind redis ...` or hand-edit the profile. Wire `--connector openvpn --openvpn-ref vpn:work` for cluster-DNS hosts on QA.
+- No-auth Redis: leave the cred ref unset (TapRoot reads an empty cred map fine). For AUTH or ACL set `password` (and optionally `user`) via `taproot creds set --ref <ref>`.
+- TLS: set `--ssl true` on the datasource profile to add `--tls` to the `redis-cli` invocation.
+- **Writes / flushes.** Default policy on `datasource add` is read-only (`allowMutate=false`). To enable writes on a profile, re-run `taproot datasource add --name <same> ... --allow-mutate`; the same flag flips the policy. At query time the same write needs `--allow-mutate`. For `FLUSHDB/FLUSHALL/SWAPDB/MIGRATE` add `--allow-flush` as well. Default to read-only for unattended/agent workflows; only request mutate/flush when the user explicitly authorizes destructive Redis work and confirms the target env. Production Redis: do not enable mutate on the profile.
 
 ## Output Mode
 - Prefer `--json` for agent workflows. The JSON envelope has been compacted across all surfaces (rows as positional arrays, schema-context indexes stripped of defaults, query-memory deduped, empty arrays omitted). Token cost is now roughly equivalent to the box-drawing table form, with type fidelity and unambiguous parsing on top.

@@ -5,6 +5,19 @@ import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson, printJsonPluck } from '../core/output.js';
 
+function parseHintPairs(values: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const value of values) {
+    const idx = value.indexOf('=');
+    if (idx <= 0) throw new Error(`Invalid --hint '${value}'. Expected key=value.`);
+    const key = value.slice(0, idx).trim();
+    const val = value.slice(idx + 1);
+    if (!key) throw new Error(`Invalid --hint '${value}'. Empty key.`);
+    out[key] = val;
+  }
+  return out;
+}
+
 function parseConnectorRefPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
@@ -103,6 +116,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--target <target>')
     .option('--connector <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--connector-ref <name=ref>', 'repeatable connector credential refs', (v, p: string[]) => (p || []).concat(v), [])
+    .option('--hint <key=value>', 'repeatable resolverHints key/value (e.g. protoRoot=/path, protoMessage=OrderProto)', (v, p: string[]) => (p || []).concat(v), [])
     .option('--openvpn-ref <ref>')
     .option('--teleport-ref <ref>')
     .option('--allow-read', 'allow read', true)
@@ -133,6 +147,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         },
         resolverHints: {
           ...parseConnectorRefPairs(opts.connectorRef || []),
+          ...parseHintPairs(opts.hint || []),
           ...(opts.openvpnRef ? { openvpnCredentialRef: opts.openvpnRef } : {}),
           ...(opts.teleportRef ? { teleportCredentialRef: opts.teleportRef } : {}),
         },

@@ -110,6 +110,61 @@ taproot --json query --env <env> --service <service> --allow-discovery --query "
 taproot --json query --datasource <name> --timeout-ms 5000 --query "SELECT 1 AS ok"
 ```
 
+- Redis / Dragonfly read commands:
+```bash
+# register (one-time). No auth example; for AUTH add `taproot creds set --ref ... --password ...`.
+# Bake proto defaults via --hint so future queries auto-decode.
+taproot --json datasource add \
+  --name qa-cache-redis --kind redis \
+  --env qa --namespace develop --service cache-redis \
+  --host my-redis.develop --port 6379 --database 0 \
+  --credential-ref qa:redis:cache \
+  --connector openvpn --openvpn-ref vpn:work \
+  --hint protoRoot=$HOME/proto/<service> \
+  --hint protoMessage=<MessageName>
+
+# health check (PING -> PONG)
+taproot --json doctor --datasource qa-cache-redis
+
+# basic reads. Pass the raw Redis command verbatim.
+taproot --json query --datasource qa-cache-redis --query "DBSIZE"
+taproot --json query --datasource qa-cache-redis --query "INFO keyspace"
+taproot --json query --datasource qa-cache-redis --query "TYPE <key>"
+taproot --json query --datasource qa-cache-redis --query "GET <key>"
+taproot --json query --datasource qa-cache-redis --query "HGETALL <key>"
+taproot --json query --datasource qa-cache-redis --query "LRANGE <key> 0 -1"
+taproot --json query --datasource qa-cache-redis --query "SCAN 0 MATCH 'prefix:*' COUNT 100"
+
+# proto decode without baked defaults (per-query override)
+taproot --json query --datasource qa-cache-redis \
+  --query "GET <key>" \
+  --proto <MessageName> \
+  --proto-root /path/to/proto/src
+
+# rows shape: columns=["value"], one row per reply line. Access via rows[i][0].
+# With --proto active, rows[i][0] is the decoded message object (JSON). SCAN keys and (nil)
+# fall through as text.
+```
+
+- Redis writes + flushes (gated):
+```bash
+# enable mutate on the profile (one-time, off by default)
+taproot --json datasource add --name qa-cache-redis ... --allow-mutate
+
+# write — needs --allow-mutate at query time too
+taproot --json query --datasource qa-cache-redis --query "SET k v" --allow-mutate
+taproot --json query --datasource qa-cache-redis --query "DEL k" --allow-mutate
+taproot --json query --datasource qa-cache-redis --query "EXPIRE k 60" --allow-mutate
+
+# FLUSH-tier requires --allow-flush IN ADDITION to --allow-mutate
+taproot --json query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
+
+# default behaviour: writes blocked
+# - without --allow-mutate -> "redis command 'SET' is a mutate operation; re-run with --allow-mutate."
+# - profile.allowMutate=false -> "datasource policy disallows mutate queries..."
+# - FLUSHDB with only --allow-mutate -> "FLUSH-tier command 'FLUSHDB' requires --allow-flush..."
+```
+
 - MySQL/TiDB schema discovery:
 ```bash
 taproot --json query --datasource <name> --query "SHOW TABLES"
