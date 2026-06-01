@@ -412,7 +412,17 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   };
                   result.timings = { ...result.timings, phases };
                   (base.meta as Record<string, unknown>).phases = phases;
-                  result.meta = { ...(result.meta || {}), schemaContext, queryMemory };
+                  const pluginMeta = result.meta || {};
+                  const pluginSchema = pluginMeta.schemaContext;
+                  const mergedSchema = pluginSchema
+                    ? {
+                        ...schemaContext,
+                        ...pluginSchema,
+                        tables: { ...(schemaContext.tables || {}), ...(pluginSchema.tables || {}) },
+                      }
+                    : schemaContext;
+                  result.meta = { ...pluginMeta, schemaContext: mergedSchema, queryMemory };
+                  base.meta.schemaContext = mergedSchema;
                   appendRunsLedgerEntry(
                     ledgerInputFromResult({
                       ledgerDir: ctx.paths.runsLedgerDir,

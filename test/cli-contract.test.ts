@@ -35,6 +35,7 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('session');
     expect(out.stdout).toContain('init');
     expect(out.stdout).toContain('discover');
+    expect(out.stdout).toContain('grpc');
   });
 
   it('prints skill version', () => {

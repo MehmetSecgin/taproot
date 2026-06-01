@@ -156,11 +156,18 @@ taproot --json datasource add \
   --host <svc>-grpc.develop --port 6565 \
   --credential-ref qa:grpc:<svc> \
   --connector openvpn --openvpn-ref vpn:work \
-  --hint protoRoot=$HOME/proto/<svc> \
-  --hint probeService=<package.Service>
+  --hint protoRoot=$HOME/proto/<svc>
 
-# doctor opens channel
+# doctor opens channel against the first service in the proto (or --hint probeService=<fq> to override)
 taproot --json doctor --datasource qa-<svc>-grpc
+
+# discover what's callable before composing requests
+taproot --json grpc list --datasource qa-<svc>-grpc                  # services + methods only
+taproot --json grpc describe --datasource qa-<svc>-grpc \
+  --service <package.Service> --method <Method>                       # expands request + response messages
+# every grpc query also returns the called method's shape under
+# meta.schemaContext.services / .messages / .enums — read that after the call
+# instead of re-running describe.
 
 # unary call. Either --request-json or --param.
 taproot --json query --datasource qa-<svc>-grpc \

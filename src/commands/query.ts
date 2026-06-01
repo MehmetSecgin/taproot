@@ -528,7 +528,16 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           database: String(datasource.connection.database || ''),
           engine: datasource.kind,
         };
-        result.meta = { ...(result.meta || {}), schemaContext, queryMemory };
+        const pluginMeta = result.meta || {};
+        const pluginSchema = pluginMeta.schemaContext;
+        const mergedSchema = pluginSchema
+          ? {
+              ...schemaContext,
+              ...pluginSchema,
+              tables: { ...(schemaContext.tables || {}), ...(pluginSchema.tables || {}) },
+            }
+          : schemaContext;
+        result.meta = { ...pluginMeta, schemaContext: mergedSchema, queryMemory };
         appendRunsLedgerEntry(
           ledgerInputFromResult({
             ledgerDir: ctx.paths.runsLedgerDir,
@@ -571,17 +580,33 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             const meta = trimmed.meta as Record<string, unknown>;
             const qm = meta.queryMemory as Record<string, unknown> | undefined;
             if (qm && Object.keys(qm).length === 0) delete meta.queryMemory;
-            const sc = meta.schemaContext as { tables?: Record<string, unknown> } | undefined;
-            if (sc && (!sc.tables || Object.keys(sc.tables).length === 0)) delete meta.schemaContext;
+            const sc = meta.schemaContext as {
+              tables?: Record<string, unknown>;
+              services?: Record<string, unknown>;
+              messages?: Record<string, unknown>;
+              enums?: Record<string, unknown>;
+            } | undefined;
+            if (
+              sc &&
+              !Object.keys(sc.tables || {}).length &&
+              !Object.keys(sc.services || {}).length &&
+              !Object.keys(sc.messages || {}).length &&
+              !Object.keys(sc.enums || {}).length
+            ) delete meta.schemaContext;
           }
           printJsonPluck(trimmed, opts.pluck ? String(opts.pluck) : undefined);
         }
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
           console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
-          const schemaTableCount = Object.keys(schemaContext.tables || {}).length;
+          const finalSchema = (result.meta?.schemaContext as { tables?: Record<string, unknown>; services?: Record<string, unknown>; messages?: Record<string, unknown> } | undefined);
+          const schemaTableCount = Object.keys(finalSchema?.tables || {}).length;
+          const schemaServiceCount = Object.keys(finalSchema?.services || {}).length;
+          const schemaMessageCount = Object.keys(finalSchema?.messages || {}).length;
           if (schemaTableCount) {
             console.log(`[schemaContext: ${schemaTableCount} table${schemaTableCount === 1 ? '' : 's'} cached — pass --json for full detail]`);
+          } else if (schemaServiceCount || schemaMessageCount) {
+            console.log(`[schemaContext: ${schemaServiceCount} service${schemaServiceCount === 1 ? '' : 's'}, ${schemaMessageCount} message${schemaMessageCount === 1 ? '' : 's'} — pass --json for full detail]`);
           }
           const renderedMemory = renderQueryMemoryTty(queryMemory);
           if (renderedMemory) console.log(renderedMemory);

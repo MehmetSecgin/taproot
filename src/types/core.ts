@@ -166,8 +166,42 @@ export interface TableContext {
   lastSeenAt?: string;
 }
 
+export interface RpcFieldShape {
+  name: string;
+  type: string;
+  repeated?: boolean;
+  optional?: boolean;
+  oneof?: string;
+}
+
+export interface RpcMessageShape {
+  name: string;
+  fields: RpcFieldShape[];
+}
+
+export interface RpcEnumShape {
+  name: string;
+  values: Record<string, number>;
+}
+
+export interface RpcMethodShape {
+  name: string;
+  requestType: string;
+  responseType: string;
+  requestStream?: boolean;
+  responseStream?: boolean;
+}
+
+export interface RpcServiceShape {
+  name: string;
+  methods: RpcMethodShape[];
+}
+
 export interface SchemaContext {
   tables: Record<string, TableContext>;
+  services?: Record<string, RpcServiceShape>;
+  messages?: Record<string, RpcMessageShape>;
+  enums?: Record<string, RpcEnumShape>;
 }
 
 export type LedgerRedactionTier = 'raw' | 'redact' | 'strict';

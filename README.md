@@ -182,11 +182,17 @@ taproot datasource add \
   --host catalog-grpc.develop --port 6565 \
   --credential-ref qa:grpc:region \
   --connector openvpn --openvpn-ref vpn:work \
-  --hint protoRoot=$HOME/proto/catalog \
-  --hint probeService=com.example.catalog.v1.CatalogService
+  --hint protoRoot=$HOME/proto/catalog
 
-# doctor: opens channel + loads proto root
+# doctor: opens a channel against the first service in the loaded proto.
+# Override with --hint probeService=<fq> on datasource add if you need a specific one.
 taproot doctor --datasource qa-catalog-grpc
+
+# introspect what's callable before composing a request:
+taproot --json grpc list --datasource qa-catalog-grpc            # services + methods only
+taproot --json grpc describe --datasource qa-catalog-grpc \
+  --service com.example.catalog.v1.CatalogService \
+  --method getItemsByParent                                    # expands request + response messages
 
 # unary call: --query is "<package.Service/Method>". Request body in JSON:
 taproot --json query --datasource qa-catalog-grpc \
@@ -204,8 +210,9 @@ gRPC plugin notes:
 - Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
 - `--request-json` takes precedence over `--param`. `--param key=value` builds a flat JSON object; numeric strings → numbers, `true`/`false` → bool.
 - Response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck result.rows.0.0.<field>`.
-- proto-root is loaded recursively via `@grpc/proto-loader`; all imports must be findable under `--proto-root` or beside the loaded files. Use the service repo's `build/extracted-protos/main` for one-shot self-contained loading.
-- Doctor uses `resolverHints.probeService` to actually open a channel; without it doctor only validates the proto root.
+- Every grpc query result carries `meta.schemaContext.services` + `.messages` + `.enums` for the called method (transitive expansion of request + response shapes) — read that to compose follow-up calls instead of re-running `grpc describe`.
+- proto-root is loaded recursively via the shared proto loader (`@grpc/proto-loader` + `protobufjs`); all imports must be findable under `--proto-root` or beside the loaded files. Use the service repo's `build/extracted-protos/main` for one-shot self-contained loading.
+- Doctor opens a real channel against the first service in the loaded package by default. Override with `--hint probeService=<fq>` on `datasource add` to pin a specific service.
 - TLS bearer auth: store `token` on the credential ref (`taproot creds set --ref qa:grpc:region --token '<jwt>'`); the plugin adds `authorization: Bearer <token>` metadata when present. Static metadata via `--hint metadata.<key>=<value>`.
 - No mutate gating yet — all gRPC methods run as `executeRead` regardless of side effects. If you need mutate distinction (because some RPCs write), gate the datasource by `policy.allowMutate` at registration time.
 
@@ -341,6 +348,7 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot session <open|ls|inspect|close|close-all>`
 - `taproot completion <zsh|bash|fish>`
 - `taproot sanitize check-repo`
+- `taproot grpc <describe|list> [--datasource <name> | --proto-root <dir>] [--service <fq>] [--method <name>] [--max-depth <n>]`
 
 ---
 

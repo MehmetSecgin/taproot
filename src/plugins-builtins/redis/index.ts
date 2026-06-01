@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
+import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
 
 const CONNECT_TIMEOUT_MS = 5000;
 
@@ -237,66 +236,7 @@ function splitReplies(stdout: string): ReplyEntry[] {
   return entries;
 }
 
-interface ProtoRoot {
-  lookupType(name: string): { decode: (buf: Uint8Array) => unknown; toObject: (msg: unknown, opts: Record<string, unknown>) => Record<string, unknown> };
-}
-
-const protoRootCache = new Map<string, Promise<ProtoRoot>>();
-
-function listProtoFiles(rootDir: string): string[] {
-  const files: string[] = [];
-  const walk = (dir: string): void => {
-    let entries: fs.Dirent[] = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      const abs = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
-        walk(abs);
-        continue;
-      }
-      if (entry.isFile() && entry.name.endsWith('.proto')) files.push(abs);
-    }
-  };
-  walk(rootDir);
-  return files;
-}
-
-async function loadProtoRoot(rootDir: string): Promise<ProtoRoot> {
-  const cached = protoRootCache.get(rootDir);
-  if (cached) return cached;
-  const promise = (async (): Promise<ProtoRoot> => {
-    const files = listProtoFiles(rootDir);
-    if (!files.length) throw new Error(`no .proto files found under '${rootDir}'`);
-    const mod = await import('protobufjs');
-    const ns = ((mod as unknown as { default?: unknown }).default ?? mod) as { Root: new () => unknown };
-    const root = new ns.Root() as unknown as {
-      resolvePath: (origin: string, target: string) => string;
-      load: (files: string[], opts: { keepCase: boolean }) => Promise<unknown>;
-    };
-    root.resolvePath = (origin: string, target: string): string => {
-      if (path.isAbsolute(target) && fs.existsSync(target)) return target;
-      if (origin) {
-        const rel = path.resolve(path.dirname(origin), target);
-        if (fs.existsSync(rel)) return rel;
-      }
-      const absUnder = path.resolve(rootDir, target);
-      if (fs.existsSync(absUnder)) return absUnder;
-      const byBasename = files.find((f) => path.basename(f) === path.basename(target));
-      if (byBasename) return byBasename;
-      return target;
-    };
-    await root.load(files, { keepCase: true });
-    return root as unknown as ProtoRoot;
-  })();
-  protoRootCache.set(rootDir, promise);
-  try {
-    return await promise;
-  } catch (err) {
-    protoRootCache.delete(rootDir);
-    throw err;
-  }
-}
+type ProtoRoot = ProtobufRoot;
 
 function looksPrintableAscii(buf: Buffer): boolean {
   if (!buf.length) return true;
@@ -377,7 +317,7 @@ export const redisPlugin: TapRootPlugin = {
     let columns: string[] = ['value'];
     let rows: Array<Record<string, unknown>> = [];
     if (decode) {
-      const root = await loadProtoRoot(protoRoot as string);
+      const root = (await loadProtobufRoot(protoRoot as string)).protobufRoot;
       const entries = splitReplies(r.stdout);
       rows = entries.map((entry) => {
         if (entry.kind === 'text') return { value: entry.text };
