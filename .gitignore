@@ -4,3 +4,7 @@ run-output/
 .taproot-state/
 .DS_Store
 *.log
+
+# Local investigation artifacts — never commit (may contain internal data)
+HANDOFF-*.md
+*.seed.json

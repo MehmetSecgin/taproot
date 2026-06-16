@@ -6,6 +6,7 @@ import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '.
 import { bootstrapDatasource } from '../core/bootstrap.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshSchemaForDatasource, supportsSchemaRefresh } from '../core/schema-refresh.js';
+import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
@@ -383,6 +384,11 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         // ignore preflight infra errors and let refresh attempt itself
       }
       const refreshed = await refreshSchemaForDatasource(ctx, datasource);
+      const service = String(datasource.service || '').toLowerCase();
+      const serviceRelations = service
+        ? ctx.kbStore.typedRelations().filter((r) => r.from.service.toLowerCase() === service || r.to.service.toLowerCase() === service)
+        : [];
+      const staleRelations = validateRelations(serviceRelations, ctx.learningStore.schemaTables()).filter((r) => r.stale);
       if (ctx.jsonMode) {
         printJson({
           datasource: datasource.name,
@@ -390,6 +396,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           source: refreshed.source,
           tables: refreshed.tables,
           joins: refreshed.joins,
+          staleRelations,
         });
       } else {
         console.log(renderRecord({
@@ -399,6 +406,11 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           tableCount: refreshed.tables.length,
           joinCount: refreshed.joins.length,
         }));
+        if (staleRelations.length) {
+          console.log(`\n⚠ ${staleRelations.length} curated relation(s) touching ${datasource.service} now reference a missing table/column:`);
+          for (const r of staleRelations) console.log(`  ${r.from} -> ${r.to} (${r.fromStatus}/${r.toStatus})`);
+          console.log('Re-verify against current schema, then edit/re-import relations.json. Run "taproot kb relations validate --service <svc>" for the full audit.');
+        }
       }
     });
 
@@ -730,6 +742,49 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           }
           return out;
         })));
+      }
+    });
+
+  l.command('relations')
+    .description('Derive candidate cross-service relations from learned schemas; --promote writes confirmed ones into KB relations.json')
+    .option('--service <service>', 'only candidates touching this service')
+    .option('--min-confidence <n>', 'drop candidates scoring below this threshold', '0')
+    .option('--include-existing', 'also include candidates already present in relations.json', false)
+    .option('--promote', 'write the listed candidates into KB relations.json (marked source=derived)', false)
+    .option('--limit <n>', 'max rows', '100')
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
+      const ctx = getCtx();
+      const existingIds = new Set(ctx.kbStore.typedRelations().map((rel) => rel.id));
+      let candidates = deriveRelationCandidates(ctx.learningStore.schemaTables());
+      if (!opts.includeExisting) candidates = candidates.filter((c) => !existingIds.has(c.id));
+      const minConfidence = Number(opts.minConfidence || 0);
+      if (minConfidence > 0) candidates = candidates.filter((c) => (c.confidence || 0) >= minConfidence);
+      if (opts.service) {
+        const s = normalizeService(String(opts.service), ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
+        candidates = candidates.filter((c) => c.from.service.toLowerCase() === s || c.to.service.toLowerCase() === s);
+      }
+      const limit = Math.max(1, Number(opts.limit || 100));
+      candidates = candidates.slice(0, limit);
+      const promoted = opts.promote && candidates.length ? ctx.kbStore.promoteRelations(candidates) : null;
+      if (ctx.jsonMode) {
+        printJsonPluck({ candidates, promoted }, opts.pluck ? String(opts.pluck) : undefined);
+        return;
+      }
+      if (!candidates.length) {
+        console.log('No new candidate relations derived. Prime more services with "taproot learn ensure-schema --service <svc>" first, or pass --include-existing.');
+        return;
+      }
+      console.log(renderTable(candidates.map((c) => ({
+        from: `${c.from.service}.${c.from.table}.${c.from.column}`,
+        to: `${c.to.service}.${c.to.table}.${c.to.column}`,
+        cross: c.from.service.toLowerCase() !== c.to.service.toLowerCase() ? 'yes' : '',
+        confidence: (c.confidence || 0).toFixed(2),
+      }))));
+      if (promoted) {
+        console.log(`\nPromoted ${promoted.added} relation(s) into relations.json (total now ${promoted.total}).`);
+      } else {
+        console.log(`\n${candidates.length} candidate(s). Review, then re-run with --promote to write confirmed edges into relations.json.`);
       }
     });
 }

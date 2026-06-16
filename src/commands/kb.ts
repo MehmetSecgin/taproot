@@ -1,7 +1,9 @@
 import { Command } from 'commander';
+import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
+import { normalizeRelations, validateRelations } from '../core/relations.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
@@ -111,20 +113,117 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       console.log(renderTable(tableRows));
     });
 
-  kb.command('related').requiredOption('--service <service>').action((opts) => {
-    const ctx = getCtx();
-    const s = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
-    const rows = ctx.kbStore.relations().filter((r) => String(r?.from?.service || '').toLowerCase() === s || String(r?.to?.service || '').toLowerCase() === s);
-    if (ctx.jsonMode) printJson(rows);
-    else {
-      const tableRows = rows.map((r) => ({
-        from: `${String(r?.from?.service || '')}.${String(r?.from?.table || '')}`,
-        to: `${String(r?.to?.service || '')}.${String(r?.to?.table || '')}`,
-        via: String(r?.via || ''),
-      }));
-      console.log(renderTable(tableRows));
-    }
-  });
+  kb.command('related')
+    .description('Show curated cross-service and intra-service relations touching a service')
+    .requiredOption('--service <service>')
+    .option('--cross-service', 'only relations that cross a service boundary', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
+      const ctx = getCtx();
+      const s = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
+      let rows = ctx.kbStore
+        .typedRelations()
+        .filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
+      if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
+      if (ctx.jsonMode) {
+        printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      } else if (!rows.length) {
+        console.log(`No curated relations for service '${opts.service}'. Derive candidates with "taproot learn relations --service ${opts.service}".`);
+      } else {
+        const tableRows = rows.map((r) => ({
+          from: `${r.from.service}.${r.from.table}.${r.from.column}`,
+          to: `${r.to.service}.${r.to.table}.${r.to.column}`,
+          relationship: r.relationship || '',
+          cross: r.from.service.toLowerCase() !== r.to.service.toLowerCase() ? 'yes' : '',
+          notes: r.notes || '',
+        }));
+        console.log(renderTable(tableRows));
+      }
+    });
+
+  const relations = kb.command('relations').description('Curated cross-service relation operations');
+
+  relations.command('list')
+    .description('List all curated relations in the KB')
+    .option('--cross-service', 'only relations that cross a service boundary', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
+      const ctx = getCtx();
+      let rows = ctx.kbStore.typedRelations();
+      if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
+      if (ctx.jsonMode) {
+        printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      } else if (!rows.length) {
+        console.log('No curated relations. Import a map with "taproot kb relations import --file <path>".');
+      } else {
+        console.log(renderTable(rows.map((r) => ({
+          from: `${r.from.service}.${r.from.table}.${r.from.column}`,
+          to: `${r.to.service}.${r.to.table}.${r.to.column}`,
+          relationship: r.relationship || '',
+          cross: r.from.service.toLowerCase() !== r.to.service.toLowerCase() ? 'yes' : '',
+        }))));
+      }
+    });
+
+  relations.command('validate')
+    .description('Check curated relation endpoints against the learned schema cache; reports ok/stale/unknown')
+    .option('--service <service>', 'only relations touching this service')
+    .option('--stale-only', 'only show edges whose table/column no longer exists', false)
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
+    .action((opts) => {
+      const ctx = getCtx();
+      let rels = ctx.kbStore.typedRelations();
+      if (opts.service) {
+        const s = normalizeService(String(opts.service), ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
+        rels = rels.filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
+      }
+      let results = validateRelations(rels, ctx.learningStore.schemaTables());
+      if (opts.staleOnly) results = results.filter((r) => r.stale);
+      const summary = {
+        total: results.length,
+        stale: results.filter((r) => r.stale).length,
+        unknown: results.filter((r) => !r.stale && (r.fromStatus === 'unknown_service' || r.toStatus === 'unknown_service')).length,
+      };
+      if (ctx.jsonMode) {
+        printJsonPluck({ summary, results }, opts.pluck ? String(opts.pluck) : undefined);
+      } else if (!results.length) {
+        console.log('No relations to validate.');
+      } else {
+        console.log(renderTable(results.map((r) => ({
+          from: r.from,
+          to: r.to,
+          fromStatus: r.fromStatus,
+          toStatus: r.toStatus,
+          stale: r.stale ? 'STALE' : '',
+        }))));
+        console.log(`\n${summary.total} relation(s): ${summary.stale} stale, ${summary.unknown} unverifiable (service not introspected).`);
+        if (summary.stale) console.log('Stale edges still inject (marked stale) — re-verify against current schema and re-import or edit relations.json.');
+      }
+    });
+
+  relations.command('import')
+    .description('Merge a JSON file of curated relations into KB relations.json (dedup by id)')
+    .requiredOption('--file <path>', 'path to a JSON array of relation objects')
+    .action((opts) => {
+      const ctx = getCtx();
+      const file = String(opts.file);
+      if (!fs.existsSync(file)) throw new Error(`Relations file not found: ${file}`);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (error) {
+        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`);
+      }
+      if (!Array.isArray(parsed)) throw new Error('Relations file must be a JSON array of relation objects.');
+      const normalized = normalizeRelations(parsed);
+      const skipped = parsed.length - normalized.length;
+      const result = ctx.kbStore.promoteRelations(normalized);
+      if (ctx.jsonMode) {
+        printJson({ ok: true, data: { added: result.added, total: result.total, skipped }, meta: {} });
+      } else {
+        console.log(`Imported ${result.added} new relation(s) (${normalized.length} valid, ${skipped} skipped). relations.json now holds ${result.total}.`);
+      }
+    });
 
   kb.command('list-services')
     .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')

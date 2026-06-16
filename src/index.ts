@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { buildContext } from './core/app.js';
+import { buildContext, nextAction } from './core/app.js';
 import { printEnvelope } from './core/output.js';
 import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
@@ -125,10 +125,15 @@ function emitError(error: unknown, code: string): void {
     : code;
   const jsonMode = process.argv.includes('--json');
   if (jsonMode) {
+    const priorDetails = (error as Error & { details?: Record<string, unknown> })?.details;
+    const details =
+      priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
+        ? priorDetails
+        : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
     printEnvelope(
       false,
       undefined,
-      { code: classifiedCode, message, details: (error as Error & { details?: unknown })?.details },
+      { code: classifiedCode, message, details },
       (error as Error & { meta?: Record<string, unknown> })?.meta,
     );
     return;

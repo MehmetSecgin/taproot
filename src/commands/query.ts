@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { createInterface } from 'node:readline/promises';
+import { randomUUID } from 'node:crypto';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
@@ -8,7 +9,7 @@ import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandid
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
-import { printJson, printJsonPluck, renderTableSmart } from '../core/output.js';
+import { printJson, printJsonPluck, renderSchemaContextFooter, renderTableSmart, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -18,6 +19,7 @@ import { rpcCall } from '../daemon/client.js';
 import { ensureSchemaSnapshot } from './learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
+import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
 import type { QueryCard } from '../types/cards.js';
@@ -96,6 +98,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--card <id>')
     .option('--template <id>')
     .option('--query <native>')
+    .option('--sql <native>', 'alias for --query (raw native query/SQL)')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
@@ -104,7 +107,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope (e.g. result.rows, meta.schemaContext, error.details). Full record is still persisted to ~/.taproot/runs/<runId>/summary.json — use "taproot --json run show --run-id <id> --pluck <other-path>" to fetch other fields later.')
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope (e.g. data.rows, data.columns, meta.schemaContext, error.details). Full record is still persisted to ~/.taproot/runs/<runId>/summary.json — use "taproot --json run show --run-id <id> --pluck <other-path>" to fetch other fields later.')
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
     .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
@@ -117,6 +120,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .action(async (opts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
+      if (opts.sql && !opts.query) opts.query = opts.sql;
+      if (opts.sql && opts.query && opts.sql !== opts.query) {
+        throw new Error('Invalid argument: pass either --query or --sql, not both with different values.');
+      }
       const timeoutMs = parseTimeoutMs(opts.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
@@ -174,14 +181,17 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             });
             if (rpc.ok) {
               const columns = (rpc.data?.columns as string[]) || [];
-              const rows = (rpc.data?.rows as Array<Record<string, unknown>>) || [];
+              const rows = (rpc.data?.rows as unknown[]) || [];
               const warnings = (rpc.data?.warnings as string[]) || [];
               if (ctx.jsonMode) {
-                printJson({
-                  ok: true,
-                  data: rpc.data || {},
-                  meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
-                });
+                printJsonPluck(
+                  trimQueryJsonEnvelope({
+                    ok: true,
+                    data: rpc.data || {},
+                    meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
+                  }),
+                  opts.pluck ? String(opts.pluck) : undefined,
+                );
               } else {
                 progress.succeed(`query complete (${rows.length} rows)`);
                 if (warnings.length) {
@@ -190,12 +200,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 logVerbose(
                   `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
                 );
-                console.log(renderTableSmart(rows.map((r) => rowFromArray(columns, r)), { full: Boolean(opts.full) }));
-                const daemonSchemaContext = (rpc.data as any)?.meta?.schemaContext || (rpc.meta as any)?.schemaContext;
-                const daemonSchemaCount = daemonSchemaContext?.tables ? Object.keys(daemonSchemaContext.tables).length : 0;
-                if (daemonSchemaCount) {
-                  console.log(`[schemaContext: ${daemonSchemaCount} table${daemonSchemaCount === 1 ? '' : 's'} cached — pass --json for full detail]`);
-                }
+                console.log(renderTableSmart(rows.map((r) => rowToObject(columns, r)), { full: Boolean(opts.full) }));
+                const daemonFooter = renderSchemaContextFooter((rpc.meta as any)?.schemaContext);
+                if (daemonFooter) console.log(daemonFooter);
                 const renderedMemory = renderQueryMemoryTty(rpc.meta?.queryMemory || (rpc.data?.queryMemory as any));
                 if (renderedMemory) console.log(renderedMemory);
               }
@@ -360,7 +367,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: effectiveIntent });
         if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
       }
-      if (!query) throw new Error('No query resolved. Provide --query, --template, or --intent.');
+      if (!query) throw new Error('No query resolved. Provide --query/--sql, --template, or --intent.');
       progress.update('query resolved');
 
       const referencedTables = collectReferencedTables(query);
@@ -380,6 +387,12 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
       }
       const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
+      const relationEdges = ctx.kbStore.relationsForTables(
+        String(datasource.service || ''),
+        referencedTables,
+        liveColumnsFromSchemaContext(schemaContext.tables),
+      );
+      if (relationEdges.length) schemaContext.relations = relationEdges;
       const reason = resolveReason(opts.reason);
       const queryMemory = buildQueryMemory({
         ledgerDir: ctx.paths.runsLedgerDir,
@@ -560,54 +573,35 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)${phaseSummary}`);
 
         if (ctx.jsonMode) {
-          const trimmedTimings: Record<string, unknown> = { durationMs: result.timings.durationMs };
-          if (result.timings.phases) trimmedTimings.phases = result.timings.phases;
-          const trimmed: Record<string, unknown> = {
-            ...result,
-            query: undefined,
-            timings: trimmedTimings,
+          const cols = result.result.columns || [];
+          const rowsObject = Boolean(opts.rowsObject);
+          const data: Record<string, unknown> = {
+            columns: cols,
+            rows: rowsObject
+              ? result.result.rows
+              : result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
+            datasource: datasource.name,
+            plugin: result.plugin,
+            classification: result.classification,
           };
-          if (!Boolean(opts.rowsObject)) {
-            const cols = result.result.columns || [];
-            trimmed.result = {
-              columns: cols,
-              rows: result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
-              rowsForm: 'array',
-            };
-          }
-          if (Array.isArray(result.warnings) && result.warnings.length === 0) delete trimmed.warnings;
-          if (trimmed.meta && typeof trimmed.meta === 'object') {
-            const meta = trimmed.meta as Record<string, unknown>;
-            const qm = meta.queryMemory as Record<string, unknown> | undefined;
-            if (qm && Object.keys(qm).length === 0) delete meta.queryMemory;
-            const sc = meta.schemaContext as {
-              tables?: Record<string, unknown>;
-              services?: Record<string, unknown>;
-              messages?: Record<string, unknown>;
-              enums?: Record<string, unknown>;
-            } | undefined;
-            if (
-              sc &&
-              !Object.keys(sc.tables || {}).length &&
-              !Object.keys(sc.services || {}).length &&
-              !Object.keys(sc.messages || {}).length &&
-              !Object.keys(sc.enums || {}).length
-            ) delete meta.schemaContext;
-          }
-          printJsonPluck(trimmed, opts.pluck ? String(opts.pluck) : undefined);
+          if (!rowsObject) data.rowsForm = 'array';
+          if (Array.isArray(result.warnings) && result.warnings.length) data.warnings = result.warnings;
+          const meta: Record<string, unknown> = {
+            ...(result.meta || {}),
+            runId: result.runId,
+            resolved: result.resolved,
+            phases: result.timings.phases,
+            timings: { durationMs: result.timings.durationMs },
+            requestId: randomUUID(),
+          };
+          const envelope = trimQueryJsonEnvelope({ ok: true, data, meta });
+          printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
         }
         else {
           console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
           console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
-          const finalSchema = (result.meta?.schemaContext as { tables?: Record<string, unknown>; services?: Record<string, unknown>; messages?: Record<string, unknown> } | undefined);
-          const schemaTableCount = Object.keys(finalSchema?.tables || {}).length;
-          const schemaServiceCount = Object.keys(finalSchema?.services || {}).length;
-          const schemaMessageCount = Object.keys(finalSchema?.messages || {}).length;
-          if (schemaTableCount) {
-            console.log(`[schemaContext: ${schemaTableCount} table${schemaTableCount === 1 ? '' : 's'} cached — pass --json for full detail]`);
-          } else if (schemaServiceCount || schemaMessageCount) {
-            console.log(`[schemaContext: ${schemaServiceCount} service${schemaServiceCount === 1 ? '' : 's'}, ${schemaMessageCount} message${schemaMessageCount === 1 ? '' : 's'} — pass --json for full detail]`);
-          }
+          const directFooter = renderSchemaContextFooter(result.meta?.schemaContext);
+          if (directFooter) console.log(directFooter);
           const renderedMemory = renderQueryMemoryTty(queryMemory);
           if (renderedMemory) console.log(renderedMemory);
         }

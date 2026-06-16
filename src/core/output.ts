@@ -21,6 +21,38 @@ function formatDate(value: Date): string {
   }
 }
 
+export function rowToObject(columns: string[], row: unknown): Record<string, unknown> {
+  if (Array.isArray(row)) {
+    const out: Record<string, unknown> = {};
+    columns.forEach((c, i) => {
+      out[c] = row[i];
+    });
+    return out;
+  }
+  const source = (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const c of columns) out[c] = source[c];
+  return out;
+}
+
+export function renderSchemaContextFooter(schemaContext: unknown): string | null {
+  const sc = schemaContext as
+    | { tables?: Record<string, unknown>; services?: Record<string, unknown>; messages?: Record<string, unknown>; relations?: unknown[] }
+    | undefined;
+  if (!sc) return null;
+  const relations = Array.isArray(sc.relations) ? sc.relations.length : 0;
+  const relationSuffix = relations ? `, ${relations} relation${relations === 1 ? '' : 's'}` : '';
+  const tables = Object.keys(sc.tables || {}).length;
+  if (tables) return `[schemaContext: ${tables} table${tables === 1 ? '' : 's'} cached${relationSuffix} — pass --json for full detail]`;
+  const services = Object.keys(sc.services || {}).length;
+  const messages = Object.keys(sc.messages || {}).length;
+  if (services || messages) {
+    return `[schemaContext: ${services} service${services === 1 ? '' : 's'}, ${messages} message${messages === 1 ? '' : 's'} — pass --json for full detail]`;
+  }
+  if (relations) return `[schemaContext: ${relations} relation${relations === 1 ? '' : 's'} — pass --json for full detail]`;
+  return null;
+}
+
 export function printJson(data: unknown): void {
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 }
@@ -48,6 +80,32 @@ export function pluckPath(obj: unknown, path: string): unknown {
     cur = (cur as Record<string, unknown>)[part];
   }
   return cur;
+}
+
+function isEmptyMap(value: unknown): boolean {
+  return !value || typeof value !== 'object' || Object.keys(value as Record<string, unknown>).length === 0;
+}
+
+export function trimQueryJsonEnvelope<T extends Record<string, unknown>>(envelope: T): T {
+  const data = envelope.data as Record<string, unknown> | undefined;
+  if (data && typeof data === 'object') {
+    if ('queryMemory' in data && isEmptyMap(data.queryMemory)) delete data.queryMemory;
+    if (Array.isArray(data.warnings) && data.warnings.length === 0) delete data.warnings;
+  }
+  const meta = envelope.meta as Record<string, unknown> | undefined;
+  if (meta && typeof meta === 'object') {
+    if ('queryMemory' in meta && isEmptyMap(meta.queryMemory)) delete meta.queryMemory;
+    const sc = meta.schemaContext as Record<string, unknown> | undefined;
+    if (
+      sc &&
+      isEmptyMap(sc.tables) &&
+      isEmptyMap(sc.services) &&
+      isEmptyMap(sc.messages) &&
+      isEmptyMap(sc.enums) &&
+      !(Array.isArray(sc.relations) && sc.relations.length)
+    ) delete meta.schemaContext;
+  }
+  return envelope;
 }
 
 export function printJsonPluck(data: unknown, path?: string): void {

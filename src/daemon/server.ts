@@ -20,6 +20,7 @@ import { bootstrapDatasource } from '../core/bootstrap.js';
 import { ensureSchemaSnapshot } from '../commands/learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
+import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, resolveReason } from '../core/query-memory.js';
 import type { QueryCard } from '../types/cards.js';
@@ -211,7 +212,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 if (policy.deterministicRequired) {
                   throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
                 }
-                throw new Error('Datasource resolution failed.');
+                throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
               }
 
               phaseResolveMs = Date.now() - phaseStart;
@@ -285,7 +286,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                     ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent });
                   if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
                 }
-                if (!query) throw new Error('No query resolved.');
+                if (!query) throw new Error('No query resolved. Provide --query/--sql, --template, or --intent.');
                 const allowMutate = Boolean(req.params.allowMutate);
                 const referencedTables = collectReferencedTables(query);
                 if (supportsSchemaRefresh(datasource as DatasourceProfile) && referencedTables.length) {
@@ -300,6 +301,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   }
                 }
                 const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
+                const relationEdges = ctx.kbStore.relationsForTables(
+                  String(datasource.service || ''),
+                  referencedTables,
+                  liveColumnsFromSchemaContext(schemaContext.tables),
+                );
+                if (relationEdges.length) schemaContext.relations = relationEdges;
                 const reason = resolveReason(String(req.params.reason || ''));
                 const queryMemory = buildQueryMemory({
                   ledgerDir: ctx.paths.runsLedgerDir,
@@ -412,6 +419,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   };
                   result.timings = { ...result.timings, phases };
                   (base.meta as Record<string, unknown>).phases = phases;
+                  (base.meta as Record<string, unknown>).resolved = result.resolved;
                   const pluginMeta = result.meta || {};
                   const pluginSchema = pluginMeta.schemaContext;
                   const mergedSchema = pluginSchema
@@ -450,7 +458,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                     datasource: datasource.name,
                     plugin: result.plugin,
                     classification: result.classification,
-                    queryMemory,
                   };
                   if (!rowsObject) baseData.rowsForm = 'array';
                   const combinedWarnings = [...(result.warnings || []), ...warnings];

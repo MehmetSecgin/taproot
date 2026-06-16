@@ -108,4 +108,26 @@ describe('agent JSON contract', () => {
       runCli(['daemon', 'stop'], env);
     }
   });
+
+  it('direct-mode query error emits the same error envelope with a nextAction hint', async () => {
+    const stateRoot = makeStateRoot();
+    writeRuntimeConfig(stateRoot, {
+      environmentPolicies: {
+        prod: {
+          deterministicRequired: true,
+          allowDiscoveryByDefault: false,
+        },
+      },
+    });
+    const env = {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-master-key',
+      TAPROOT_FORCE_DIRECT: '1',
+    };
+    const out = runCli(['--json', 'query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'], env);
+    expect(out.status).not.toBe(0);
+    const parsed = errorEnvelopeSchema.parse(JSON.parse(out.stdout));
+    expect(parsed.error.code).toBe('DETERMINISTIC_REQUIRED');
+    expect((parsed.error.details as any)?.nextAction).toBeTruthy();
+  });
 });

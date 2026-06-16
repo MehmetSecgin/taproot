@@ -209,7 +209,7 @@ gRPC plugin notes:
 - Unary calls only in v1. Server/client/bidi streaming deferred.
 - Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
 - `--request-json` takes precedence over `--param`. `--param key=value` builds a flat JSON object; numeric strings → numbers, `true`/`false` → bool.
-- Response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck result.rows.0.0.<field>`.
+- Response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck data.rows.0.0.<field>`.
 - Every grpc query result carries `meta.schemaContext.services` + `.messages` + `.enums` for the called method (transitive expansion of request + response shapes) — read that to compose follow-up calls instead of re-running `grpc describe`.
 - proto-root is loaded recursively via the shared proto loader (`@grpc/proto-loader` + `protobufjs`); all imports must be findable under `--proto-root` or beside the loaded files. Use the service repo's `build/extracted-protos/main` for one-shot self-contained loading.
 - Doctor opens a real channel against the first service in the loaded package by default. Override with `--hint probeService=<fq>` on `datasource add` to pin a specific service.

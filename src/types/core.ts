@@ -197,11 +197,49 @@ export interface RpcServiceShape {
   methods: RpcMethodShape[];
 }
 
+export interface RelationEndpoint {
+  service: string;
+  table: string;
+  column: string;
+}
+
+export interface KbRelation {
+  id: string;
+  from: RelationEndpoint;
+  to: RelationEndpoint;
+  relationship?: string;
+  notes?: string;
+  confidence?: number;
+  source?: 'curated' | 'derived';
+}
+
+export interface SchemaRelationEdge {
+  from: string;
+  to: string;
+  relationship?: string;
+  crossService: boolean;
+  notes?: string;
+  stale?: boolean;
+  staleReason?: string;
+}
+
+export type RelationEndpointStatus = 'ok' | 'missing_table' | 'missing_column' | 'unknown_service';
+
+export interface RelationValidation {
+  id: string;
+  from: string;
+  to: string;
+  fromStatus: RelationEndpointStatus;
+  toStatus: RelationEndpointStatus;
+  stale: boolean;
+}
+
 export interface SchemaContext {
   tables: Record<string, TableContext>;
   services?: Record<string, RpcServiceShape>;
   messages?: Record<string, RpcMessageShape>;
   enums?: Record<string, RpcEnumShape>;
+  relations?: SchemaRelationEdge[];
 }
 
 export type LedgerRedactionTier = 'raw' | 'redact' | 'strict';

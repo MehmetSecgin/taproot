@@ -115,7 +115,7 @@ export function nextAction(errorCode: string): string {
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
     DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
-    GENERIC: 'Inspect error details and rerun with --json for envelope details.',
+    GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };
   return mapping[errorCode] || mapping.GENERIC;
 }

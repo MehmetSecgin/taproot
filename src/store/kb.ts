@@ -1,5 +1,7 @@
 import path from 'node:path';
-import { readJsonFile } from '../core/json.js';
+import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { normalizeRelations, relationsForTables } from '../core/relations.js';
+import type { KbRelation, SchemaRelationEdge } from '../types/core.js';
 
 function normalizeText(value: string): string {
   return String(value || '')
@@ -25,6 +27,29 @@ export class KbStore {
 
   relations(): any[] {
     return readJsonFile<any[]>(this.file('relations.json'), []);
+  }
+
+  typedRelations(): KbRelation[] {
+    return normalizeRelations(this.relations());
+  }
+
+  relationsForTables(service: string, tables: string[], liveColumns?: Map<string, Set<string>>): SchemaRelationEdge[] {
+    if (!service || !tables.length) return [];
+    return relationsForTables(this.typedRelations(), service, tables, liveColumns);
+  }
+
+  promoteRelations(candidates: KbRelation[]): { added: number; total: number } {
+    const existing = this.typedRelations();
+    const byId = new Map(existing.map((rel) => [rel.id, rel]));
+    let added = 0;
+    for (const candidate of candidates) {
+      if (byId.has(candidate.id)) continue;
+      byId.set(candidate.id, candidate);
+      added += 1;
+    }
+    const merged = [...byId.values()];
+    writeJsonFile(this.file('relations.json'), merged);
+    return { added, total: merged.length };
   }
 
   tables(): any[] {
