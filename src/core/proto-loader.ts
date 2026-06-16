@@ -72,6 +72,56 @@ function collectAndDedupe(roots: string[]): { files: string[]; includeDirs: stri
   return { files, includeDirs };
 }
 
+const IMPORT_RE = /^\s*import\s+(?:public\s+|weak\s+)?"([^"]+)"\s*;/gm;
+
+function importResolves(target: string, importerDir: string, roots: string[], basenames: Set<string>): boolean {
+  if (target.startsWith('google/protobuf/')) return true;
+  if (path.isAbsolute(target) && fs.existsSync(target)) return true;
+  if (fs.existsSync(path.resolve(importerDir, target))) return true;
+  for (const r of roots) {
+    if (fs.existsSync(path.resolve(r, target))) return true;
+  }
+  return basenames.has(path.basename(target));
+}
+
+export interface UnresolvedImport {
+  importPath: string;
+  importedBy: string;
+}
+
+function findUnresolvedImports(files: string[], roots: string[]): UnresolvedImport[] {
+  const basenames = new Set(files.map((f) => path.basename(f)));
+  const out: UnresolvedImport[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    let content = '';
+    try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    for (const match of content.matchAll(IMPORT_RE)) {
+      const target = match[1];
+      if (importResolves(target, path.dirname(file), roots, basenames)) continue;
+      const key = `${target}|${file}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ importPath: target, importedBy: file });
+    }
+  }
+  return out;
+}
+
+function unresolvedImportsError(unresolved: UnresolvedImport[], roots: string[]): Error {
+  const lines = unresolved
+    .slice(0, 20)
+    .map((u) => `  - "${u.importPath}"  (imported by ${u.importedBy})`);
+  const more = unresolved.length > 20 ? `\n  … and ${unresolved.length - 20} more` : '';
+  const missing = [...new Set(unresolved.map((u) => path.basename(u.importPath)))].join(', ');
+  return new Error(
+    `unresolved proto import(s) under proto root(s) [${roots.join(', ')}]:\n${lines.join('\n')}${more}\n` +
+      `Missing file(s): ${missing}. These imports live in other proto modules/repos. ` +
+      `Clone the repo(s) that provide them and either point --proto-root at the parent directory of your checkouts ` +
+      `or add each module dir to --proto-root (comma-separated). google/protobuf/* are bundled and need no checkout.`,
+  );
+}
+
 function normalizeCacheKey(roots: string[]): string {
   return roots.map((r) => path.resolve(r)).sort().join('|');
 }
@@ -87,6 +137,8 @@ export async function loadProtobufRoot(protoRoot: string): Promise<LoadedProtoBu
   if (cached) return cached;
   const promise = (async (): Promise<LoadedProtoBundle> => {
     const { files, includeDirs } = collectAndDedupe(roots);
+    const unresolved = findUnresolvedImports(files, roots);
+    if (unresolved.length) throw unresolvedImportsError(unresolved, roots);
     const mod = await import('protobufjs');
     const ns = ((mod as unknown as { default?: unknown }).default ?? mod) as { Root: new () => unknown };
     const root = new ns.Root() as unknown as ProtobufRoot & {

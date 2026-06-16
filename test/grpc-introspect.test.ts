@@ -3,7 +3,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { _resetProtoCachesForTest, loadProtobufRoot, loadGrpcPackage } from '../src/core/proto-loader.js';
-import { describeProto, describeProtoRoot, listServices, expandMessage } from '../src/core/grpc-introspect.js';
+import {
+  describeProto,
+  describeProtoRoot,
+  listServices,
+  expandMessage,
+  resolveName,
+  suggestNames,
+  searchMethods,
+  buildRequestSkeleton,
+} from '../src/core/grpc-introspect.js';
 
 function tmpDir(name: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `taproot-${name}-`));
@@ -83,6 +92,36 @@ describe('proto-loader', () => {
     const dir = tmpDir('proto-empty');
     await expect(loadProtobufRoot(dir)).rejects.toThrow(/no \.proto files/);
   });
+
+  it('reports unresolved cross-repo imports with the importing file and a fix hint', async () => {
+    const dir = tmpDir('proto-missing-import');
+    fs.writeFileSync(
+      path.join(dir, 'main.proto'),
+      'syntax = "proto3";\npackage demo;\nimport "common.proto";\nimport "google/protobuf/timestamp.proto";\nmessage Req { string id = 1; }\n',
+      'utf8',
+    );
+    await expect(loadProtobufRoot(dir)).rejects.toThrow(/unresolved proto import/);
+    await expect(loadProtobufRoot(dir)).rejects.toThrow(/common\.proto/);
+    // google/protobuf/* is bundled and must not be flagged
+    await expect(loadProtobufRoot(dir)).rejects.not.toThrow(/timestamp\.proto/);
+  });
+
+  it('resolves cross-module imports across multiple roots', async () => {
+    const rootA = tmpDir('proto-root-a');
+    const rootB = tmpDir('proto-root-b');
+    fs.writeFileSync(
+      path.join(rootA, 'main.proto'),
+      'syntax = "proto3";\npackage demo;\nimport "common.proto";\nmessage Req { shared.Common c = 1; }\n',
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(rootB, 'common.proto'),
+      'syntax = "proto3";\npackage shared;\nmessage Common { string x = 1; }\n',
+      'utf8',
+    );
+    const bundle = await loadProtobufRoot(`${rootA},${rootB}`);
+    expect(bundle.files.length).toBe(2);
+  });
 });
 
 describe('grpc-introspect', () => {
@@ -158,5 +197,62 @@ describe('grpc-introspect', () => {
     const descriptor = await describeProtoRoot(dir, { service: 'taproot.test.ProfileService' });
     expect(descriptor.services[0].methods).toHaveLength(2);
     expect(descriptor.messages['taproot.test.Profile']).toBeTruthy();
+  });
+});
+
+describe('grpc-introspect discovery helpers', () => {
+  const services = ['com.example.catalog.v1.CatalogService', 'taproot.test.ProfileService'];
+
+  it('resolveName matches exact, short name, and substring', () => {
+    expect(resolveName('taproot.test.ProfileService', services).match).toBe('taproot.test.ProfileService');
+    expect(resolveName('ProfileService', services).match).toBe('taproot.test.ProfileService');
+    expect(resolveName('catalogservice', services).match).toBe('com.example.catalog.v1.CatalogService');
+    expect(resolveName('catalog', services).match).toBe('com.example.catalog.v1.CatalogService');
+  });
+
+  it('resolveName returns candidates when ambiguous and has no match', () => {
+    const both = resolveName('service', services);
+    expect(both.match).toBeUndefined();
+    expect(both.candidates).toEqual(services);
+  });
+
+  it('suggestNames ranks closest by edit distance', () => {
+    const out = suggestNames('ProfilService', services, 1);
+    expect(out[0]).toBe('taproot.test.ProfileService');
+  });
+
+  it('searchMethods finds by service/method/message substring', async () => {
+    const dir = tmpDir('introspect-search');
+    writeFixtureProto(dir);
+    const { protobufRoot } = await loadProtobufRoot(dir);
+    const byMethod = searchMethods(protobufRoot, 'getprofile');
+    expect(byMethod.map((m) => m.method)).toEqual(['GetProfile']);
+    const byMessage = searchMethods(protobufRoot, 'ListProfilesResponse');
+    expect(byMessage.map((m) => m.method)).toEqual(['ListProfiles']);
+    expect(searchMethods(protobufRoot, '').length).toBe(2);
+  });
+
+  it('buildRequestSkeleton emits an editable typed example', async () => {
+    const dir = tmpDir('introspect-skeleton');
+    writeFixtureProto(dir);
+    const { protobufRoot } = await loadProtobufRoot(dir);
+    const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.GetProfileRequest') as Record<string, unknown>;
+    expect(skeleton).toEqual({ id: '<string>' });
+  });
+
+  it('buildRequestSkeleton expands nested messages, repeated, enum, map, oneof', async () => {
+    const dir = tmpDir('introspect-skeleton-deep');
+    writeFixtureProto(dir);
+    const { protobufRoot } = await loadProtobufRoot(dir);
+    const resp = buildRequestSkeleton(protobufRoot, 'taproot.test.ListProfilesResponse') as Record<string, unknown>;
+    const profiles = resp.profiles as Record<string, unknown>[];
+    expect(Array.isArray(profiles)).toBe(true);
+    const p = profiles[0];
+    expect(p.name).toBe('<string>');
+    expect(p.nicknames).toEqual(['<string>']);
+    expect(p.address).toEqual({ city: '<string>', country: '<string>' });
+    expect(p.status).toBe('STATUS_UNKNOWN');
+    expect(p.labels).toEqual({ '<key>': '<string>' });
+    expect(p.email).toBe('<string>');
   });
 });
