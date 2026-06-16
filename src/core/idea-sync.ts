@@ -42,12 +42,8 @@ export function stableUuidForDatasource(name: string): string {
   return uuidv5(`taproot:${name}`, TAPROOT_UUID_NAMESPACE);
 }
 
-const MYSQL_DRIVER_OVERRIDE = new Set<string>([
-  'prod-orders',
-]);
-
 function mysqlFamilyDriverRef(profile: DatasourceProfile): string {
-  return MYSQL_DRIVER_OVERRIDE.has(profile.name) ? 'mysql.8' : 'tidb';
+  return profile.resolverHints?.ideaDriverFamily === 'mysql' ? 'mysql.8' : 'tidb';
 }
 
 interface InlineAuth {
@@ -55,12 +51,17 @@ interface InlineAuth {
   password: string;
 }
 
-const ENV_INLINE_AUTH: Record<string, InlineAuth> = {
-  qa: { username: 'root', password: '123456' },
-};
+function configuredInlineAuth(env?: string): InlineAuth | undefined {
+  if (!env) return undefined;
+  const targetEnv = process.env.TAPROOT_IDEA_INLINE_ENV?.trim();
+  const user = process.env.TAPROOT_IDEA_INLINE_USER?.trim();
+  if (!targetEnv || targetEnv !== env || !user) return undefined;
+  return { username: user, password: process.env.TAPROOT_IDEA_INLINE_PASSWORD ?? '' };
+}
 
 function inlineAuthFor(profile: DatasourceProfile): InlineAuth | undefined {
-  if (profile.env && ENV_INLINE_AUTH[profile.env]) return ENV_INLINE_AUTH[profile.env];
+  const configured = configuredInlineAuth(profile.env);
+  if (configured) return configured;
   if (String(profile.kind).toLowerCase() === 'teleport-mysql') {
     const user = defaultDbUser(profile);
     if (user) return { username: user, password: '' };
@@ -74,7 +75,7 @@ function authMode(profile: DatasourceProfile): IdeaAuthMode {
   // accepts the cert-mapped user, but IDEA's mysql driver still needs to send a proper
   // handshake. Use idea-managed auth so user-name is set and IDEA prompts once for the
   // (empty) password, then caches it in the keychain.
-  if (profile.env && ENV_INLINE_AUTH[profile.env]) return 'url-inline';
+  if (configuredInlineAuth(profile.env)) return 'url-inline';
   return 'idea-managed';
 }
 

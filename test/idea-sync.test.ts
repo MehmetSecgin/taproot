@@ -18,17 +18,17 @@ import type { DatasourceProfile } from '../src/types/core.js';
 
 function makeProfile(overrides: Partial<DatasourceProfile> = {}): DatasourceProfile {
   return {
-    name: 'develop-billing',
+    name: 'develop-orders',
     kind: 'mysql',
     env: 'develop',
-    service: 'billing',
+    service: 'orders',
     tags: [],
     connection: {
-      host: 'tiproxy-billing.develop',
+      host: 'tiproxy-orders.develop',
       port: 6000,
-      database: 'billing_db',
+      database: 'orders_db',
     },
-    credentialRef: 'develop:billing',
+    credentialRef: 'develop:orders',
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: '2026-05-12T00:00:00.000Z',
     confidence: 0.9,
@@ -38,8 +38,8 @@ function makeProfile(overrides: Partial<DatasourceProfile> = {}): DatasourceProf
 
 describe('idea-sync', () => {
   it('stableUuidForDatasource is deterministic and well-formed', () => {
-    const a = stableUuidForDatasource('develop-billing');
-    const b = stableUuidForDatasource('develop-billing');
+    const a = stableUuidForDatasource('develop-orders');
+    const b = stableUuidForDatasource('develop-orders');
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(stableUuidForDatasource('other')).not.toBe(a);
@@ -50,7 +50,7 @@ describe('idea-sync', () => {
     expect('skip' in d).toBe(false);
     if ('skip' in d) return;
     expect(d.driverRef).toBe('tidb');
-    expect(d.jdbcUrl).toBe('jdbc:mysql://tiproxy-billing.develop:6000/billing_db?allowPublicKeyRetrieval=true&useSSL=false');
+    expect(d.jdbcUrl).toBe('jdbc:mysql://tiproxy-orders.develop:6000/orders_db?allowPublicKeyRetrieval=true&useSSL=false');
   });
 
   it('describeDriver returns postgres spec for postgres kind', () => {
@@ -64,12 +64,12 @@ describe('idea-sync', () => {
   it('describeDriver emits localhost tunnel jdbc for teleport-mysql', () => {
     const d = describeDriver(makeProfile({
       kind: 'teleport-mysql',
-      connection: { database: 'orders', target: 'tidb-orders-prod' },
+      connection: { database: 'orders_db', target: 'tidb-orders-prod' },
     }));
     expect('skip' in d).toBe(false);
     if ('skip' in d) return;
     expect(d.driverRef).toBe('tidb');
-    expect(d.jdbcUrl).toMatch(/^jdbc:mysql:\/\/127\.0\.0\.1:3\d{4}\/orders/);
+    expect(d.jdbcUrl).toMatch(/^jdbc:mysql:\/\/127\.0\.0\.1:3\d{4}\/orders_db/);
   });
 
   it('describeDriver skips teleport-mysql without target', () => {
@@ -93,9 +93,9 @@ describe('idea-sync', () => {
 </project>`;
     const merged = mergeIntoHistory(existing, [
       {
-        uuid: stableUuidForDatasource('develop-billing'),
-        ideaName: 'billing_db@billing.develop (taproot)',
-        managedName: 'develop-billing',
+        uuid: stableUuidForDatasource('develop-orders'),
+        ideaName: 'orders_db@orders.develop (taproot)',
+        managedName: 'develop-orders',
         spec: {
           driverRef: 'mysql.8',
           jdbcDriver: 'com.mysql.cj.jdbc.Driver',
@@ -107,7 +107,7 @@ describe('idea-sync', () => {
     ]);
     expect(merged).toContain('DataSourceManagerImpl');
     expect(merged).toContain('hand-added');
-    expect(merged).toContain('taproot-managed: develop-billing');
+    expect(merged).toContain('taproot-managed: develop-orders');
     expect(merged).toContain('(taproot)');
     expect(splitForeignEntries(merged)).toHaveLength(1);
   });
@@ -119,7 +119,7 @@ describe('idea-sync', () => {
     syncToHistoryFile({ target, profiles });
     syncToHistoryFile({ target, profiles });
     const xml = fs.readFileSync(target, 'utf8');
-    const occurrences = xml.match(/taproot-managed: develop-billing/g) || [];
+    const occurrences = xml.match(/taproot-managed: develop-orders/g) || [];
     expect(occurrences).toHaveLength(1);
   });
 
@@ -128,20 +128,20 @@ describe('idea-sync', () => {
     const target = path.join(tmp, '.idea', 'dataSources.xml');
     const result = syncToHistoryFile({
       target,
-      profiles: [makeProfile({ name: 'tsh-orders', kind: 'teleport-mysql' })],
+      profiles: [makeProfile({ name: 'tsh-customers', kind: 'teleport-mysql' })],
     });
     expect(result.written).toHaveLength(0);
     expect(result.skipped).toHaveLength(1);
-    expect(result.skipped[0].name).toBe('tsh-orders');
+    expect(result.skipped[0].name).toBe('tsh-customers');
     const xml = fs.readFileSync(target, 'utf8');
-    expect(xml).not.toContain('tsh-orders');
+    expect(xml).not.toContain('tsh-customers');
   });
 
   it('diffStatus categorizes matched, taprootOnly, ideaOnly', () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="false">
-    <!-- taproot-managed: develop-billing -->
+    <!-- taproot-managed: develop-orders -->
     <data-source uuid="x" name="a"></data-source>
     <!-- taproot-managed: stale-only-in-idea -->
     <data-source uuid="y" name="b"></data-source>
@@ -151,13 +151,13 @@ describe('idea-sync', () => {
       makeProfile(),
       makeProfile({ name: 'new-in-taproot' }),
     ]);
-    expect(diff.matched).toEqual(['develop-billing']);
+    expect(diff.matched).toEqual(['develop-orders']);
     expect(diff.taprootOnly).toEqual(['new-in-taproot']);
     expect(diff.ideaOnly).toEqual(['stale-only-in-idea']);
   });
 
   it('ideaDisplayName uses <ns>.<env>.<service> when namespace present', () => {
-    expect(ideaDisplayName(makeProfile({ namespace: 'test', env: 'qa', service: 'settlement' }))).toBe('test.qa.settlement');
+    expect(ideaDisplayName(makeProfile({ namespace: 'test', env: 'qa', service: 'billing' }))).toBe('test.qa.billing');
     expect(ideaDisplayName(makeProfile({ namespace: 'develop', env: 'qa', service: 'orders' }))).toBe('develop.qa.orders');
   });
 
@@ -167,24 +167,24 @@ describe('idea-sync', () => {
   });
 
   it('deterministicLocalPort is stable and inside 30000-39999, keyed by datasource', () => {
-    const p = deterministicLocalPort('prod-catalog');
+    const p = deterministicLocalPort('prod-orders');
     expect(p).toBeGreaterThanOrEqual(30000);
     expect(p).toBeLessThan(40000);
-    expect(deterministicLocalPort('prod-catalog')).toBe(p);
+    expect(deterministicLocalPort('prod-orders')).toBe(p);
     expect(deterministicLocalPort('prod-billing')).not.toBe(p);
   });
 
   it('tshTunnelCommand renders ready-to-paste command with --db-user', () => {
     const cmd = tshTunnelCommand(makeProfile({
-      name: 'prod-catalog', kind: 'teleport-mysql', service: 'orders',
-      connection: { database: 'orders', target: 'tidb-orders-prod' },
+      name: 'prod-orders', kind: 'teleport-mysql', service: 'orders',
+      connection: { database: 'orders_db', target: 'tidb-orders-prod' },
     }));
     expect(cmd).toMatch(/^tsh proxy db --tunnel --port=3\d{4} --db-user=orders_reader tidb-orders-prod$/);
   });
 
   it('defaultDbUser converts service dashes to underscores and appends _reader', () => {
-    expect(defaultDbUser(makeProfile({ service: 'billing' }))).toBe('billing_reader');
-    expect(defaultDbUser(makeProfile({ service: 'pricing-template' }))).toBe('templates_reader');
+    expect(defaultDbUser(makeProfile({ service: 'order-feed' }))).toBe('order_feed_reader');
+    expect(defaultDbUser(makeProfile({ service: 'price-engine' }))).toBe('price_engine_reader');
   });
 
   it('defaultDbUser uses resolverHints.dbUser when present', () => {
@@ -196,7 +196,7 @@ describe('idea-sync', () => {
     const target = path.join(tmp, '.idea', 'dataSources.xml');
     syncToHistoryFile({
       target,
-      profiles: [makeProfile({ name: 'prod-catalog', kind: 'teleport-mysql', env: 'prod', namespace: undefined, service: 'orders', connection: { database: 'orders', target: 'tidb-orders-prod' } })],
+      profiles: [makeProfile({ name: 'prod-orders', kind: 'teleport-mysql', env: 'prod', namespace: undefined, service: 'orders', connection: { database: 'orders_db', target: 'tidb-orders-prod' } })],
     });
     const xml = fs.readFileSync(target, 'utf8');
     expect(xml).toMatch(/<comment>tunnel: tsh proxy db --tunnel[^<]*<\/comment>/);
@@ -216,8 +216,8 @@ describe('idea-sync', () => {
     expect(t.driverRef).toBe('tidb');
   });
 
-  it('prod-orders overrides driver-ref to mysql.8', () => {
-    const d = describeDriver(makeProfile({ name: 'prod-orders', kind: 'teleport-mysql', connection: { database: 'rp', target: 'tidb-orders-prod' } }));
+  it('resolverHints.ideaDriverFamily=mysql overrides driver-ref to mysql.8', () => {
+    const d = describeDriver(makeProfile({ name: 'legacy-mysql-svc', kind: 'teleport-mysql', resolverHints: { ideaDriverFamily: 'mysql' }, connection: { database: 'rp', target: 'tidb-orders-prod' } }));
     expect('skip' in d).toBe(false);
     if ('skip' in d) return;
     expect(d.driverRef).toBe('mysql.8');

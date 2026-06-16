@@ -37,7 +37,7 @@ describe('classifyKubeService', () => {
     expect(classifyKubeService(tidbSvc, baseOpts)?.kind).toBe('mysql');
 
     const tiproxySvc: KubeService = {
-      metadata: { name: 'billing', namespace: 'develop' },
+      metadata: { name: 'orders', namespace: 'develop' },
       spec: { ports: [{ port: 6000 }] },
     };
     expect(classifyKubeService(tiproxySvc, baseOpts)?.connection.port).toBe(6000);
@@ -58,11 +58,11 @@ describe('classifyKubeService', () => {
 
   it('builds tiproxy host pattern when hostPattern=tiproxy', () => {
     const svc: KubeService = {
-      metadata: { name: 'billing', namespace: 'develop' },
+      metadata: { name: 'orders', namespace: 'develop' },
       spec: { ports: [{ port: 6000 }] },
     };
     const p = classifyKubeService(svc, { env: 'qa', hostPattern: 'tiproxy', sharedCredentialRef: true });
-    expect(p?.connection.host).toBe('tiproxy-billing.develop');
+    expect(p?.connection.host).toBe('tiproxy-orders.develop');
     expect(p?.connection.port).toBe(6000);
     expect(p?.credentialRef).toBe('qa');
     expect(p?.connectors).toEqual(['openvpn']);

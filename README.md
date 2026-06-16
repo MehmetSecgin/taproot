@@ -106,7 +106,7 @@ taproot doctor --datasource qa-cache-redis
 
 # read query: pass any Redis read command as the query string
 taproot --json query --datasource qa-cache-redis --query "DBSIZE"
-taproot --json query --datasource qa-cache-redis --query "GET orderCache:v2:102193"
+taproot --json query --datasource qa-cache-redis --query "GET user:session:abc123"
 taproot --json query --datasource qa-cache-redis --query "SCAN 0 COUNT 10"
 ```
 
@@ -149,7 +149,7 @@ Proto-decoding example:
 ```bash
 # Per-query
 taproot --json query --datasource qa-order-cache \
-  --query "GET orderCache:v2:102193" \
+  --query "GET order:v2:1001" \
   --proto OrderProto \
   --proto-root ~/proto/order-cache
 
@@ -158,14 +158,14 @@ taproot datasource add \
   --name qa-order-cache --kind redis \
   --env qa --namespace develop --service order-cache \
   --host my-cache.develop --port 6379 --database 14 \
-  --credential-ref qa:redis:my-cache \
+  --credential-ref qa:redis:order-cache \
   --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/order-cache \
   --hint protoMessage=OrderProto
 
 taproot --json query --datasource qa-order-cache \
-  --query "MGET orderCache:v2:102193 orderCache:v2:272308"
-# rows: [[{record_id:"102193", item_id:"category:137"}], [{record_id:"272308", item_id:"category:137"}]]
+  --query "MGET order:v2:1001 order:v2:1002"
+# rows: [[{order_id:"1001", status:"OPEN"}], [{order_id:"1002", status:"OPEN"}]]
 ```
 
 ---
@@ -174,13 +174,13 @@ taproot --json query --datasource qa-order-cache \
 
 ```bash
 # register. proto-root must point at a directory containing the service .proto
-# (and its transitive imports). For Example services, the build/extracted-protos
-# directory is the easiest single-root option.
+# (and its transitive imports). A build/extracted-protos directory that bundles
+# the service proto plus its imports is the easiest single-root option.
 taproot datasource add \
   --name qa-catalog-grpc --kind grpc \
   --env qa --namespace develop --service catalog-grpc \
   --host catalog-grpc.develop --port 6565 \
-  --credential-ref qa:grpc:region \
+  --credential-ref qa:grpc:catalog \
   --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/catalog
 
@@ -192,7 +192,7 @@ taproot doctor --datasource qa-catalog-grpc
 taproot --json grpc list --datasource qa-catalog-grpc            # services + methods only
 taproot --json grpc describe --datasource qa-catalog-grpc \
   --service com.example.catalog.v1.CatalogService \
-  --method getItemsByParent                                    # expands request + response messages
+  --method getItemsByParent                                      # expands request + response messages
 
 # unary call: --query is "<package.Service/Method>". Request body in JSON:
 taproot --json query --datasource qa-catalog-grpc \
@@ -202,7 +202,7 @@ taproot --json query --datasource qa-catalog-grpc \
 # or build the request from --param key=value pairs (numbers/booleans coerced):
 taproot --json query --datasource qa-catalog-grpc \
   --query "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
-  --param text=United
+  --param text=Widget
 ```
 
 gRPC plugin notes:
@@ -285,7 +285,7 @@ taproot discover kb --env qa
 
 # Limit by namespace or single service.
 taproot discover kb --env qa --namespace develop
-taproot discover kb --env prod --service billing
+taproot discover kb --env prod --service orders
 
 # Save proposals + seed connector credential defaults (vpn:work statusCommand, tsh:<env> statusCommand).
 taproot discover kb --env qa --apply

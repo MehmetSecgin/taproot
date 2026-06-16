@@ -183,10 +183,10 @@ taproot --json query --datasource qa-<svc>-grpc \
   --query "..." --request-json '...' \
   --pluck data.rows.0.0.<field>
 
-# Example first target (Region):
+# example call:
 taproot --json query --datasource qa-catalog-grpc \
   --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
-  --request-json '{"value":1}' --pluck data.rows.0.0.regions
+  --request-json '{"value":1}' --pluck data.rows.0.0.items
 ```
 
 - Redis writes + flushes (gated):

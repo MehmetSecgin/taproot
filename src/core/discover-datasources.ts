@@ -59,7 +59,7 @@ const DB_PORT_MAP: Record<number, 'mysql' | 'postgres'> = {
   3306: 'mysql',
   4000: 'mysql', // tidb
   6000: 'mysql', // tiproxy (mysql wire)
-  6033: 'mysql', // db-proxy variant
+  6033: 'mysql', // alternate mysql proxy port
   5432: 'postgres',
   6432: 'postgres', // pgbouncer
 };
