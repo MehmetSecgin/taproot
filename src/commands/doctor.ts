@@ -391,7 +391,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         if (datasource.env && datasource.service) {
           const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
           if (kb) {
-            const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+            const critical = criticalDatasourceKbConflicts(datasource, kb);
             if (critical.length) {
               const checks: DoctorCheck[] = [
                 {
@@ -423,14 +423,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
               return;
             }
-            const conflicts = datasourceKbConflicts(datasource as any, kb);
+            const conflicts = datasourceKbConflicts(datasource, kb);
             if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
           }
         }
         const creds = await ctx.credentialStore.get(datasource.credentialRef);
         progress.update('running connector checks');
         const connectorChecks = await runDatasourceConnectors({
-          datasource: datasource as any,
+          datasource,
           credentialStore: ctx.credentialStore,
           pluginRegistry: ctx.pluginRegistry,
           mode: 'doctor',
@@ -440,7 +440,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           progress.update('running connector connect step');
           checks.push(
             ...(await runDatasourceConnectors({
-              datasource: datasource as any,
+              datasource,
               credentialStore: ctx.credentialStore,
               pluginRegistry: ctx.pluginRegistry,
               mode: 'connect',

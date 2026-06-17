@@ -27,7 +27,7 @@ export const mysqlPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     try {
-      const conn = await mysql.createConnection(connConfig(input.datasource as any, input.credentials));
+      const conn = await mysql.createConnection(connConfig(input.datasource, input.credentials));
       await conn.query('SELECT 1 AS ok');
       await conn.end();
       return [{ check: 'mysql connect', status: 'ok', detail: 'connection and read query succeeded' }];

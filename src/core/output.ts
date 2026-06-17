@@ -142,15 +142,15 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function renderTable(rows: Array<Record<string, unknown>>): string {
+export function renderTable(rows: ReadonlyArray<object>): string {
   if (!rows.length) return 'Rows: 0\n(no rows)';
-  const columns = Object.keys(rows[0]);
+  const columns = Object.keys(rows[0] as Record<string, unknown>);
   const table = new Table({
     head: columns,
     wordWrap: true,
   });
   for (const row of rows) {
-    table.push(columns.map((column) => formatValue(row[column])));
+    table.push(columns.map((column) => formatValue((row as Record<string, unknown>)[column])));
   }
   return `Rows: ${rows.length}\n\n${table.toString()}`;
 }

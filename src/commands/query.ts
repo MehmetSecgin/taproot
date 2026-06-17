@@ -329,11 +329,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       if (env && service) {
         const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
         if (kb) {
-          const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+          const critical = criticalDatasourceKbConflicts(datasource, kb);
           if (critical.length) {
             throw misconfiguredDatasourceError(datasource.name, env, service, critical);
           }
-          const conflicts = datasourceKbConflicts(datasource as any, kb);
+          const conflicts = datasourceKbConflicts(datasource, kb);
           if (conflicts.length) {
             const warning = `datasource overrides KB (${conflicts.join('; ')})`;
             warnings.push(warning);
@@ -376,7 +376,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       progress.update('query resolved');
 
       const referencedTables = collectReferencedTables(query);
-      if (supportsSchemaRefresh(datasource as any) && referencedTables.length) {
+      if (supportsSchemaRefresh(datasource) && referencedTables.length) {
         const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.service).length;
         if (priorSnapshotRows === 0 && !ctx.jsonMode) {
           process.stderr.write(`[taproot] first query against service ${datasource.service} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
@@ -423,7 +423,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
-        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
+        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource });
         {
           const cachedRows = ctx.learningStore.schemaTables(datasource.service);
           const hasRefreshedSchema = cachedRows.some((row) => row.sources.includes('refreshed-metadata') || row.sources.includes('manual'));
@@ -451,7 +451,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           timeoutMs: preflightBudgetMs,
           run: () =>
             runDatasourceConnectors({
-              datasource: datasource as any,
+              datasource: datasource,
               credentialStore: ctx.credentialStore,
               pluginRegistry: ctx.pluginRegistry,
               mode: 'connect',
@@ -482,7 +482,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             run: () =>
               execute(
                 {
-                  datasource: datasource as any,
+                  datasource: datasource,
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
@@ -514,7 +514,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             run: () =>
               execute(
                 {
-                  datasource: datasource as any,
+                  datasource: datasource,
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
@@ -561,7 +561,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           ledgerInputFromResult({
             ledgerDir: ctx.paths.runsLedgerDir,
             result,
-            datasource: datasource as any,
+            datasource: datasource,
             intent: effectiveIntent,
             reason,
             sql: query,
@@ -572,7 +572,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         writeRunSummary(artifacts.runDir, result);
         appendEvent(artifacts.runDir, 'query succeeded');
 
-        ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: effectiveIntent, sql: query, result });
+        ctx.learningStore.saveSuccess({ datasource: datasource, queryIntent: effectiveIntent, sql: query, result });
         const phaseSummary = ctx.verbose
           ? ` [resolve ${phaseResolveMs}ms · connect ${phaseConnectMs}ms · execute ${phaseExecuteMs}ms]`
           : '';
@@ -617,7 +617,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
           progress.fail(`query failed (${code})`);
           ctx.learningStore.saveFailure({
-            datasource: datasource as any,
+            datasource: datasource,
             queryIntent: effectiveIntent,
             sql: query,
             errorClass: code,
@@ -625,7 +625,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           appendRunsLedgerEntry({
             ledgerDir: ctx.paths.runsLedgerDir,
             runId: artifacts.runId,
-            datasource: datasource as any,
+            datasource: datasource,
             intent: effectiveIntent,
             reason,
             sql: query,

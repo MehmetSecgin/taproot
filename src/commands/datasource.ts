@@ -4,6 +4,7 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson, printJsonPluck } from '../core/output.js';
+import type { Capability } from '../types/core.js';
 
 function parseHintPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -143,7 +144,9 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         policy: {
           allowRead: Boolean(opts.allowRead),
           allowMutate: Boolean(opts.allowMutate),
-          allowedCapabilities: opts.allowMutate ? ['executeRead', 'executeMutate'] : ['executeRead'],
+          allowedCapabilities: opts.allowMutate
+            ? (['executeRead', 'executeMutate'] satisfies Capability[])
+            : (['executeRead'] satisfies Capability[]),
         },
         resolverHints: {
           ...parseConnectorRefPairs(opts.connectorRef || []),
@@ -155,7 +158,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         confidence: Number(opts.confidence),
       };
       const existed = Boolean(ctx.datasourceStore.get(opts.name));
-      const saved = ctx.datasourceStore.save(profile as any);
+      const saved = ctx.datasourceStore.save(profile);
       if (opts.probe) {
         const plugin = ctx.pluginRegistry.get(saved.kind);
         if (!plugin?.doctor) {
@@ -164,7 +167,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         }
         try {
           const creds = await ctx.credentialStore.get(saved.credentialRef);
-          const checks = await plugin.doctor({ datasource: saved as any, credentials: creds });
+          const checks = await plugin.doctor({ datasource: saved, credentials: creds });
           const failures = checks.filter((c) => c.status === 'fail');
           if (failures.length) {
             if (!existed) ctx.datasourceStore.remove(saved.name);

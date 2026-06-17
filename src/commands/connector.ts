@@ -110,7 +110,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
       const ctx = getCtx();
       const datasource = resolveDatasource(ctx, opts.datasource);
       const allChecks = await runDatasourceConnectors({
-        datasource: datasource as any,
+        datasource,
         credentialStore: ctx.credentialStore,
         pluginRegistry: ctx.pluginRegistry,
         mode: 'doctor',
@@ -183,7 +183,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
           [refKey]: ref,
         },
       };
-      ctx.datasourceStore.save(profile as any);
+      ctx.datasourceStore.save(profile);
 
       const out = {
         saved: true,
