@@ -17,8 +17,7 @@ import {
 } from '../../core/proto-loader.js';
 import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
 import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
-
-const CONNECT_TIMEOUT_MS = 5000;
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 
 interface GrpcClient extends Record<string, unknown> {
   waitForReady: (deadline: number, callback: (err?: Error) => void) => void;
@@ -30,7 +29,7 @@ const channelCache = new Map<string, GrpcClient>();
 function channelKey(ds: QueryRequest['datasource'], creds: Record<string, string>): string {
   return [
     ds.connection.host || '127.0.0.1',
-    ds.connection.port || 6565,
+    ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.grpc,
     ds.connection.ssl ? 'tls' : 'h2c',
     ds.resolverHints?.protoRoot || '',
     creds.token || '',
@@ -42,7 +41,7 @@ function buildClient(
   ServiceCtor: new (t: string, c: unknown) => Record<string, unknown>,
   ds: QueryRequest['datasource'],
 ): GrpcClient {
-  const target = `${ds.connection.host || '127.0.0.1'}:${ds.connection.port || 6565}`;
+  const target = `${ds.connection.host || '127.0.0.1'}:${ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.grpc}`;
   const creds = ds.connection.ssl ? grpc.credentials.createSsl() : grpc.credentials.createInsecure();
   return new ServiceCtor(target, creds) as GrpcClient;
 }
@@ -187,7 +186,7 @@ export const grpcPlugin: TapRootPlugin = {
       const client = buildClient(grpc, ServiceCtor, ds);
       try {
         await new Promise<void>((resolve, reject) => {
-          client.waitForReady(Date.now() + CONNECT_TIMEOUT_MS, (err) => (err ? reject(err) : resolve()));
+          client.waitForReady(Date.now() + RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs, (err) => (err ? reject(err) : resolve()));
         });
         return [{ check: 'grpc channel', status: 'ok', detail: `connected to ${ds.connection.host}:${ds.connection.port} (${probe})` }];
       } finally {

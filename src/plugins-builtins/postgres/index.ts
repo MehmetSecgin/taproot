@@ -1,23 +1,22 @@
 import { Client } from 'pg';
 import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, QueryResult, TapRootPlugin } from '../../types/core.js';
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 
-const CONNECT_TIMEOUT_MS = 5000;
-
 function connConfig(ds: any, creds: Record<string, string>, timeoutMs?: number) {
   return {
     host: ds.connection.host || '127.0.0.1',
-    port: Number(ds.connection.port || 5432),
+    port: Number(ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.postgres),
     user: creds.user,
     password: creds.password,
     database: ds.connection.database,
     ssl: ds.connection.ssl ? { rejectUnauthorized: false } : undefined,
     statement_timeout: timeoutMs,
     query_timeout: timeoutMs,
-    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    connectionTimeoutMillis: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
   };
 }
 

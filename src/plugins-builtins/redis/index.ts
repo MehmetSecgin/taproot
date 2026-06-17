@@ -5,8 +5,7 @@ import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
-
-const CONNECT_TIMEOUT_MS = 5000;
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 
 const READ_COMMANDS = new Set<string>([
   'GET', 'MGET', 'STRLEN', 'GETRANGE', 'EXISTS', 'TYPE', 'TTL', 'PTTL',
@@ -132,7 +131,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
 function cliArgs(ds: QueryRequest['datasource'], creds: Record<string, string>, decode: boolean): string[] {
   const args: string[] = [
     '-h', String(ds.connection.host || '127.0.0.1'),
-    '-p', String(ds.connection.port || 6379),
+    '-p', String(ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.redis),
     '--no-auth-warning',
   ];
   if (decode) args.push('--no-raw');
@@ -280,7 +279,7 @@ export const redisPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     const args = cliArgs(input.datasource, input.credentials, false);
-    const r = await runRedis(args, ['PING'], CONNECT_TIMEOUT_MS + 2000);
+    const r = await runRedis(args, ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000);
     if (r.code === 0 && /PONG/i.test(r.stdout)) {
       return [{ check: 'redis ping', status: 'ok', detail: 'PING -> PONG' }];
     }

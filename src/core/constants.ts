@@ -34,4 +34,15 @@ export const RUNTIME_CONSTANTS = {
     statusCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_STATUS_MS', 3 * 1000),
     connectCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_CONNECT_MS', 12 * 1000),
   },
+  plugin: {
+    dbConnectTimeoutMs: 5_000,
+    openvpnStatusTimeoutMs: 1_500,
+    openvpnCommandTimeoutMs: 3_000,
+  },
+  defaultPorts: {
+    mysql: 3306,
+    postgres: 5432,
+    redis: 6379,
+    grpc: 6565,
+  },
 } as const;
