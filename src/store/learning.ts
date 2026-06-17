@@ -9,6 +9,10 @@ import type { SchemaProvenance } from '../types/core.js';
 
 export const SCHEMA_METADATA_VERSION = 2;
 
+export function bareTableName(value: unknown): string {
+  return String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
+}
+
 interface ResolutionEntry {
   key: string;
   env: string;
@@ -272,7 +276,7 @@ export class LearningStore {
           changed = true;
           continue;
         }
-        const bareTable = String(row.table).replace(/`/g, '').trim().split('.').pop() || '';
+        const bareTable = bareTableName(row.table);
         if (!bareTable) {
           changed = true;
           continue;
@@ -306,8 +310,8 @@ export class LearningStore {
           if (!changed) changed = true;
           continue;
         }
-        const leftBare = String(row.leftTable).replace(/`/g, '').trim().split('.').pop() || '';
-        const rightBare = String(row.rightTable).replace(/`/g, '').trim().split('.').pop() || '';
+        const leftBare = bareTableName(row.leftTable);
+        const rightBare = bareTableName(row.rightTable);
         if (!leftBare || !rightBare) {
           changed = true;
           continue;
@@ -426,7 +430,7 @@ export class LearningStore {
     const database = String(datasource.connection.database || '');
     const target = String(datasource.connection.target || '');
 
-    const bare = (value: string): string => String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
+    const bare = bareTableName;
     const isSystemTable = (value: string): boolean => {
       const lower = String(value || '').toLowerCase();
       return lower.startsWith('information_schema.') || lower.startsWith('performance_schema.') || lower.startsWith('mysql.')

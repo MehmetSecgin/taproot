@@ -10,7 +10,7 @@ import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrp
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
 import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
-import { schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
+import { bareTableName, schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
 async function resolveDatasource(ctx: AppContext, opts: { datasource?: string; env?: string; namespace?: string; service?: string }): Promise<DatasourceProfile | undefined> {
   if (opts.datasource) return ctx.datasourceStore.get(String(opts.datasource));
@@ -189,20 +189,16 @@ export interface EnsureSchemaResult {
   ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
 }
 
-function normalizeRequestedTable(value: string): string {
-  return String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
-}
-
 function filterRequestedTables(rows: SchemaObservationEntry[], tables?: string[]): SchemaObservationEntry[] {
-  const requested = new Set((tables || []).map(normalizeRequestedTable).filter(Boolean));
+  const requested = new Set((tables || []).map(bareTableName).filter(Boolean));
   if (!requested.size) return rows;
-  return rows.filter((row) => requested.has(normalizeRequestedTable(row.table)));
+  return rows.filter((row) => requested.has(bareTableName(row.table)));
 }
 
 function hasMissingRequestedTables(rows: SchemaObservationEntry[], tables?: string[]): boolean {
-  const requested = new Set((tables || []).map(normalizeRequestedTable).filter(Boolean));
+  const requested = new Set((tables || []).map(bareTableName).filter(Boolean));
   if (!requested.size) return false;
-  const present = new Set(rows.map((row) => normalizeRequestedTable(row.table)));
+  const present = new Set(rows.map((row) => bareTableName(row.table)));
   return [...requested].some((table) => !present.has(table));
 }
 
