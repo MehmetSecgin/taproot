@@ -378,6 +378,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (req.params.protoRoot) pluginParams.protoRoot = String(req.params.protoRoot);
                       if (req.params.allowFlush) pluginParams.allowFlush = true;
                       if (req.params.requestJson) pluginParams.requestJson = String(req.params.requestJson);
+                      if (req.params.skipProtoValidate) pluginParams.skipProtoValidate = true;
                       if (datasource.kind === 'grpc' && req.params.param) {
                         const grpcParams: Record<string, string> = {};
                         for (const pair of req.params.param as string[]) {

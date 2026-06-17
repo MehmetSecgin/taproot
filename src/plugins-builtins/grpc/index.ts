@@ -15,6 +15,7 @@ import {
   type GrpcModule,
 } from '../../core/proto-loader.js';
 import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
+import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
 
 const CONNECT_TIMEOUT_MS = 5000;
 
@@ -227,6 +228,23 @@ export const grpcPlugin: TapRootPlugin = {
         const close = suggestNames(method, methodNames, 3);
         const hint = close.length ? ` Did you mean ${close.map((m) => `'${m}'`).join(', ')}?` : '';
         throw new Error(`grpc method '${method}' not found on ${service}.${hint} Available: ${methodNames.join(', ')}.`);
+      }
+    }
+    const skipProtoValidate = pp.skipProtoValidate === true || pp.skipProtoValidate === 'true';
+    if (!skipProtoValidate) {
+      const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod);
+      if (methodShape) {
+        const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, payload);
+        if (validationError) {
+          const err = new Error(`BAD_INPUT: ${validationError.message}`);
+          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'BAD_INPUT';
+          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+            field: validationError.field,
+            expected: validationError.expected,
+            nextCommand: `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`,
+          };
+          throw err;
+        }
       }
     }
     const ServiceCtor = lookupServiceCtor(bundle.grpcPackage, service);
