@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -38,10 +39,11 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('grpc');
   });
 
-  it('prints skill version', () => {
+  it('prints skill version', async () => {
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
     const out = runCli(['--skill-version']);
     expect(out.status).toBe(0);
-    expect(out.stdout.trim()).toBe('taproot-skill@0.6.0');
+    expect(out.stdout.trim()).toBe(`taproot-skill@${pkg.version}`);
   });
 
   it('completion zsh includes command name', () => {
