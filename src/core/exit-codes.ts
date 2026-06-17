@@ -21,6 +21,7 @@ export function classifyExitCode(input: unknown): number {
   if (/unknown option|required option|too many arguments|missing required argument|invalid argument/.test(lower)) {
     return EXIT_CODES.BAD_INPUT;
   }
+  if (upper.startsWith('BAD_INPUT:')) return EXIT_CODES.BAD_INPUT;
   if (upper.startsWith('CONNECTIVITY:')) return EXIT_CODES.CONNECTIVITY;
   if (upper.startsWith('QUERY_TIMEOUT:')) return EXIT_CODES.GENERAL_ERROR;
   if (upper.startsWith('MISSING_PARTITION_PREDICATE:')) return EXIT_CODES.BAD_INPUT;
@@ -36,6 +37,8 @@ export function classifyExitCode(input: unknown): number {
 
 export function exitCodeForClass(code: string): number {
   switch (code) {
+    case 'BAD_INPUT':
+      return EXIT_CODES.BAD_INPUT;
     case 'CONNECTIVITY':
       return EXIT_CODES.CONNECTIVITY;
     case 'QUERY_TIMEOUT':

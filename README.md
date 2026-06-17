@@ -172,17 +172,27 @@ taproot --json query --datasource qa-order-cache \
 
 ### gRPC (read-only)
 
+# proto-root is a LOCAL directory (or comma-separated list) of .proto sources.
+# It is loaded recursively, so the easiest setup is to clone the proto-bearing
+# repos and point proto-root at the parent dir of your checkouts:
+#   --hint protoRoot=$HOME/repos
+# Service protos often import from OTHER modules/repos (e.g. a service .proto
+# imports a shared common.proto that lives in a separate repo). Make sure those
+# checkouts are under proto-root too, or comma-list each module dir:
+#   --hint protoRoot=$HOME/repos/catalog-service,$HOME/repos/shared-protos
+# google/protobuf/* well-known types are bundled — no checkout needed. If an
+# import can't be found, the loader names the missing file + the proto that
+# imports it so you know which repo to clone.
+```
+
 ```bash
-# register. proto-root must point at a directory containing the service .proto
-# (and its transitive imports). A build/extracted-protos directory that bundles
-# the service proto plus its imports is the easiest single-root option.
 taproot datasource add \
   --name qa-catalog-grpc --kind grpc \
   --env qa --namespace develop --service catalog-grpc \
   --host catalog-grpc.develop --port 6565 \
   --credential-ref qa:grpc:catalog \
   --connector openvpn --openvpn-ref vpn:work \
-  --hint protoRoot=$HOME/proto/catalog
+  --hint protoRoot=$HOME/repos/catalog-service,$HOME/repos/shared-protos
 
 # doctor: opens a channel against the first service in the loaded proto.
 # Override with --hint probeService=<fq> on datasource add if you need a specific one.
@@ -190,9 +200,19 @@ taproot doctor --datasource qa-catalog-grpc
 
 # introspect what's callable before composing a request:
 taproot --json grpc list --datasource qa-catalog-grpc            # services + methods only
+taproot --json grpc list --datasource qa-catalog-grpc items      # filter methods by substring
+
+# don't know the exact name? search across all services:
+taproot --json grpc find --datasource qa-catalog-grpc items      # matches service/method/request/response
+
+# --service and --method accept partial names (short name or unambiguous substring):
 taproot --json grpc describe --datasource qa-catalog-grpc \
-  --service com.example.catalog.v1.CatalogService \
+  --service CatalogService \
   --method getItemsByParent                                      # expands request + response messages
+
+# --skeleton emits a ready-to-edit request body + the exact query call line:
+taproot grpc describe --datasource qa-catalog-grpc \
+  --method getItemsByParent --skeleton
 
 # unary call: --query is "<package.Service/Method>". Request body in JSON:
 taproot --json query --datasource qa-catalog-grpc \
@@ -206,6 +226,9 @@ taproot --json query --datasource qa-catalog-grpc \
 ```
 
 gRPC plugin notes:
+- Discovery: `grpc find <pattern>` searches every service/method by substring; `grpc list [pattern]` filters the method table; `grpc describe --service/--method` accept short names or unambiguous substrings (no need to copy the fully-qualified name). `grpc describe --method <m> --skeleton` prints an editable request JSON plus the exact `query` call line.
+- Learned schema cache (mirrors the SQL `learn` flow): `taproot learn refresh-schema --datasource <grpc>` introspects the proto root once and caches the full descriptor (services/methods/messages/enums) keyed by service. `taproot learn schema --datasource <grpc>` reads it back (no proto-root needed in cwd) and `taproot learn ensure-schema --datasource <grpc>` introspects on first use then serves cache; add `--refresh` after a proto change, `--detailed` to include message/enum shapes. The cache shows up in `learn status` as `grpc schema entries`.
+- Service/method typos in a call return a "did you mean" suggestion and the list of available methods; method names are matched case-insensitively.
 - Unary calls only in v1. Server/client/bidi streaming deferred.
 - Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
 - `--request-json` takes precedence over `--param`. `--param key=value` builds a flat JSON object; numeric strings → numbers, `true`/`false` → bool.
@@ -342,13 +365,15 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot template <list|save|validate|run>`
 - `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related|list-services>`
 - `taproot cache <show|prune|clear>`
-- `taproot learn <status|compact|replay|refresh-schema|tables|joins|shapes>`
+- `taproot learn <status|compact|replay|refresh-schema|schema|ensure-schema|tables|joins|shapes|relations>` — `refresh-schema`/`schema`/`ensure-schema` also handle `grpc` datasources (proto descriptor cached per service)
 - `taproot creds <set|show|unset>`
 - `taproot daemon <start|status|stop|restart>`
 - `taproot session <open|ls|inspect|close|close-all>`
 - `taproot completion <zsh|bash|fish>`
 - `taproot sanitize check-repo`
-- `taproot grpc <describe|list> [--datasource <name> | --proto-root <dir>] [--service <fq>] [--method <name>] [--max-depth <n>]`
+- `taproot grpc describe [--datasource <name> | --proto-root <dir>] [--service <name>] [--method <name>] [--skeleton] [--max-depth <n>]` — `--service`/`--method` accept partial names
+- `taproot grpc list [pattern] [--datasource <name> | --proto-root <dir>] [--service <name>]`
+- `taproot grpc find <pattern> [--datasource <name> | --proto-root <dir>]`
 
 ---
 

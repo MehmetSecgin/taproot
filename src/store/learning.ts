@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition } from '../types/core.js';
 import { nowIso } from '../core/time.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
@@ -139,6 +139,21 @@ export interface SchemaQueryShapeEntry {
   sources: SchemaProvenance[];
 }
 
+export interface GrpcServiceSchemaEntry {
+  key: string;
+  datasource: string;
+  env: string;
+  service: string;
+  kind: string;
+  protoRoot: string;
+  services: RpcServiceShape[];
+  messages: Record<string, RpcMessageShape>;
+  enums: Record<string, RpcEnumShape>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sources: SchemaProvenance[];
+}
+
 function normalizeIntent(value?: string): string {
   return String(value || '')
     .trim()
@@ -181,6 +196,7 @@ export class LearningStore {
   private readonly schemaObservationFile: string;
   private readonly schemaJoinFile: string;
   private readonly schemaShapeFile: string;
+  private readonly grpcSchemaFile: string;
   private schemaKeysMigrated = false;
 
   constructor(private readonly dir: string) {
@@ -192,6 +208,7 @@ export class LearningStore {
     this.schemaObservationFile = path.join(dir, 'schema-observations.json');
     this.schemaJoinFile = path.join(dir, 'schema-joins.json');
     this.schemaShapeFile = path.join(dir, 'schema-query-shapes.json');
+    this.grpcSchemaFile = path.join(dir, 'grpc-schemas.json');
   }
 
   private mergeColumnStats(a: SchemaTableColumnStat[], b: SchemaTableColumnStat[]): SchemaTableColumnStat[] {
@@ -356,6 +373,10 @@ export class LearningStore {
     return readJsonFile<SchemaQueryShapeEntry[]>(this.schemaShapeFile, []);
   }
 
+  private loadGrpcSchemas(): GrpcServiceSchemaEntry[] {
+    return readJsonFile<GrpcServiceSchemaEntry[]>(this.grpcSchemaFile, []);
+  }
+
   private saveAll(input: {
     resolution?: ResolutionEntry[];
     library?: QueryLibraryEntry[];
@@ -364,6 +385,7 @@ export class LearningStore {
     schemaObservations?: SchemaObservationEntry[];
     schemaJoins?: SchemaJoinEntry[];
     schemaShapes?: SchemaQueryShapeEntry[];
+    grpcSchemas?: GrpcServiceSchemaEntry[];
   }): void {
     if (input.resolution) writeJsonFile(this.resolutionFile, input.resolution);
     if (input.library) writeJsonFile(this.libraryFile, input.library);
@@ -372,6 +394,7 @@ export class LearningStore {
     if (input.schemaObservations) writeJsonFile(this.schemaObservationFile, input.schemaObservations);
     if (input.schemaJoins) writeJsonFile(this.schemaJoinFile, input.schemaJoins);
     if (input.schemaShapes) writeJsonFile(this.schemaShapeFile, input.schemaShapes);
+    if (input.grpcSchemas) writeJsonFile(this.grpcSchemaFile, input.grpcSchemas);
   }
 
   private upsertColumnStat(columns: SchemaTableColumnStat[], column: string, role: ColumnRole, now: string): SchemaTableColumnStat[] {
@@ -533,6 +556,47 @@ export class LearningStore {
     return rows.filter((r) => r.datasource === datasourceName);
   }
 
+  grpcSchemas(service?: string): GrpcServiceSchemaEntry[] {
+    const rows = this.loadGrpcSchemas();
+    if (!service) return rows;
+    return rows.filter((r) => r.service === service);
+  }
+
+  saveGrpcSchema(input: {
+    datasource: DatasourceProfile;
+    protoRoot: string;
+    source?: SchemaProvenance;
+    services: RpcServiceShape[];
+    messages: Record<string, RpcMessageShape>;
+    enums: Record<string, RpcEnumShape>;
+  }): GrpcServiceSchemaEntry {
+    const now = nowIso();
+    const rows = this.loadGrpcSchemas();
+    const datasource = input.datasource;
+    const service = String(datasource.service || datasource.name);
+    const key = service;
+    const idx = rows.findIndex((r) => r.key === key);
+    const prev = idx >= 0 ? rows[idx] : undefined;
+    const entry: GrpcServiceSchemaEntry = {
+      key,
+      datasource: datasource.name,
+      env: String(datasource.env || ''),
+      service,
+      kind: datasource.kind,
+      protoRoot: input.protoRoot,
+      services: input.services,
+      messages: input.messages,
+      enums: input.enums,
+      firstSeenAt: prev?.firstSeenAt || now,
+      lastSeenAt: now,
+      sources: Array.from(new Set([...(prev?.sources || []), input.source || 'refreshed-metadata'])).sort() as SchemaProvenance[],
+    };
+    if (idx >= 0) rows[idx] = entry;
+    else rows.push(entry);
+    this.saveAll({ grpcSchemas: rows });
+    return entry;
+  }
+
   saveSchemaRefresh(input: {
     datasource: DatasourceProfile;
     source: SchemaProvenance;
@@ -653,6 +717,7 @@ export class LearningStore {
     const schemaObservations = this.loadSchemaObservations();
     const schemaJoins = this.loadSchemaJoins();
     const schemaShapes = this.loadSchemaShapes();
+    const grpcSchemas = this.loadGrpcSchemas();
     const latest = [
       resolution.at(-1)?.lastVerifiedAt,
       library.at(-1)?.lastVerifiedAt,
@@ -661,6 +726,7 @@ export class LearningStore {
       schemaObservations.at(-1)?.lastSeenAt,
       schemaJoins.at(-1)?.lastSeenAt,
       schemaShapes.at(-1)?.lastSeenAt,
+      grpcSchemas.at(-1)?.lastSeenAt,
     ]
       .filter(Boolean)
       .sort()
@@ -674,6 +740,7 @@ export class LearningStore {
         schemaObservations: schemaObservations.length,
         schemaJoins: schemaJoins.length,
         schemaShapes: schemaShapes.length,
+        grpcSchemas: grpcSchemas.length,
       },
       latest,
     };
@@ -924,8 +991,9 @@ export class LearningStore {
     const schemaObservations = this.loadSchemaObservations();
     const schemaJoins = this.loadSchemaJoins();
     const schemaShapes = this.loadSchemaShapes();
+    const grpcSchemas = this.loadGrpcSchemas();
     const before =
-      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length;
+      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length + grpcSchemas.length;
 
     const resolutionMap = new Map<string, ResolutionEntry>();
     for (const row of resolution) {
@@ -966,9 +1034,15 @@ export class LearningStore {
       const cur = schemaShapeMap.get(row.key);
       if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaShapeMap.set(row.key, row);
     }
+    const grpcSchemaMap = new Map<string, GrpcServiceSchemaEntry>();
+    for (const row of grpcSchemas) {
+      const cur = grpcSchemaMap.get(row.key);
+      if (!cur || row.lastSeenAt > cur.lastSeenAt) grpcSchemaMap.set(row.key, row);
+    }
     const compactedSchemaObservations = [...schemaObservationMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const compactedSchemaJoins = [...schemaJoinMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const compactedSchemaShapes = [...schemaShapeMap.values()].sort((a, b) => a.key.localeCompare(b.key));
+    const compactedGrpcSchemas = [...grpcSchemaMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const after =
       compactedResolution.length +
       compactedLibrary.length +
@@ -976,7 +1050,8 @@ export class LearningStore {
       targetSelectionMap.size +
       compactedSchemaObservations.length +
       compactedSchemaJoins.length +
-      compactedSchemaShapes.length;
+      compactedSchemaShapes.length +
+      compactedGrpcSchemas.length;
     this.saveAll({
       resolution: compactedResolution,
       library: compactedLibrary,
@@ -985,6 +1060,7 @@ export class LearningStore {
       schemaObservations: compactedSchemaObservations,
       schemaJoins: compactedSchemaJoins,
       schemaShapes: compactedSchemaShapes,
+      grpcSchemas: compactedGrpcSchemas,
     });
     return { before, after };
   }
@@ -997,6 +1073,7 @@ export class LearningStore {
     const schemaObservations = this.loadSchemaObservations();
     const schemaJoins = this.loadSchemaJoins();
     const schemaShapes = this.loadSchemaShapes();
+    const grpcSchemas = this.loadGrpcSchemas();
     const cutoff = Date.now() - ttlHours * 3600 * 1000;
     const keepResolution = resolution.filter((r) => new Date(r.lastVerifiedAt).getTime() >= cutoff);
     const keepLibrary = library.filter((r) => new Date(r.lastVerifiedAt).getTime() >= cutoff);
@@ -1005,6 +1082,7 @@ export class LearningStore {
     const keepSchemaObservations = schemaObservations.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
     const keepSchemaJoins = schemaJoins.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
     const keepSchemaShapes = schemaShapes.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
+    const keepGrpcSchemas = grpcSchemas.filter((r) => new Date(r.lastSeenAt).getTime() >= cutoff);
     this.saveAll({
       resolution: keepResolution,
       library: keepLibrary,
@@ -1013,9 +1091,10 @@ export class LearningStore {
       schemaObservations: keepSchemaObservations,
       schemaJoins: keepSchemaJoins,
       schemaShapes: keepSchemaShapes,
+      grpcSchemas: keepGrpcSchemas,
     });
     const before =
-      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length;
+      resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length + grpcSchemas.length;
     const after =
       keepResolution.length +
       keepLibrary.length +
@@ -1023,11 +1102,12 @@ export class LearningStore {
       keepTargetSelections.length +
       keepSchemaObservations.length +
       keepSchemaJoins.length +
-      keepSchemaShapes.length;
+      keepSchemaShapes.length +
+      keepGrpcSchemas.length;
     return { before, after };
   }
 
   clear(): void {
-    this.saveAll({ resolution: [], library: [], stats: [], targetSelections: [], schemaObservations: [], schemaJoins: [], schemaShapes: [] });
+    this.saveAll({ resolution: [], library: [], stats: [], targetSelections: [], schemaObservations: [], schemaJoins: [], schemaShapes: [], grpcSchemas: [] });
   }
 }

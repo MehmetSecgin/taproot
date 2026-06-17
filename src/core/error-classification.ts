@@ -1,6 +1,7 @@
 import type { DoctorCheckCode } from '../types/core.js';
 
 export type ErrorClass =
+  | 'BAD_INPUT'
   | 'MISSING_PARTITION_PREDICATE'
   | 'REDUNDANT_INTROSPECTION'
   | 'QUERY_TIMEOUT'
@@ -18,6 +19,7 @@ export type ErrorClass =
 
 export function classifyError(message: string): ErrorClass {
   const text = message.toLowerCase();
+  if (/^bad_input:/.test(text)) return 'BAD_INPUT';
   if (/missing_partition_predicate/.test(text)) return 'MISSING_PARTITION_PREDICATE';
   if (/redundant_introspection/.test(text)) return 'REDUNDANT_INTROSPECTION';
   if (/query_timeout|query exceeded timeout|statement timeout/.test(text)) return 'QUERY_TIMEOUT';

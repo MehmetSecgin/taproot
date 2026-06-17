@@ -14,7 +14,8 @@ import {
   lookupServiceCtor,
   type GrpcModule,
 } from '../../core/proto-loader.js';
-import { describeProto, listServices } from '../../core/grpc-introspect.js';
+import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
+import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
 
 const CONNECT_TIMEOUT_MS = 5000;
 
@@ -206,6 +207,46 @@ export const grpcPlugin: TapRootPlugin = {
     const paramPairs = (pp.params as Record<string, string>) || {};
     const payload = resolveRequestPayload(request, paramPairs);
     const bundle = await loadGrpcPackage(protoRoot);
+    const services = listServices(bundle.protobufRoot);
+    const svcShape = services.find((s) => s.name === service);
+    if (!svcShape) {
+      const res = resolveName(service, services.map((s) => s.name));
+      const hint = res.match
+        ? ` Did you mean '${res.match}'?`
+        : res.candidates.length
+          ? ` Closest: ${res.candidates.slice(0, 5).join(', ')}.`
+          : '';
+      throw new Error(`grpc service '${service}' not found in proto root.${hint} Run 'taproot grpc list' to see services.`);
+    }
+    const methodNames = svcShape.methods.map((m) => m.name);
+    let canonicalMethod = methodNames.find((m) => m === method);
+    if (!canonicalMethod) {
+      const ci = methodNames.filter((m) => m.toLowerCase() === method.toLowerCase());
+      if (ci.length === 1) {
+        canonicalMethod = ci[0];
+      } else {
+        const close = suggestNames(method, methodNames, 3);
+        const hint = close.length ? ` Did you mean ${close.map((m) => `'${m}'`).join(', ')}?` : '';
+        throw new Error(`grpc method '${method}' not found on ${service}.${hint} Available: ${methodNames.join(', ')}.`);
+      }
+    }
+    const skipProtoValidate = pp.skipProtoValidate === true || pp.skipProtoValidate === 'true';
+    if (!skipProtoValidate) {
+      const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod);
+      if (methodShape) {
+        const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, payload);
+        if (validationError) {
+          const err = new Error(`BAD_INPUT: ${validationError.message}`);
+          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'BAD_INPUT';
+          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+            field: validationError.field,
+            expected: validationError.expected,
+            nextCommand: `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`,
+          };
+          throw err;
+        }
+      }
+    }
     const ServiceCtor = lookupServiceCtor(bundle.grpcPackage, service);
     const client = getOrCreateClient(bundle.grpcModule, ServiceCtor, request.datasource, creds, service);
     let metadata: { add: (k: string, v: string) => void } | undefined;
@@ -224,7 +265,7 @@ export const grpcPlugin: TapRootPlugin = {
     let response: Record<string, unknown>;
     try {
       response = await Promise.race([
-        callUnary(client, method, payload, metadata, deadlineMs),
+        callUnary(client, canonicalMethod, payload, metadata, deadlineMs),
         new Promise<never>((_, reject) => setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500)),
       ]);
     } catch (err) {
@@ -234,7 +275,7 @@ export const grpcPlugin: TapRootPlugin = {
     }
     let schemaContext: SchemaContext | undefined;
     try {
-      const descriptor = describeProto(bundle.protobufRoot, { service, method });
+      const descriptor = describeProto(bundle.protobufRoot, { service, method: canonicalMethod });
       schemaContext = schemaContextFor(descriptor, service);
     } catch {
       schemaContext = undefined;
@@ -244,7 +285,7 @@ export const grpcPlugin: TapRootPlugin = {
       datasource: request.datasource.name,
       plugin: 'grpc',
       capability: request.capability,
-      query: { native: `${service}/${method}` },
+      query: { native: `${service}/${canonicalMethod}` },
       result: { columns: ['value'], rows: [{ value: response }] },
       timings: {
         startedAt,

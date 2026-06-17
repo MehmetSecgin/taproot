@@ -1,8 +1,10 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
-import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { SCHEMA_METADATA_VERSION } from '../store/learning.js';
+import { loadProtobufRoot } from './proto-loader.js';
+import { describeProto } from './grpc-introspect.js';
 
 export interface RefreshedSchemaTable {
   table: string;
@@ -417,4 +419,40 @@ export async function refreshSchemaForDatasource(
 
 export function supportsSchemaRefresh(datasource?: DatasourceProfile): boolean {
   return Boolean(datasource && isSqlDatasource(datasource.kind));
+}
+
+export interface GrpcSchemaRefreshResult {
+  datasource: string;
+  protoRoot: string;
+  services: RpcServiceShape[];
+  messages: Record<string, RpcMessageShape>;
+  enums: Record<string, RpcEnumShape>;
+}
+
+export function supportsGrpcSchema(datasource?: DatasourceProfile): boolean {
+  return Boolean(datasource && datasource.kind === 'grpc' && (datasource.resolverHints || {}).protoRoot);
+}
+
+export async function refreshGrpcSchemaForDatasource(
+  ctx: AppContext,
+  datasource: DatasourceProfile,
+): Promise<GrpcSchemaRefreshResult> {
+  if (datasource.kind !== 'grpc') {
+    throw new Error(`learning_unsupported: datasource kind '${datasource.kind}' does not support grpc schema refresh`);
+  }
+  const protoRoot = String((datasource.resolverHints || {}).protoRoot || '').trim();
+  if (!protoRoot) {
+    throw new Error(`executor_configuration_missing: grpc datasource '${datasource.name}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
+  }
+  const { protobufRoot } = await loadProtobufRoot(protoRoot);
+  const descriptor = describeProto(protobufRoot, { expand: { maxDepth: 6 } });
+  ctx.learningStore.saveGrpcSchema({
+    datasource,
+    protoRoot,
+    source: 'refreshed-metadata',
+    services: descriptor.services,
+    messages: descriptor.messages,
+    enums: descriptor.enums,
+  });
+  return { datasource: datasource.name, protoRoot, services: descriptor.services, messages: descriptor.messages, enums: descriptor.enums };
 }

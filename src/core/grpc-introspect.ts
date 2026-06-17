@@ -234,3 +234,136 @@ export async function describeProtoRoot(protoRoot: string, opts: DescribeOptions
   const { protobufRoot } = await loadProtobufRoot(protoRoot);
   return describeProto(protobufRoot, opts);
 }
+
+function shortName(fq: string): string {
+  const i = fq.lastIndexOf('.');
+  return i >= 0 ? fq.slice(i + 1) : fq;
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  let curr = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+export function suggestNames(query: string, names: string[], limit = 5): string[] {
+  const q = query.toLowerCase();
+  return [...new Set(names)]
+    .map((n) => ({ n, d: Math.min(levenshtein(q, n.toLowerCase()), levenshtein(q, shortName(n).toLowerCase())) }))
+    .sort((x, y) => x.d - y.d || x.n.localeCompare(y.n))
+    .slice(0, limit)
+    .map((x) => x.n);
+}
+
+export interface NameResolution {
+  match?: string;
+  candidates: string[];
+}
+
+export function resolveName(query: string, names: string[]): NameResolution {
+  const q = String(query || '').trim();
+  if (!q) return { candidates: names };
+  if (names.includes(q)) return { match: q, candidates: [q] };
+  const ql = q.toLowerCase();
+  const shortExact = names.filter((n) => shortName(n).toLowerCase() === ql);
+  if (shortExact.length === 1) return { match: shortExact[0], candidates: shortExact };
+  if (shortExact.length > 1) return { candidates: shortExact };
+  const sub = names.filter((n) => n.toLowerCase().includes(ql) || shortName(n).toLowerCase().includes(ql));
+  if (sub.length === 1) return { match: sub[0], candidates: sub };
+  if (sub.length > 1) return { candidates: sub };
+  return { candidates: suggestNames(q, names) };
+}
+
+export interface MethodMatch {
+  service: string;
+  method: string;
+  requestType: string;
+  responseType: string;
+  streams: string;
+}
+
+function methodStreams(m: RpcMethodShape): string {
+  return [m.requestStream ? 'req' : '', m.responseStream ? 'resp' : ''].filter(Boolean).join('+');
+}
+
+export function searchMethods(root: ProtobufRoot, pattern: string): MethodMatch[] {
+  const p = String(pattern || '').toLowerCase();
+  const out: MethodMatch[] = [];
+  for (const svc of listServices(root)) {
+    for (const m of svc.methods) {
+      const hay = `${svc.name} ${m.name} ${m.requestType} ${m.responseType}`.toLowerCase();
+      if (!p || hay.includes(p)) {
+        out.push({
+          service: svc.name,
+          method: m.name,
+          requestType: m.requestType,
+          responseType: m.responseType,
+          streams: methodStreams(m),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function scalarPlaceholder(type: string): unknown {
+  if (type === 'bool') return false;
+  if (type === 'string') return '<string>';
+  if (type === 'bytes') return '<bytes:base64>';
+  if (type === 'float' || type === 'double') return 0;
+  if (/(^|u|s)int|fixed/.test(type)) return 0;
+  return `<${type}>`;
+}
+
+export function buildRequestSkeleton(
+  root: ProtobufRoot,
+  messageName: string,
+  opts: ExpandOptions = {},
+): unknown {
+  const { messages, enums } = expandMessage(root, messageName, { maxDepth: opts.maxDepth ?? 6, maxMessages: opts.maxMessages });
+  const seen = new Set<string>();
+
+  const valueForType = (type: string): unknown => {
+    if (type.startsWith('message:')) return build(type.slice('message:'.length));
+    if (type.startsWith('enum:')) {
+      const en = enums[type.slice('enum:'.length)];
+      const first = en ? Object.keys(en.values)[0] : undefined;
+      return first ?? '<enum>';
+    }
+    return scalarPlaceholder(type);
+  };
+
+  const valueForField = (f: RpcFieldShape): unknown => {
+    if (f.type.startsWith('map<')) {
+      const inner = f.type.slice(4, -1);
+      const valType = inner.slice(inner.indexOf(',') + 1);
+      return { '<key>': valueForType(valType) };
+    }
+    const v = valueForType(f.type);
+    return f.repeated ? [v] : v;
+  };
+
+  function build(name: string): Record<string, unknown> {
+    const msg = messages[stripLeadingDot(name)];
+    if (!msg || seen.has(name)) return {};
+    seen.add(name);
+    const out: Record<string, unknown> = {};
+    for (const f of msg.fields) out[f.name] = valueForField(f);
+    seen.delete(name);
+    return out;
+  }
+
+  return build(stripLeadingDot(messageName));
+}

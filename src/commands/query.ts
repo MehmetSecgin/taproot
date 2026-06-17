@@ -112,6 +112,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
     .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
     .option('--request-json <json>', 'gRPC plugin: request message body as JSON. Overrides --param-built payloads. Example: \'{"values":[1,2,3]}\'.')
+    .option('--skip-proto-validate', 'gRPC plugin: bypass local proto schema validation of the request payload. Off by default; only use for deliberately malformed payloads (e.g. fuzzing).', false)
     .option(
       '--timeout-ms <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
@@ -177,6 +178,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
                 protoRoot: opts.protoRoot,
                 allowFlush: Boolean(opts.allowFlush),
                 requestJson: opts.requestJson,
+                skipProtoValidate: Boolean(opts.skipProtoValidate),
               },
             });
             if (rpc.ok) {
@@ -466,6 +468,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
         if (opts.allowFlush) pluginParams.allowFlush = true;
         if (opts.requestJson) pluginParams.requestJson = String(opts.requestJson);
+        if (opts.skipProtoValidate) pluginParams.skipProtoValidate = true;
         if (datasource.kind === 'grpc' && params && Object.keys(params).length) {
           pluginParams.params = params;
         }

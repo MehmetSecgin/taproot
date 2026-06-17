@@ -5,10 +5,10 @@ import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
-import { refreshSchemaForDatasource, supportsSchemaRefresh } from '../core/schema-refresh.js';
+import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrpcSchema, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
-import type { DatasourceProfile } from '../types/core.js';
-import { schemaObservationHasCurrentMetadata, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
+import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
+import { schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
 async function resolveDatasource(ctx: AppContext, opts: { datasource?: string; env?: string; namespace?: string; service?: string }): Promise<DatasourceProfile | undefined> {
   if (opts.datasource) return ctx.datasourceStore.get(String(opts.datasource));
@@ -284,6 +284,159 @@ export async function ensureSchemaSnapshot(
   };
 }
 
+export interface GrpcMethodRow {
+  service: string;
+  method: string;
+  request: string;
+  response: string;
+  streams: string;
+}
+
+export interface GrpcSchemaSnapshot {
+  datasource: string | null;
+  service: string | null;
+  protoRoot: string | null;
+  serviceCount: number;
+  methodCount: number;
+  messageCount: number;
+  enumCount: number;
+  methods: GrpcMethodRow[];
+  messages?: Record<string, RpcMessageShape>;
+  enums?: Record<string, RpcEnumShape>;
+  lastSeenAt?: string;
+  emptyReason: string | null;
+  suggestedNextCommand: string | null;
+  ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
+}
+
+function emptyGrpcSnapshot(input: { datasource?: DatasourceProfile; emptyReason: string | null; suggestedNextCommand: string | null; ensuredBy: GrpcSchemaSnapshot['ensuredBy'] }): GrpcSchemaSnapshot {
+  return {
+    datasource: input.datasource?.name || null,
+    service: input.datasource ? String(input.datasource.service || input.datasource.name) : null,
+    protoRoot: null,
+    serviceCount: 0,
+    methodCount: 0,
+    messageCount: 0,
+    enumCount: 0,
+    methods: [],
+    emptyReason: input.emptyReason,
+    suggestedNextCommand: input.suggestedNextCommand,
+    ensuredBy: input.ensuredBy,
+  };
+}
+
+function buildGrpcSnapshot(entry: GrpcServiceSchemaEntry, detailed: boolean, ensuredBy: GrpcSchemaSnapshot['ensuredBy']): GrpcSchemaSnapshot {
+  const methods: GrpcMethodRow[] = entry.services.flatMap((svc) =>
+    svc.methods.map((m) => ({
+      service: svc.name,
+      method: m.name,
+      request: m.requestType,
+      response: m.responseType,
+      streams: [m.requestStream ? 'req' : '', m.responseStream ? 'resp' : ''].filter(Boolean).join('+') || '',
+    })),
+  );
+  const snapshot: GrpcSchemaSnapshot = {
+    datasource: entry.datasource,
+    service: entry.service,
+    protoRoot: entry.protoRoot,
+    serviceCount: entry.services.length,
+    methodCount: methods.length,
+    messageCount: Object.keys(entry.messages).length,
+    enumCount: Object.keys(entry.enums).length,
+    methods,
+    lastSeenAt: entry.lastSeenAt,
+    emptyReason: null,
+    suggestedNextCommand: null,
+    ensuredBy,
+  };
+  if (detailed) {
+    snapshot.messages = entry.messages;
+    snapshot.enums = entry.enums;
+  }
+  return snapshot;
+}
+
+export async function ensureGrpcSchemaSnapshot(
+  ctx: AppContext,
+  opts: { datasource?: string; env?: string; namespace?: string; service?: string; detailed?: boolean; refresh?: boolean },
+): Promise<GrpcSchemaSnapshot> {
+  const datasource = await resolveDatasource(ctx, opts);
+  const targeted = isTargetedRequest(opts);
+  if (!datasource) {
+    return emptyGrpcSnapshot({
+      emptyReason: targeted ? 'datasource_unresolved' : 'no_learning_yet',
+      suggestedNextCommand: targeted ? unresolvedNextCommand(opts, ctx) : null,
+      ensuredBy: targeted ? 'unresolved' : 'empty',
+    });
+  }
+  const service = String(datasource.service || datasource.name);
+  let entry = ctx.learningStore.grpcSchemas(service)[0];
+  let ensuredBy: GrpcSchemaSnapshot['ensuredBy'] = entry ? 'cached-learning' : 'empty';
+  if ((!entry || opts.refresh) && supportsGrpcSchema(datasource)) {
+    await refreshGrpcSchemaForDatasource(ctx, datasource);
+    entry = ctx.learningStore.grpcSchemas(service)[0];
+    ensuredBy = 'refreshed-introspection';
+  }
+  if (!entry) {
+    const refreshable = supportsGrpcSchema(datasource);
+    return emptyGrpcSnapshot({
+      datasource,
+      emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
+      suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
+      ensuredBy: 'empty',
+    });
+  }
+  return buildGrpcSnapshot(entry, Boolean(opts.detailed), ensuredBy);
+}
+
+function readGrpcSchemaSnapshot(
+  ctx: AppContext,
+  datasource: DatasourceProfile | undefined,
+  targeted: boolean,
+  opts: { datasource?: string; env?: string; namespace?: string; service?: string; detailed?: boolean },
+): GrpcSchemaSnapshot {
+  if (!datasource) {
+    return emptyGrpcSnapshot({
+      emptyReason: targeted ? 'datasource_unresolved' : 'no_learning_yet',
+      suggestedNextCommand: targeted ? unresolvedNextCommand(opts, ctx) : null,
+      ensuredBy: targeted ? 'unresolved' : 'empty',
+    });
+  }
+  const service = String(datasource.service || datasource.name);
+  const entry = ctx.learningStore.grpcSchemas(service)[0];
+  if (!entry) {
+    const refreshable = supportsGrpcSchema(datasource);
+    return emptyGrpcSnapshot({
+      datasource,
+      emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
+      suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
+      ensuredBy: 'empty',
+    });
+  }
+  return buildGrpcSnapshot(entry, Boolean(opts.detailed), 'cached-learning');
+}
+
+function renderGrpcSnapshotTty(snapshot: GrpcSchemaSnapshot): void {
+  if (!snapshot.methods.length) {
+    if (snapshot.emptyReason) {
+      console.log(`No learned grpc schema found (${snapshot.emptyReason}).`);
+      if (snapshot.suggestedNextCommand) console.log(`next: ${snapshot.suggestedNextCommand}`);
+    }
+    return;
+  }
+  console.log(renderRecord({
+    datasource: snapshot.datasource || '',
+    service: snapshot.service || '',
+    ensuredBy: snapshot.ensuredBy,
+    services: snapshot.serviceCount,
+    methods: snapshot.methodCount,
+    messages: snapshot.messageCount,
+    enums: snapshot.enumCount,
+    protoRoot: snapshot.protoRoot || '',
+  }));
+  console.log(renderTable(snapshot.methods));
+}
+
 export function registerLearn(program: Command, getCtx: () => AppContext): void {
   const l = program.command('learn').description('Learning cache operations');
 
@@ -300,6 +453,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         { metric: 'schema observation entries', value: status.files.schemaObservations },
         { metric: 'schema join entries', value: status.files.schemaJoins },
         { metric: 'schema shape entries', value: status.files.schemaShapes },
+        { metric: 'grpc schema entries', value: status.files.grpcSchemas },
       ]));
     }
   });
@@ -358,6 +512,31 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
+      if (datasource.kind === 'grpc') {
+        const refreshed = await refreshGrpcSchemaForDatasource(ctx, datasource);
+        const methodCount = refreshed.services.reduce((acc, s) => acc + s.methods.length, 0);
+        if (ctx.jsonMode) {
+          printJson({
+            datasource: refreshed.datasource,
+            protoRoot: refreshed.protoRoot,
+            source: 'proto-introspection',
+            services: refreshed.services.length,
+            methods: methodCount,
+            messages: Object.keys(refreshed.messages).length,
+            enums: Object.keys(refreshed.enums).length,
+          });
+        } else {
+          console.log(renderRecord({
+            datasource: refreshed.datasource,
+            protoRoot: refreshed.protoRoot,
+            services: refreshed.services.length,
+            methods: methodCount,
+            messages: Object.keys(refreshed.messages).length,
+            enums: Object.keys(refreshed.enums).length,
+          }));
+        }
+        return;
+      }
       // Preflight connectors: schema refresh hits the real DB host, so VPN/telepresence/teleport must be ready.
       // Surface CONNECTIVITY: errors with a remediation hint instead of letting getaddrinfo ENOTFOUND bubble.
       try {
@@ -427,6 +606,12 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
+      if (datasource?.kind === 'grpc') {
+        const snapshot = readGrpcSchemaSnapshot(ctx, datasource, targeted, { ...opts, detailed: Boolean(opts.detailed) });
+        if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
+        else renderGrpcSnapshotTty(snapshot);
+        return;
+      }
       const limit = Math.max(1, Number(opts.limit || 50));
       const detailed = Boolean(opts.detailed);
       const allTables = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) });
@@ -501,6 +686,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .action(async (opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
+      const preResolved = await resolveDatasource(ctx, opts);
+      if (preResolved?.kind === 'grpc') {
+        const snapshot = await ensureGrpcSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
+        if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
+        else renderGrpcSnapshotTty(snapshot);
+        return;
+      }
       const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
       if (ctx.jsonMode) {
         printJsonPluck(out, opts.pluck ? String(opts.pluck) : undefined);
