@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 async function runAsync(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
@@ -76,7 +77,7 @@ export const openvpnPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    accessMethods: ['native', 'qa-portforward', 'tsh'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward, AccessMethod.Tsh],
     priority: 80,
   },
 

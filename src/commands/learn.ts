@@ -8,6 +8,7 @@ import { connectivity } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrpcSchema, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
@@ -513,7 +514,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
-      if (datasource.kind === 'grpc') {
+      if (datasource.kind === DatasourceKind.Grpc) {
         const refreshed = await refreshGrpcSchemaForDatasource(ctx, datasource);
         const methodCount = refreshed.services.reduce((acc, s) => acc + s.methods.length, 0);
         if (ctx.jsonMode) {
@@ -604,7 +605,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
-      if (datasource?.kind === 'grpc') {
+      if (datasource?.kind === DatasourceKind.Grpc) {
         const snapshot = readGrpcSchemaSnapshot(ctx, datasource, targeted, { ...opts, detailed: Boolean(opts.detailed) });
         if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
         else renderGrpcSnapshotTty(snapshot);
@@ -685,7 +686,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
       const preResolved = await resolveDatasource(ctx, opts);
-      if (preResolved?.kind === 'grpc') {
+      if (preResolved?.kind === DatasourceKind.Grpc) {
         const snapshot = await ensureGrpcSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
         if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
         else renderGrpcSnapshotTty(snapshot);

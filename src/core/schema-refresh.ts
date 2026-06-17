@@ -1,5 +1,6 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
@@ -48,13 +49,19 @@ function tableFilterSql(tables?: string[]): string {
   return ` AND table_name IN (${normalized.map((table) => `'${table}'`).join(', ')})`;
 }
 
+const SQL_DATASOURCE_KINDS: readonly string[] = [
+  DatasourceKind.Mysql,
+  DatasourceKind.Postgres,
+  DatasourceKind.TeleportMysql,
+];
+
 function isSqlDatasource(kind: string): boolean {
-  return ['mysql', 'postgres', 'teleport-mysql'].includes(String(kind || '').trim());
+  return SQL_DATASOURCE_KINDS.includes(String(kind || '').trim());
 }
 
 function tableSql(datasource: DatasourceProfile, tables?: string[]): string {
   const database = escapeSqlString(String(datasource.connection.database || ''));
-  if (datasource.kind === 'postgres') {
+  if (datasource.kind === DatasourceKind.Postgres) {
     return [
       'SELECT table_name AS table_name, column_name AS column_name',
       'FROM information_schema.columns',
@@ -76,7 +83,7 @@ function tableSql(datasource: DatasourceProfile, tables?: string[]): string {
 function joinSql(datasource: DatasourceProfile, tables?: string[]): string {
   const database = escapeSqlString(String(datasource.connection.database || ''));
   const tableFilter = tableFilterSql(tables);
-  if (datasource.kind === 'postgres') {
+  if (datasource.kind === DatasourceKind.Postgres) {
     return [
       'SELECT',
       '  tc.table_name AS left_table,',
@@ -305,12 +312,12 @@ export async function refreshSchemaForDatasource(
   try {
     tableResult = await executeReadMaybeTimed(ctx, datasource, tableSql(datasource, targetTables), opts.metadataTimeoutMs);
     joinResult = await executeReadMaybeTimed(ctx, datasource, joinSql(datasource, targetTables), opts.metadataTimeoutMs);
-    if (datasource.kind !== 'postgres') {
+    if (datasource.kind !== DatasourceKind.Postgres) {
       indexResult = await executeReadMaybeTimed(ctx, datasource, indexSql(datasource, targetTables), opts.metadataTimeoutMs);
       partitionResult = await executeReadMaybeTimed(ctx, datasource, partitionSql(datasource, targetTables), opts.metadataTimeoutMs);
     }
   } catch (error) {
-    if (targetTables.length && isAccessDenied(error) && datasource.kind !== 'postgres') {
+    if (targetTables.length && isAccessDenied(error) && datasource.kind !== DatasourceKind.Postgres) {
       const fallback = await refreshFromShowCreate(ctx, datasource, targetTables, opts.metadataTimeoutMs);
       const refreshed: SchemaRefreshResult = {
         datasource: datasource.name,
@@ -431,7 +438,7 @@ export interface GrpcSchemaRefreshResult {
 }
 
 export function supportsGrpcSchema(datasource?: DatasourceProfile): boolean {
-  return Boolean(datasource && datasource.kind === 'grpc' && (datasource.resolverHints || {}).protoRoot);
+  return Boolean(datasource && datasource.kind === DatasourceKind.Grpc && (datasource.resolverHints || {}).protoRoot);
 }
 
 export async function refreshGrpcSchemaForDatasource(

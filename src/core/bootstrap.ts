@@ -2,6 +2,7 @@ import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
 import { criticalDatasourceKbConflicts } from './conflicts.js';
 import { nowIso } from './time.js';
+import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 
 export interface BootstrapResult {
@@ -75,7 +76,7 @@ export function buildKbBootstrapCandidate(
   const confidence = options?.confidence ?? 0.9;
   const namespace = String(kb.namespace || '').trim() || undefined;
 
-  if (accessMethod === 'qa-portforward') {
+  if (accessMethod === AccessMethod.QaPortforward) {
     const effectiveNamespace = String(namespace || 'default');
     const context = String(process.env.TAPROOT_QA_CONTEXT || kb.k8s_context || env || effectiveNamespace);
     const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
@@ -87,7 +88,7 @@ export function buildKbBootstrapCandidate(
       kb,
       profile: {
         name: datasourceName,
-        kind: engine.includes('postgres') ? 'postgres' : 'mysql',
+        kind: engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql,
         env,
         namespace,
         service,
@@ -132,7 +133,7 @@ export function buildKbBootstrapCandidate(
     };
   }
 
-  if (accessMethod === 'native') {
+  if (accessMethod === AccessMethod.Native) {
     const host = String(kb.host || '').trim();
     const port = Number(kb.port || 0) || (engine.includes('postgres') ? 5432 : 3306);
     if (!host) return undefined;
@@ -140,7 +141,7 @@ export function buildKbBootstrapCandidate(
       kb,
       profile: {
         name: datasourceName,
-        kind: engine.includes('postgres') ? 'postgres' : 'mysql',
+        kind: engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql,
         env,
         namespace,
         service,
@@ -176,12 +177,12 @@ export function buildKbBootstrapCandidate(
     };
   }
 
-  if (accessMethod === 'tsh') {
+  if (accessMethod === AccessMethod.Tsh) {
     return {
       kb,
       profile: {
         name: datasourceName,
-        kind: 'teleport-mysql',
+        kind: DatasourceKind.TeleportMysql,
         env,
         namespace,
         service,

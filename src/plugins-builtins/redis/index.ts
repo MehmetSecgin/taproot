@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
@@ -273,7 +274,7 @@ export const redisPlugin: TapRootPlugin = {
     version: '0.3.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead', 'executeMutate'],
-    accessMethods: ['native', 'qa-portforward'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 

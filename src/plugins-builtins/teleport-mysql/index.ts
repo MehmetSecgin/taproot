@@ -5,6 +5,7 @@ import { registerCleanup } from '../../core/cleanup.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
+import { AccessMethod } from '../../types/core.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
 
 type ProxyRuntime = {
@@ -211,7 +212,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['tsh'],
+    accessMethods: [AccessMethod.Tsh],
     priority: 100,
   },
 

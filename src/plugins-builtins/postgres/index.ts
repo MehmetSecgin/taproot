@@ -1,4 +1,5 @@
 import { Client } from 'pg';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
@@ -26,7 +27,7 @@ export const postgresPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['native', 'qa-portforward'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 

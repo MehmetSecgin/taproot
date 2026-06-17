@@ -7,6 +7,7 @@ import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson, printJsonPluck } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
@@ -92,7 +93,7 @@ function isMissingConnectorConfigCode(code?: DoctorCheckCode): boolean {
 }
 
 function credentialRepairHint(datasource: DatasourceProfile): string {
-  if (datasource.kind === 'teleport-mysql') {
+  if (datasource.kind === DatasourceKind.TeleportMysql) {
     return `taproot --json creds set --ref ${datasource.credentialRef} --db-user <user> --password <password>`;
   }
   return `taproot --json creds set --ref ${datasource.credentialRef} --user <user> --password <password>`;

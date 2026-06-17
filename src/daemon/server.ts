@@ -12,6 +12,7 @@ import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospe
 import { nowIso } from '../core/time.js';
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
@@ -380,7 +381,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (req.params.allowFlush) pluginParams.allowFlush = true;
                       if (req.params.requestJson) pluginParams.requestJson = String(req.params.requestJson);
                       if (req.params.skipProtoValidate) pluginParams.skipProtoValidate = true;
-                      if (datasource.kind === 'grpc' && req.params.param) {
+                      if (datasource.kind === DatasourceKind.Grpc && req.params.param) {
                         const grpcParams: Record<string, string> = {};
                         for (const pair of req.params.param as string[]) {
                           const idx = pair.indexOf('=');

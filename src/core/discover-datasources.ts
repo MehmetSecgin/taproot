@@ -3,10 +3,11 @@ import { defaultDatasourceName, normalizeService } from './app.js';
 import { buildKbBootstrapCandidate, ensureCredentialDefaults } from './bootstrap.js';
 import { nowIso } from './time.js';
 import type { AppContext } from './app.js';
-import type { DatasourceProfile } from '../types/core.js';
+import { DatasourceKind, type DatasourceProfile } from '../types/core.js';
+import type { AccessMethod } from '../types/core.js';
 
 export type DiscoverySource = 'kubectl' | 'teleport' | 'kb';
-export type DiscoveryMode = 'native' | 'qa-portforward' | 'tsh';
+export type DiscoveryMode = AccessMethod;
 
 export interface KubeServicePort {
   name?: string;
@@ -35,9 +36,14 @@ export interface TshDatabase {
   uri?: string;
 }
 
+export type DiscoveryProposalKind =
+  | typeof DatasourceKind.Mysql
+  | typeof DatasourceKind.Postgres
+  | typeof DatasourceKind.TeleportMysql;
+
 export interface DiscoveryProposal {
   name: string;
-  kind: 'mysql' | 'postgres' | 'teleport-mysql';
+  kind: DiscoveryProposalKind;
   env: string;
   service: string;
   namespace?: string;
@@ -50,18 +56,20 @@ export interface DiscoveryProposal {
   reason: string;
 }
 
-const DB_SERVICE_PATTERNS: Array<{ pattern: RegExp; engine: 'mysql' | 'postgres' }> = [
-  { pattern: /(mysql|mariadb|maria|tidb|percona|aurora)/i, engine: 'mysql' },
-  { pattern: /(postgres|postgresql|pgbouncer|^pg-)/i, engine: 'postgres' },
+type DbEngine = typeof DatasourceKind.Mysql | typeof DatasourceKind.Postgres;
+
+const DB_SERVICE_PATTERNS: Array<{ pattern: RegExp; engine: DbEngine }> = [
+  { pattern: /(mysql|mariadb|maria|tidb|percona|aurora)/i, engine: DatasourceKind.Mysql },
+  { pattern: /(postgres|postgresql|pgbouncer|^pg-)/i, engine: DatasourceKind.Postgres },
 ];
 
-const DB_PORT_MAP: Record<number, 'mysql' | 'postgres'> = {
-  3306: 'mysql',
-  4000: 'mysql', // tidb
-  6000: 'mysql', // tiproxy (mysql wire)
-  6033: 'mysql', // alternate mysql proxy port
-  5432: 'postgres',
-  6432: 'postgres', // pgbouncer
+const DB_PORT_MAP: Record<number, DbEngine> = {
+  3306: DatasourceKind.Mysql,
+  4000: DatasourceKind.Mysql, // tidb
+  6000: DatasourceKind.Mysql, // tiproxy (mysql wire)
+  6033: DatasourceKind.Mysql, // alternate mysql proxy port
+  5432: DatasourceKind.Postgres,
+  6432: DatasourceKind.Postgres, // pgbouncer
 };
 
 const SYSTEM_NAMESPACES = new Set([
@@ -94,7 +102,7 @@ export function classifyKubeService(svc: KubeService, opts: KubeClassifyOptions)
   if (namespace && SYSTEM_NAMESPACES.has(namespace)) return null;
 
   const ports = (svc.spec?.ports || []).filter((p) => typeof p.port === 'number');
-  let engine: 'mysql' | 'postgres' | null = null;
+  let engine: DbEngine | null = null;
   let matchedPort: number | undefined;
   let reason = '';
 
@@ -120,7 +128,7 @@ export function classifyKubeService(svc: KubeService, opts: KubeClassifyOptions)
   }
 
   if (!engine) return null;
-  const port = matchedPort ?? (engine === 'postgres' ? 5432 : 3306);
+  const port = matchedPort ?? (engine === DatasourceKind.Postgres ? 5432 : 3306);
 
   const service = normalizeService(name, opts.aliases || {});
   const profileName = defaultDatasourceName(opts.env, service, namespace);
@@ -172,16 +180,16 @@ export function classifyTshDatabase(db: TshDatabase, opts: TshClassifyOptions): 
   const labelEnv = (labels.env || labels.environment || '').toLowerCase();
   if (labelEnv && labelEnv !== opts.env.toLowerCase()) return null;
 
-  let engine: 'mysql' | 'postgres' | null = null;
-  if (protocol === 'mysql' || protocol === 'mariadb' || protocol === 'tidb') engine = 'mysql';
-  else if (protocol === 'postgres' || protocol === 'postgresql') engine = 'postgres';
+  let engine: DbEngine | null = null;
+  if (protocol === 'mysql' || protocol === 'mariadb' || protocol === 'tidb') engine = DatasourceKind.Mysql;
+  else if (protocol === 'postgres' || protocol === 'postgresql') engine = DatasourceKind.Postgres;
   if (!engine) return null;
 
   const serviceRaw = labels.service || labels.app || name;
   const service = normalizeService(serviceRaw, opts.aliases || {});
   const profileName = defaultDatasourceName(opts.env, service);
   const credentialRef = `${opts.env}:${service}`;
-  const kind: DiscoveryProposal['kind'] = engine === 'mysql' ? 'teleport-mysql' : 'postgres';
+  const kind: DiscoveryProposalKind = engine === DatasourceKind.Mysql ? DatasourceKind.TeleportMysql : DatasourceKind.Postgres;
   const vpn = opts.vpn !== false;
 
   const connectors = vpn ? ['openvpn', 'teleport'] : ['teleport'];

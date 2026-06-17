@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 function run(command: string): { ok: boolean; detail: string } {
@@ -13,7 +14,7 @@ export const kubectlPortforwardPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    accessMethods: ['qa-portforward'],
+    accessMethods: [AccessMethod.QaPortforward],
     priority: 85,
   },
 

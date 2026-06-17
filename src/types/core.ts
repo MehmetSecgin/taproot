@@ -10,12 +10,28 @@ export type Capability =
 
 export type PluginKind = 'connector' | 'executor' | 'resolver';
 
+export const DatasourceKind = {
+  Mysql: 'mysql',
+  Postgres: 'postgres',
+  TeleportMysql: 'teleport-mysql',
+  Redis: 'redis',
+  Grpc: 'grpc',
+} as const;
+export type DatasourceKind = (typeof DatasourceKind)[keyof typeof DatasourceKind];
+
+export const AccessMethod = {
+  Native: 'native',
+  QaPortforward: 'qa-portforward',
+  Tsh: 'tsh',
+} as const;
+export type AccessMethod = (typeof AccessMethod)[keyof typeof AccessMethod];
+
 export interface PluginManifest {
   name: string;
   version: string;
   kind: PluginKind;
   capabilities: Capability[];
-  accessMethods?: string[];
+  accessMethods?: AccessMethod[];
   configSchema?: Record<string, unknown>;
   priority?: number;
 }

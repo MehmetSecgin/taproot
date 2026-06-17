@@ -7,6 +7,7 @@ import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, 
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
+import { AccessMethod, DatasourceKind } from '../types/core.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
@@ -56,9 +57,9 @@ function discoverTargets(ctx: AppContext, input: { env: string; service: string;
   for (const method of input.accessMethods) {
     const current = String(method || '').trim().toLowerCase();
     let next: string[] = [];
-    if (current === 'qa-portforward') {
+    if (current === AccessMethod.QaPortforward) {
       next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, policy);
-    } else if (current === 'tsh') {
+    } else if (current === AccessMethod.Tsh) {
       next = discoverTeleportTargets(input.service, input.env, policy);
     }
     for (const target of next) {
@@ -299,14 +300,14 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             namespace: targetNamespace,
             ...(kb || {}),
           };
-          if (accessMethod === 'tsh') {
+          if (accessMethod === AccessMethod.Tsh) {
             datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
               confidence: 0.6,
             });
             resolutionSource = 'kb';
-          } else if (accessMethod === 'qa-portforward') {
+          } else if (accessMethod === AccessMethod.QaPortforward) {
             datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
@@ -470,7 +471,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (opts.allowFlush) pluginParams.allowFlush = true;
         if (opts.requestJson) pluginParams.requestJson = String(opts.requestJson);
         if (opts.skipProtoValidate) pluginParams.skipProtoValidate = true;
-        if (datasource.kind === 'grpc' && params && Object.keys(params).length) {
+        if (datasource.kind === DatasourceKind.Grpc && params && Object.keys(params).length) {
           pluginParams.params = params;
         }
         let result;
@@ -498,7 +499,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             !ctx.jsonMode &&
             input.isTTY &&
             !process.env.CI &&
-            (datasource.kind === 'mysql' || datasource.kind === 'postgres');
+            (datasource.kind === DatasourceKind.Mysql || datasource.kind === DatasourceKind.Postgres);
           if (!canPromptPassword) throw err;
           progress.update(`password required for ${datasource.credentialRef}`);
           progress.stop();

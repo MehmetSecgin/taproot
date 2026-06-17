@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 
 const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
@@ -64,7 +65,7 @@ export const teleportPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    accessMethods: ['tsh'],
+    accessMethods: [AccessMethod.Tsh],
     priority: 90,
   },
 

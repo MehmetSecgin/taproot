@@ -6,6 +6,7 @@ import type {
   SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
+import { AccessMethod } from '../../types/core.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -161,7 +162,7 @@ export const grpcPlugin: TapRootPlugin = {
     version: '0.2.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['native', 'qa-portforward'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 
