@@ -47,19 +47,14 @@ jobs:
             RANGE="$LAST_TAG..HEAD"
             echo "Scanning commits in $RANGE"
           fi
-          LOG="$(git log "$RANGE" --pretty=%B)"
-          if [ -z "$LOG" ]; then
+          COMMITS="$(git log "$RANGE" --oneline)"
+          if [ -z "$COMMITS" ]; then
             echo "No new commits since $LAST_TAG; nothing to release."
             echo "bump=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if printf '%s\n' "$LOG" | grep -qE '(^|[[:space:]])BREAKING CHANGE:|^[a-zA-Z]+(\([^)]+\))?!:'; then
-            BUMP=major
-          else
-            BUMP=minor
-          fi
-          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
-          echo "Selected bump: $BUMP"
+          echo "bump=minor" >> "$GITHUB_OUTPUT"
+          echo "Selected bump: minor"
 
       - name: Install dependencies
         if: steps.bump.outputs.bump != ''
