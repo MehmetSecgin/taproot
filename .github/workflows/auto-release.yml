@@ -55,10 +55,8 @@ jobs:
           fi
           if printf '%s\n' "$LOG" | grep -qE '(^|[[:space:]])BREAKING CHANGE:|^[a-zA-Z]+(\([^)]+\))?!:'; then
             BUMP=major
-          elif printf '%s\n' "$LOG" | grep -qE '^feat(\([^)]+\))?:'; then
-            BUMP=minor
           else
-            BUMP=patch
+            BUMP=minor
           fi
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
           echo "Selected bump: $BUMP"
