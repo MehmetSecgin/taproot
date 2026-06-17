@@ -202,6 +202,22 @@ function hasMissingRequestedTables(rows: SchemaObservationEntry[], tables?: stri
   return [...requested].some((table) => !present.has(table));
 }
 
+function shouldRefreshSchema(input: {
+  datasource: DatasourceProfile | undefined;
+  currentRows: SchemaObservationEntry[];
+  requestedTables?: string[];
+  emptyReason: string | null;
+  forceRefresh: boolean;
+}): boolean {
+  if (!input.datasource || !supportsSchemaRefresh(input.datasource)) return false;
+  if (input.forceRefresh) return true;
+  if (input.emptyReason === 'schema_refresh_required') return true;
+  if (hasMissingRequestedTables(input.currentRows, input.requestedTables)) return true;
+  // Service-keyed cache: refresh once per service. Re-refresh only when no row has
+  // properly refreshed metadata yet (observed-only rows from ad-hoc queries don't force re-refresh).
+  return input.currentRows.length > 0 && !input.currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
+}
+
 export async function ensureSchemaSnapshot(
   ctx: AppContext,
   opts: {
@@ -237,19 +253,13 @@ export async function ensureSchemaSnapshot(
   });
 
   const currentRows = filterRequestedTables(scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) }), opts.tables);
-  const missingRequestedTables = hasMissingRequestedTables(currentRows, opts.tables);
-  // Service-keyed cache: full refresh runs at most once per service. Subsequent calls return the cached schema.
-  // Refresh triggers only when (a) no rows for this service, (b) requested tables are missing,
-  // or (c) cached rows lack current introspection metadata (only observed by ad-hoc queries, never refreshed).
-  // First-time introspection trigger: cache exists but no row has been properly refreshed yet.
-  // Subsequent observed-only rows (CTE aliases, qualified-name dupes) do not force re-refresh.
-  const hasAnyRefreshed = currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
-  const incompleteMetadata = currentRows.length > 0 && !hasAnyRefreshed;
-  const forceRefresh = Boolean((opts as { refresh?: boolean }).refresh);
-  const shouldRefresh =
-    Boolean(datasource) &&
-    supportsSchemaRefresh(datasource) &&
-    (forceRefresh || state.emptyReason === 'schema_refresh_required' || missingRequestedTables || incompleteMetadata);
+  const shouldRefresh = shouldRefreshSchema({
+    datasource,
+    currentRows,
+    requestedTables: opts.tables,
+    emptyReason: state.emptyReason,
+    forceRefresh: Boolean(opts.refresh),
+  });
 
   if (shouldRefresh && datasource) {
     await refreshSchemaForDatasource(ctx, datasource, {
