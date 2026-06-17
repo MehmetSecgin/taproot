@@ -13,6 +13,15 @@ export function bareTableName(value: unknown): string {
   return String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
 }
 
+function pickBestByKey<T extends { key: string }>(rows: T[], isBetter: (candidate: T, current: T) => boolean): T[] {
+  const map = new Map<string, T>();
+  for (const row of rows) {
+    const cur = map.get(row.key);
+    if (!cur || isBetter(row, cur)) map.set(row.key, row);
+  }
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
 interface ResolutionEntry {
   key: string;
   env: string;
@@ -999,59 +1008,30 @@ export class LearningStore {
     const before =
       resolution.length + library.length + stats.length + targetSelections.length + schemaObservations.length + schemaJoins.length + schemaShapes.length + grpcSchemas.length;
 
-    const resolutionMap = new Map<string, ResolutionEntry>();
-    for (const row of resolution) {
-      const cur = resolutionMap.get(row.key);
-      if (!cur || row.confidence > cur.confidence || row.lastVerifiedAt > cur.lastVerifiedAt) resolutionMap.set(row.key, row);
-    }
-    const libraryMap = new Map<string, QueryLibraryEntry>();
-    for (const row of library) {
-      const cur = libraryMap.get(row.key);
-      if (!cur || row.successCount > cur.successCount || row.lastVerifiedAt > cur.lastVerifiedAt) libraryMap.set(row.key, row);
-    }
-    const statMap = new Map<string, QueryStatEntry>();
-    for (const row of stats) {
-      const cur = statMap.get(row.key);
-      if (!cur || row.lastRunAt > cur.lastRunAt) statMap.set(row.key, row);
-    }
+    const compactedResolution = pickBestByKey(resolution, (a, b) =>
+      a.confidence > b.confidence || a.lastVerifiedAt > b.lastVerifiedAt,
+    );
+    const compactedLibrary = pickBestByKey(library, (a, b) =>
+      a.successCount > b.successCount || a.lastVerifiedAt > b.lastVerifiedAt,
+    );
+    const compactedStats = pickBestByKey(stats, (a, b) => a.lastRunAt > b.lastRunAt);
+    const compactedTargetSelections = pickBestByKey(targetSelections, (a, b) => a.updatedAt > b.updatedAt);
+    const compactedSchemaObservations = pickBestByKey(schemaObservations, (a, b) =>
+      a.sightings > b.sightings || a.lastSeenAt > b.lastSeenAt,
+    );
+    const compactedSchemaJoins = pickBestByKey(schemaJoins, (a, b) =>
+      a.sightings > b.sightings || a.lastSeenAt > b.lastSeenAt,
+    );
+    const compactedSchemaShapes = pickBestByKey(schemaShapes, (a, b) =>
+      a.sightings > b.sightings || a.lastSeenAt > b.lastSeenAt,
+    );
+    const compactedGrpcSchemas = pickBestByKey(grpcSchemas, (a, b) => a.lastSeenAt > b.lastSeenAt);
 
-    const compactedResolution = [...resolutionMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const compactedLibrary = [...libraryMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const compactedStats = [...statMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const targetSelectionMap = new Map<string, TargetSelectionEntry>();
-    for (const row of targetSelections) {
-      const cur = targetSelectionMap.get(row.key);
-      if (!cur || row.updatedAt > cur.updatedAt) targetSelectionMap.set(row.key, row);
-    }
-    const schemaObservationMap = new Map<string, SchemaObservationEntry>();
-    for (const row of schemaObservations) {
-      const cur = schemaObservationMap.get(row.key);
-      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaObservationMap.set(row.key, row);
-    }
-    const schemaJoinMap = new Map<string, SchemaJoinEntry>();
-    for (const row of schemaJoins) {
-      const cur = schemaJoinMap.get(row.key);
-      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaJoinMap.set(row.key, row);
-    }
-    const schemaShapeMap = new Map<string, SchemaQueryShapeEntry>();
-    for (const row of schemaShapes) {
-      const cur = schemaShapeMap.get(row.key);
-      if (!cur || row.sightings > cur.sightings || row.lastSeenAt > cur.lastSeenAt) schemaShapeMap.set(row.key, row);
-    }
-    const grpcSchemaMap = new Map<string, GrpcServiceSchemaEntry>();
-    for (const row of grpcSchemas) {
-      const cur = grpcSchemaMap.get(row.key);
-      if (!cur || row.lastSeenAt > cur.lastSeenAt) grpcSchemaMap.set(row.key, row);
-    }
-    const compactedSchemaObservations = [...schemaObservationMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const compactedSchemaJoins = [...schemaJoinMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const compactedSchemaShapes = [...schemaShapeMap.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const compactedGrpcSchemas = [...grpcSchemaMap.values()].sort((a, b) => a.key.localeCompare(b.key));
     const after =
       compactedResolution.length +
       compactedLibrary.length +
       compactedStats.length +
-      targetSelectionMap.size +
+      compactedTargetSelections.length +
       compactedSchemaObservations.length +
       compactedSchemaJoins.length +
       compactedSchemaShapes.length +
@@ -1060,7 +1040,7 @@ export class LearningStore {
       resolution: compactedResolution,
       library: compactedLibrary,
       stats: compactedStats,
-      targetSelections: [...targetSelectionMap.values()].sort((a, b) => a.key.localeCompare(b.key)),
+      targetSelections: compactedTargetSelections,
       schemaObservations: compactedSchemaObservations,
       schemaJoins: compactedSchemaJoins,
       schemaShapes: compactedSchemaShapes,
