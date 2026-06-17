@@ -3,6 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import type { AppContext } from '../core/app.js';
 import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
@@ -14,7 +15,7 @@ import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } 
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
 import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
 import { DatasourceKind } from '../types/core.js';
-import type { DatasourceProfile } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
 import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
@@ -66,6 +67,60 @@ function parseQueryParams(params: Record<string, unknown>): Record<string, strin
 
 function cardParamNames(card: QueryCard): string[] {
   return (card.params || []).map((param) => param.name).filter(Boolean);
+}
+
+function buildPluginParams(
+  reqParams: Record<string, unknown>,
+  datasourceKind: string,
+): Record<string, unknown> | undefined {
+  const pluginParams: Record<string, unknown> = {};
+  if (reqParams.proto) pluginParams.protoMessage = String(reqParams.proto);
+  if (reqParams.protoRoot) pluginParams.protoRoot = String(reqParams.protoRoot);
+  if (reqParams.allowFlush) pluginParams.allowFlush = true;
+  if (reqParams.requestJson) pluginParams.requestJson = String(reqParams.requestJson);
+  if (reqParams.skipProtoValidate) pluginParams.skipProtoValidate = true;
+  if (datasourceKind === DatasourceKind.Grpc && reqParams.param) {
+    const grpcParams: Record<string, string> = {};
+    for (const pair of reqParams.param as string[]) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) grpcParams[pair.slice(0, idx)] = pair.slice(idx + 1);
+    }
+    if (Object.keys(grpcParams).length) pluginParams.params = grpcParams;
+  }
+  return Object.keys(pluginParams).length ? pluginParams : undefined;
+}
+
+function mergeSchemaContext(
+  base: SchemaContext,
+  pluginSchema: SchemaContext | undefined,
+): SchemaContext {
+  if (!pluginSchema) return base;
+  return {
+    ...base,
+    ...pluginSchema,
+    tables: { ...(base.tables || {}), ...(pluginSchema.tables || {}) },
+  };
+}
+
+function buildResolvedMeta(input: {
+  ctx: AppContext;
+  datasource: DatasourceProfile;
+  env: string;
+  namespace: string;
+  service: string;
+  source: string;
+}): NonNullable<QueryResult['resolved']> {
+  const { ctx, datasource, env, namespace, service, source } = input;
+  return {
+    source,
+    env,
+    namespace: datasource.namespace || namespace || undefined,
+    service,
+    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
+    target: String(datasource.connection.target || ''),
+    database: String(datasource.connection.database || ''),
+    engine: datasource.kind,
+  };
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
@@ -365,42 +420,26 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
                         await new Promise((r) => setTimeout(r, testHoldMs));
                       }
-                      const pluginParams: Record<string, unknown> = {};
-                      if (req.params.proto) pluginParams.protoMessage = String(req.params.proto);
-                      if (req.params.protoRoot) pluginParams.protoRoot = String(req.params.protoRoot);
-                      if (req.params.allowFlush) pluginParams.allowFlush = true;
-                      if (req.params.requestJson) pluginParams.requestJson = String(req.params.requestJson);
-                      if (req.params.skipProtoValidate) pluginParams.skipProtoValidate = true;
-                      if (datasource.kind === DatasourceKind.Grpc && req.params.param) {
-                        const grpcParams: Record<string, string> = {};
-                        for (const pair of req.params.param as string[]) {
-                          const idx = pair.indexOf('=');
-                          if (idx > 0) grpcParams[pair.slice(0, idx)] = pair.slice(idx + 1);
-                        }
-                        if (Object.keys(grpcParams).length) pluginParams.params = grpcParams;
-                      }
                       return await execute(
                         {
                           datasource: datasource as DatasourceProfile,
                           query,
                           capability: capability as any,
                           timeoutMs: remainingTimeoutMs(),
-                          pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
+                          pluginParams: buildPluginParams(req.params, datasource.kind),
                         },
                         execCreds,
                       );
                     },
                   });
-                  result.resolved = {
-                    source: resolutionSource,
+                  result.resolved = buildResolvedMeta({
+                    ctx,
+                    datasource,
                     env,
-                    namespace: datasource.namespace || namespace || undefined,
+                    namespace,
                     service,
-                    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
-                    target: String(datasource.connection.target || ''),
-                    database: String(datasource.connection.database || ''),
-                    engine: datasource.kind,
-                  };
+                    source: resolutionSource,
+                  });
                   phaseExecuteMs = Date.now() - executeStart;
                   result.runId = artifacts.runId;
                   if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
@@ -414,14 +453,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   (base.meta as Record<string, unknown>).phases = phases;
                   (base.meta as Record<string, unknown>).resolved = result.resolved;
                   const pluginMeta = result.meta || {};
-                  const pluginSchema = pluginMeta.schemaContext;
-                  const mergedSchema = pluginSchema
-                    ? {
-                        ...schemaContext,
-                        ...pluginSchema,
-                        tables: { ...(schemaContext.tables || {}), ...(pluginSchema.tables || {}) },
-                      }
-                    : schemaContext;
+                  const mergedSchema = mergeSchemaContext(schemaContext, pluginMeta.schemaContext);
                   result.meta = { ...pluginMeta, schemaContext: mergedSchema, queryMemory };
                   base.meta.schemaContext = mergedSchema;
                   appendRunsLedgerEntry(
