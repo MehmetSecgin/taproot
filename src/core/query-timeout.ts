@@ -1,12 +1,14 @@
+import { badInput, queryTimeoutErr } from './error-classification.js';
+
 export function queryTimeoutError(timeoutMs: number): Error {
-  return new Error(`QUERY_TIMEOUT: query exceeded timeout (${timeoutMs}ms) and was aborted.`);
+  return queryTimeoutErr(`query exceeded timeout (${timeoutMs}ms) and was aborted.`);
 }
 
 export function parseTimeoutMs(value: unknown, fallbackMs: number): number {
   if (value === undefined || value === null || value === '') return fallbackMs;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`BAD_INPUT: invalid timeout '${String(value)}'. Expected a positive integer in milliseconds.`);
+    throw badInput(`invalid timeout '${String(value)}'. Expected a positive integer in milliseconds.`);
   }
   return Math.floor(parsed);
 }

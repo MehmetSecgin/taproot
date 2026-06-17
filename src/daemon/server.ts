@@ -10,7 +10,8 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
-import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
+import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
+import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
@@ -193,7 +194,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const service = normalizeService(String(req.params.service || alias?.[2] || ''), ctx.runtimeConfigStore.serviceAliases());
               const policy = environmentPolicy(ctx, env);
               if (allowDiscovery || policy.allowDiscoveryByDefault) {
-                throw new Error('DISCOVERY_UNAVAILABLE: discovery mode is only available in direct CLI mode when daemon is bypassed.');
+                throw discoveryUnavailable('discovery mode is only available in direct CLI mode when daemon is bypassed.');
               }
               let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
               let resolutionSource: 'explicit' | 'store' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
@@ -210,7 +211,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               }
               if (!datasource) {
                 if (policy.deterministicRequired) {
-                  throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
+                  throw deterministicRequired(`environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
                 }
                 throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
               }
@@ -219,7 +220,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const timeoutMs = parseTimeoutMs(req.params.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
               const timeoutController = new AbortController();
               const timeoutTimer = setTimeout(() => {
-                timeoutController.abort(new Error(`QUERY_TIMEOUT: query exceeded timeout (${timeoutMs}ms) and was aborted.`));
+                timeoutController.abort(queryTimeoutError(timeoutMs));
               }, timeoutMs);
               const startedAtMs = Date.now();
               const remainingTimeoutMs = (): number => Math.max(1, timeoutMs - (Date.now() - startedAtMs));
@@ -234,8 +235,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   if (kb) {
                     const critical = criticalDatasourceKbConflicts(datasource as DatasourceProfile, kb);
                     if (critical.length) {
-                      throw new Error(
-                        `MISCONFIGURED_DATASOURCE: datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+                      throw misconfiguredDatasource(
+                        `datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
                       );
                     }
                     const conflicts = datasourceKbConflicts(datasource as DatasourceProfile, kb);

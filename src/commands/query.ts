@@ -6,6 +6,7 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
+import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
@@ -70,8 +71,8 @@ function discoverTargets(ctx: AppContext, input: { env: string; service: string;
 }
 
 function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
-  return new Error(
-    `MISCONFIGURED_DATASOURCE: datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+  return misconfiguredDatasource(
+    `datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
   );
 }
 
@@ -316,11 +317,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
       }
       if (!datasource && deterministicRequired && !allowDiscovery) {
-        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
+        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
       }
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
       if (deterministicRequired && !allowDiscovery && resolutionSource === 'learning') {
-        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
+        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
       }
       const warnings: string[] = [];
       if (env && service) {

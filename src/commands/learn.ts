@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
+import { connectivity } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrpcSchema, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
@@ -549,13 +550,10 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         const failures = connectorChecks.filter((check) => check.status === 'fail');
         if (failures.length) {
           const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
-          const err = new Error(`CONNECTIVITY: ${detail}; ensure VPN/teleport/telepresence are up before retrying`);
-          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'CONNECTIVITY';
-          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+          throw connectivity(`${detail}; ensure VPN/teleport/telepresence are up before retrying`, {
             failures,
             nextCommand: `taproot --json doctor --datasource ${datasource.name} --connect`,
-          };
-          throw err;
+          });
         }
       } catch (error) {
         const e = error as Error & { code?: string };

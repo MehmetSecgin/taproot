@@ -6,7 +6,7 @@ import type {
   SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
-import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
+import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import {
@@ -236,14 +236,11 @@ export const grpcPlugin: TapRootPlugin = {
       if (methodShape) {
         const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, payload);
         if (validationError) {
-          const err = new Error(`BAD_INPUT: ${validationError.message}`);
-          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'BAD_INPUT';
-          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+          throw badInput(validationError.message, {
             field: validationError.field,
             expected: validationError.expected,
             nextCommand: `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`,
-          };
-          throw err;
+          });
         }
       }
     }

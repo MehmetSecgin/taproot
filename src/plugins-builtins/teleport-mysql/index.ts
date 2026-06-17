@@ -2,7 +2,7 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
-import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
+import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
@@ -87,7 +87,7 @@ async function waitForTcpReady(host: string, port: number, timeoutMs: number, sh
     if (ok) return;
     await new Promise((r) => setTimeout(r, 120));
   }
-  throw new Error(`CONNECTIVITY: timed out waiting for teleport db proxy on ${host}:${port}`);
+  throw connectivity(`timed out waiting for teleport db proxy on ${host}:${port}`);
 }
 
 async function stopProxy(proxy: ProxyRuntime): Promise<void> {
@@ -193,14 +193,14 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
     await stopProxy(runtime);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
-    if (spawnError) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`);
+    if (spawnError) throw connectivity(`teleport proxy path unavailable; ${spawnError}`);
     const exit = exitState.value;
     if (exit) {
       const detail = stderr.trim() || `tsh proxy db exited code=${exit.code} signal=${exit.signal ?? 'none'}`;
-      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
+      throw connectivity(`teleport proxy path unavailable; ${detail}`);
     }
     const detail = stderr.trim();
-    if (detail) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
+    if (detail) throw connectivity(`teleport proxy path unavailable; ${detail}`);
     throw error;
   }
 }
@@ -300,7 +300,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       if (String((proxyError as Error).message || '').startsWith('QUERY_TIMEOUT:')) {
         throw proxyError;
       }
-      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
+      throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
     } finally {
       if (shouldCleanup) {
         await closeTeleportMysqlSessionProxies(effectiveSessionId);

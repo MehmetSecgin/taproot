@@ -1,3 +1,5 @@
+import { overloaded } from '../core/error-classification.js';
+
 export interface QueryLimiterStats {
   inFlight: number;
   queued: number;
@@ -47,7 +49,7 @@ export class QueryLimiter {
       return this.makeRelease();
     }
     if (this.queue.length >= this.maxQueued) {
-      throw new Error(`OVERLOADED: query queue limit reached (${this.queue.length}/${this.maxQueued})`);
+      throw overloaded(`query queue limit reached (${this.queue.length}/${this.maxQueued})`);
     }
     return await new Promise<() => void>((resolve, reject) => {
       const entry: QueueEntry = {

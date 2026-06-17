@@ -1,6 +1,7 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
 import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
+import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { SCHEMA_METADATA_VERSION } from '../store/learning.js';
 import { loadProtobufRoot } from './proto-loader.js';
@@ -147,7 +148,7 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
     mode: 'connect',
   });
   if (connectorChecks.some((c) => c.status === 'fail')) {
-    throw new Error(`CONNECTIVITY: connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+    throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
   }
   return plugin.execute(
     {

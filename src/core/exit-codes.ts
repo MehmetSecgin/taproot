@@ -1,61 +1,13 @@
-export const EXIT_CODES = {
-  OK: 0,
-  GENERAL_ERROR: 1,
-  BAD_INPUT: 2,
-  CONNECTIVITY: 3,
-  AUTH: 4,
-  ACCESS_DENIED: 5,
-  UNKNOWN_TARGET: 6,
-  NOT_READY: 7,
-} as const;
+import { classifyError, exitCodeForClass, EXIT_CODES } from './error-classification.js';
 
-function normalizedMessage(input: unknown): string {
-  return String((input as Error)?.message || input || '').trim();
-}
+export { EXIT_CODES, exitCodeForClass } from './error-classification.js';
 
 export function classifyExitCode(input: unknown): number {
-  const message = normalizedMessage(input);
-  const upper = message.toUpperCase();
+  const message = String((input as Error)?.message || input || '').trim();
+  if (!message) return EXIT_CODES.GENERAL_ERROR;
   const lower = message.toLowerCase();
-
   if (/unknown option|required option|too many arguments|missing required argument|invalid argument/.test(lower)) {
     return EXIT_CODES.BAD_INPUT;
   }
-  if (upper.startsWith('BAD_INPUT:')) return EXIT_CODES.BAD_INPUT;
-  if (upper.startsWith('CONNECTIVITY:')) return EXIT_CODES.CONNECTIVITY;
-  if (upper.startsWith('QUERY_TIMEOUT:')) return EXIT_CODES.GENERAL_ERROR;
-  if (upper.startsWith('MISSING_PARTITION_PREDICATE:')) return EXIT_CODES.BAD_INPUT;
-  if (upper.startsWith('REDUNDANT_INTROSPECTION:')) return EXIT_CODES.BAD_INPUT;
-  if (upper.startsWith('AUTH_EXPIRED:')) return EXIT_CODES.AUTH;
-  if (upper.startsWith('ACCESS_DENIED:')) return EXIT_CODES.ACCESS_DENIED;
-  if (upper.startsWith('UNKNOWN_TARGET:')) return EXIT_CODES.UNKNOWN_TARGET;
-  if (upper.startsWith('MISCONFIGURED_DATASOURCE:')) return EXIT_CODES.BAD_INPUT;
-  if (upper.startsWith('DETERMINISTIC_REQUIRED:')) return EXIT_CODES.BAD_INPUT;
-  if (upper.startsWith('DISCOVERY_UNAVAILABLE:')) return EXIT_CODES.BAD_INPUT;
-  return EXIT_CODES.GENERAL_ERROR;
-}
-
-export function exitCodeForClass(code: string): number {
-  switch (code) {
-    case 'BAD_INPUT':
-      return EXIT_CODES.BAD_INPUT;
-    case 'CONNECTIVITY':
-      return EXIT_CODES.CONNECTIVITY;
-    case 'QUERY_TIMEOUT':
-      return EXIT_CODES.GENERAL_ERROR;
-    case 'MISSING_PARTITION_PREDICATE':
-      return EXIT_CODES.BAD_INPUT;
-    case 'REDUNDANT_INTROSPECTION':
-      return EXIT_CODES.BAD_INPUT;
-    case 'AUTH_EXPIRED':
-      return EXIT_CODES.AUTH;
-    case 'ACCESS_DENIED':
-      return EXIT_CODES.ACCESS_DENIED;
-    case 'UNKNOWN_TARGET':
-      return EXIT_CODES.UNKNOWN_TARGET;
-    case 'MISCONFIGURED_DATASOURCE':
-      return EXIT_CODES.BAD_INPUT;
-    default:
-      return EXIT_CODES.GENERAL_ERROR;
-  }
+  return exitCodeForClass(classifyError(message));
 }
