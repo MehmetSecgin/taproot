@@ -8,6 +8,7 @@ import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 
 function runDirFromCtx(ctx: AppContext): string {
   return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.taproot'), 'run');
@@ -59,7 +60,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       while (Date.now() - startedAt < 5000) {
         try {
           progress.update('waiting for daemon health check');
-          const res = await rpcCall({ method: 'daemon.status' });
+          const res = await rpcCall({ method: RpcMethod.DaemonStatus });
           if (res.ok) {
             if (ctx.jsonMode) printJson({ started: true, status: res.data });
             else {
@@ -82,7 +83,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
 
   d.command('status').action(async () => {
     const ctx = getCtx();
-    const res = await rpcCall({ method: 'daemon.status' });
+    const res = await rpcCall({ method: RpcMethod.DaemonStatus });
     if (!res.ok) throw new Error(res.error?.message || 'daemon status failed');
     if (ctx.jsonMode) {
       printJson({
@@ -105,7 +106,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
     });
     try {
       progress.update('stopping taprootd');
-      const res = await rpcCall({ method: 'daemon.stop' });
+      const res = await rpcCall({ method: RpcMethod.DaemonStop });
       if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
       if (ctx.jsonMode) {
         printJson({
@@ -135,7 +136,7 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
     try {
       progress.update('restarting taprootd');
       try {
-        await rpcCall({ method: 'daemon.stop' });
+        await rpcCall({ method: RpcMethod.DaemonStop });
       } catch {
         // ignore if not running
       }

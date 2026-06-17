@@ -18,6 +18,7 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 import { ensureSchemaSnapshot } from './learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
@@ -158,7 +159,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           try {
             const rpc = await rpcCall({
               timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, timeoutMs + 1000),
-              method: 'query.execute',
+              method: RpcMethod.QueryExecute,
               params: {
                 datasource: opts.datasource,
                 env: opts.env,

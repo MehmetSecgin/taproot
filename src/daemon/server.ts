@@ -14,7 +14,7 @@ import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } 
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
 import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
-import type { RpcRequest, RpcResponse } from './types.js';
+import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
@@ -122,7 +122,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
           const begin = Date.now();
           const base = responseBase(req);
           try {
-            if (req.method === 'daemon.status') {
+            if (req.method === RpcMethod.DaemonStatus) {
               base.ok = true;
               base.data = {
                 pid: process.pid,
@@ -138,7 +138,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   maxConcurrentLeases: RUNTIME_CONSTANTS.session.maxConcurrentLeases,
                 },
               };
-            } else if (req.method === 'session.open') {
+            } else if (req.method === RpcMethod.SessionOpen) {
               const session = sessions.open({
                 datasourceName: String(req.params.datasource || req.params.datasourceName || 'unknown'),
                 env: String(req.params.env || ''),
@@ -151,10 +151,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = true;
               base.data = { session };
               base.meta.sessionId = session.sessionId;
-            } else if (req.method === 'session.list') {
+            } else if (req.method === RpcMethod.SessionList) {
               base.ok = true;
               base.data = { sessions: sessions.list() };
-            } else if (req.method === 'session.inspect') {
+            } else if (req.method === RpcMethod.SessionInspect) {
               const sessionId = String(req.params.sessionId || '');
               const session = sessions.get(sessionId);
               if (!session) {
@@ -165,7 +165,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.data = { session };
                 base.meta.sessionId = session.sessionId;
               }
-            } else if (req.method === 'session.close') {
+            } else if (req.method === RpcMethod.SessionClose) {
               const sessionId = String(req.params.sessionId || '');
               const closed = sessions.close(sessionId);
               if (!closed) {
@@ -177,12 +177,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.data = { closed: true, sessionId };
                 base.meta.sessionId = sessionId;
               }
-            } else if (req.method === 'session.closeAll') {
+            } else if (req.method === RpcMethod.SessionCloseAll) {
               const closedCount = sessions.closeAll();
               await closeAllTeleportMysqlProxies();
               base.ok = true;
               base.data = { closedCount };
-            } else if (req.method === 'query.execute') {
+            } else if (req.method === RpcMethod.QueryExecute) {
               const phaseStart = Date.now();
               let phaseResolveMs = 0;
               let phaseConnectMs = 0;
@@ -499,7 +499,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 if (leaseSessionId && leaseId) sessions.releaseLease(leaseSessionId, leaseId);
                 releaseGlobal();
               }
-            } else if (req.method === 'daemon.stop') {
+            } else if (req.method === RpcMethod.DaemonStop) {
               base.ok = true;
               base.data = { stopping: true };
               write({
