@@ -1,0 +1,108 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          set -euo pipefail
+          LAST_TAG="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n 1)"
+          if [ -z "$LAST_TAG" ]; then
+            RANGE="HEAD"
+            echo "No prior tag; scanning full history."
+          else
+            RANGE="$LAST_TAG..HEAD"
+            echo "Scanning commits in $RANGE"
+          fi
+          LOG="$(git log "$RANGE" --pretty=%B)"
+          if [ -z "$LOG" ]; then
+            echo "No new commits since $LAST_TAG; nothing to release."
+            echo "bump=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$LOG" | grep -qE '(^|[[:space:]])BREAKING CHANGE:|^[a-zA-Z]+(\([^)]+\))?!:'; then
+            BUMP=major
+          elif printf '%s\n' "$LOG" | grep -qE '^feat(\([^)]+\))?:'; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Selected bump: $BUMP"
+
+      - name: Install dependencies
+        if: steps.bump.outputs.bump != ''
+        run: npm ci
+
+      - name: Build and test
+        if: steps.bump.outputs.bump != ''
+        run: npm test
+
+      - name: Bump version + tag
+        if: steps.bump.outputs.bump != ''
+        id: version
+        run: |
+          set -euo pipefail
+          NEW_TAG="$(npm version "${{ steps.bump.outputs.bump }}" -m "chore(release): %s")"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "New tag: $NEW_TAG"
+
+      - name: Push commit + tag
+        if: steps.bump.outputs.bump != ''
+        run: |
+          git push origin HEAD:main
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish to npm
+        if: steps.bump.outputs.bump != ''
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret is not configured; skipping npm publish."
+            exit 0
+          fi
+          npm publish
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.bump != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            --verify-tag
