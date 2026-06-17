@@ -3,7 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext, classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -12,13 +12,13 @@ import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospe
 import { nowIso } from '../core/time.js';
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
+import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
 import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
-import { bootstrapDatasource } from '../core/bootstrap.js';
 import { ensureSchemaSnapshot } from '../commands/learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
@@ -197,19 +197,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               if (allowDiscovery || policy.allowDiscoveryByDefault) {
                 throw discoveryUnavailable('discovery mode is only available in direct CLI mode when daemon is bypassed.');
               }
-              let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
-              let resolutionSource: 'explicit' | 'store' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
-              if (!datasource && env && service) {
-                datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
-                if (datasource) resolutionSource = 'store';
-              }
-              if (!datasource && env && service) {
-                const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined);
-                if (bootstrapped) {
-                  datasource = bootstrapped.profile;
-                  resolutionSource = 'kb';
-                }
-              }
+              const resolution = await resolveCanonicalDatasource({ ctx, rawDs, env, namespace, service });
+              let datasource = resolution.datasource;
+              const resolutionSource = resolution.source;
               if (!datasource) {
                 if (policy.deterministicRequired) {
                   throw deterministicRequired(`environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
