@@ -50,18 +50,48 @@ function upsertAction(
   });
 }
 
+const CONNECTOR_SETUP_HINTS: Record<string, (datasourceName: string) => string> = {
+  openvpn: (name) =>
+    `taproot connector setup --datasource ${name} --connector openvpn --connect-command '<command>' --status-command '<command>'`,
+  teleport: (name) =>
+    `taproot connector setup --datasource ${name} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`,
+  'kubectl-portforward': (name) =>
+    `taproot connector setup --datasource ${name} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`,
+};
+
 function connectorSetupHint(datasourceName: string, connector: string): string {
-  if (connector === 'openvpn') {
-    return `taproot connector setup --datasource ${datasourceName} --connector openvpn --connect-command '<command>' --status-command '<command>'`;
-  }
-  if (connector === 'teleport') {
-    return `taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`;
-  }
-  if (connector === 'kubectl-portforward') {
-    return `taproot connector setup --datasource ${datasourceName} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`;
-  }
+  const builder = CONNECTOR_SETUP_HINTS[connector];
+  if (builder) return builder(datasourceName);
   return `taproot connector setup --datasource ${datasourceName} --connector ${connector || '<name>'} ...`;
 }
+
+interface ConnectorActionStrategy {
+  prefix: string;
+  missingConfigRegex: RegExp;
+  setupReason: string;
+  reconnectReason: string;
+}
+
+const CONNECTOR_ACTION_STRATEGIES: ConnectorActionStrategy[] = [
+  {
+    prefix: 'openvpn',
+    missingConfigRegex: /no connectcommand configured/i,
+    setupReason: 'OpenVPN is missing required commands, so connector setup is the first repair.',
+    reconnectReason: 'OpenVPN reported a blocked state, so retry the connector connect flow first.',
+  },
+  {
+    prefix: 'teleport',
+    missingConfigRegex: /no logincommand configured/i,
+    setupReason: 'Teleport is missing login wiring, so connector setup is required first.',
+    reconnectReason: 'Teleport reported a blocked session, so reconnect is the fastest next step.',
+  },
+  {
+    prefix: 'kubectl-portforward',
+    missingConfigRegex: /no connectcommand configured|no statuscommand configured/i,
+    setupReason: 'kubectl port-forward wiring is incomplete, so setup is required before reconnecting.',
+    reconnectReason: 'kubectl port-forward reported a blocked state, so retry the connector connect flow first.',
+  },
+];
 
 const ACTION_PRIORITIES = {
   connectorSetup: 10,
@@ -250,15 +280,16 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
       continue;
     }
 
-    if (label.startsWith('openvpn')) {
-      if (/no connectcommand configured/i.test(detail)) {
+    for (const strategy of CONNECTOR_ACTION_STRATEGIES) {
+      if (!label.startsWith(strategy.prefix)) continue;
+      if (strategy.missingConfigRegex.test(detail)) {
         addActionForCheck(
           actions,
-          connectorSetupHint(datasource.name, 'openvpn'),
+          connectorSetupHint(datasource.name, strategy.prefix),
           ACTION_PRIORITIES.connectorSetup,
           orderRef,
           check,
-          'OpenVPN is missing required commands, so connector setup is the first repair.',
+          strategy.setupReason,
         );
       } else {
         addActionForCheck(
@@ -267,49 +298,7 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
           ACTION_PRIORITIES.connectorConnect,
           orderRef,
           check,
-          'OpenVPN reported a blocked state, so retry the connector connect flow first.',
-        );
-      }
-    }
-    if (label.startsWith('teleport')) {
-      if (/no logincommand configured/i.test(detail)) {
-        addActionForCheck(
-          actions,
-          connectorSetupHint(datasource.name, 'teleport'),
-          ACTION_PRIORITIES.connectorSetup,
-          orderRef,
-          check,
-          'Teleport is missing login wiring, so connector setup is required first.',
-        );
-      } else {
-        addActionForCheck(
-          actions,
-          `taproot doctor --datasource ${datasource.name} --connect`,
-          ACTION_PRIORITIES.connectorConnect,
-          orderRef,
-          check,
-          'Teleport reported a blocked session, so reconnect is the fastest next step.',
-        );
-      }
-    }
-    if (label.startsWith('kubectl-portforward')) {
-      if (/no connectcommand configured/i.test(detail) || /no statuscommand configured/i.test(detail)) {
-        addActionForCheck(
-          actions,
-          connectorSetupHint(datasource.name, 'kubectl-portforward'),
-          ACTION_PRIORITIES.connectorSetup,
-          orderRef,
-          check,
-          'kubectl port-forward wiring is incomplete, so setup is required before reconnecting.',
-        );
-      } else {
-        addActionForCheck(
-          actions,
-          `taproot doctor --datasource ${datasource.name} --connect`,
-          ACTION_PRIORITIES.connectorConnect,
-          orderRef,
-          check,
-          'kubectl port-forward reported a blocked state, so retry the connector connect flow first.',
+          strategy.reconnectReason,
         );
       }
     }
