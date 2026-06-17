@@ -12,8 +12,8 @@ type ProxyRuntime = {
   key: string;
   sessionId: string;
   target: string;
-  dbUser: string;
-  dbName: string;
+  user: string;
+  database: string;
   port: number;
   process: ChildProcess;
   cleanupRegistered: boolean;
@@ -23,8 +23,8 @@ const proxiesByKey = new Map<string, ProxyRuntime>();
 const proxyKeyBySession = new Map<string, Set<string>>();
 let globalCleanupRegistered = false;
 
-function proxyKey(sessionId: string, target: string, dbUser: string, dbName: string): string {
-  return `${sessionId}|${target}|${dbUser}|${dbName}`;
+function proxyKey(sessionId: string, target: string, user: string, database: string): string {
+  return `${sessionId}|${target}|${user}|${database}`;
 }
 
 function ensureGlobalCleanup(): void {
@@ -138,14 +138,14 @@ export async function closeAllTeleportMysqlProxies(): Promise<void> {
   proxyKeyBySession.clear();
 }
 
-async function ensureProxy(sessionId: string, target: string, dbUser: string, dbName: string): Promise<ProxyRuntime> {
+async function ensureProxy(sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
   ensureGlobalCleanup();
-  const key = proxyKey(sessionId, target, dbUser, dbName);
+  const key = proxyKey(sessionId, target, user, database);
   const existing = proxiesByKey.get(key);
   if (existing && !existing.process.killed) return existing;
 
   const port = await getFreePort();
-  const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', dbUser, '--db-name', dbName, target];
+  const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', user, '--db-name', database, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   type ExitInfo = { code: number | null; signal: NodeJS.Signals | null };
   let stderr = '';
@@ -168,8 +168,8 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
     key,
     sessionId,
     target,
-    dbUser,
-    dbName,
+    user,
+    database,
     port,
     process: proc,
     cleanupRegistered: true,
@@ -218,21 +218,21 @@ export const teleportMysqlPlugin: TapRootPlugin = {
 
   async doctor(input) {
     const target = input.datasource.connection.target;
-    const dbUser = input.credentials.dbUser || input.credentials.user;
-    const dbName = input.datasource.connection.database;
-    if (!target || !dbUser || !dbName) {
+    const user = input.credentials.dbUser || input.credentials.user;
+    const database = input.datasource.connection.database;
+    if (!target || !user || !database) {
       const detail = 'missing target/dbUser/database in datasource+credentials';
       return [{ check: 'teleport-mysql doctor', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
     }
     const sessionId = `doctor-${process.pid}-${Date.now()}`;
     try {
-      const proxy = await ensureProxy(sessionId, String(target), String(dbUser), String(dbName));
+      const proxy = await ensureProxy(sessionId, String(target), String(user), String(database));
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
-        user: String(dbUser),
+        user: String(user),
         password: input.credentials.password,
-        database: String(dbName),
+        database: String(database),
       });
       await conn.query('SELECT 1 AS ok');
       await conn.end();
@@ -249,10 +249,10 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const target = request.datasource.connection.target;
-    const dbUser = creds.dbUser || creds.user;
-    const dbName = request.datasource.connection.database;
+    const user = creds.dbUser || creds.user;
+    const database = request.datasource.connection.database;
     const sessionId = String(creds.__sessionId || '').trim();
-    if (!target || !dbUser || !dbName) {
+    if (!target || !user || !database) {
       throw new Error('teleport-mysql requires target, dbUser/user, and database');
     }
 
@@ -260,13 +260,13 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const effectiveSessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
     const shouldCleanup = !sessionId;
     try {
-      const proxy = await ensureProxy(effectiveSessionId, String(target), String(dbUser), String(dbName));
+      const proxy = await ensureProxy(effectiveSessionId, String(target), String(user), String(database));
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
-        user: String(dbUser),
+        user: String(user),
         password: creds.password,
-        database: String(dbName),
+        database: String(database),
       });
       try {
         const [rows, fields] = await conn.query(
