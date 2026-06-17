@@ -1,18 +1,15 @@
 import { Client } from 'pg';
 import { AccessMethod } from '../../types/core.js';
-import type { DoctorCheck, QueryResult, TapRootPlugin } from '../../types/core.js';
+import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
+import { baseConnConfig } from '../_shared/db-conn.js';
 
-function connConfig(ds: any, creds: Record<string, string>, timeoutMs?: number) {
+function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs?: number) {
   return {
-    host: ds.connection.host || '127.0.0.1',
-    port: Number(ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.postgres),
-    user: creds.user,
-    password: creds.password,
-    database: ds.connection.database,
+    ...baseConnConfig(ds, creds, RUNTIME_CONSTANTS.defaultPorts.postgres),
     ssl: ds.connection.ssl ? { rejectUnauthorized: false } : undefined,
     statement_timeout: timeoutMs,
     query_timeout: timeoutMs,
