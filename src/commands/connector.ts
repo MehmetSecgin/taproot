@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext, AppContext as Ctx } from '../core/app.js';
 import { runDatasourceConnectors } from '../core/app.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
 import { DoctorStatus } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
@@ -193,7 +193,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         ref,
         keys: Object.keys(merged),
       };
-      if (ctx.jsonMode) printJson({ ok: true, data: out });
+      if (ctx.jsonMode) respondOk(out);
       else {
         console.log(renderRecord(out));
       }

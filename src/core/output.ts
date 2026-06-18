@@ -127,6 +127,19 @@ export function printEnvelope(
   printJson(env);
 }
 
+export function respondOk<T = unknown>(data: T, meta?: Record<string, unknown>): void {
+  printJson({ ok: true, data, meta: meta || {} });
+}
+
+export function respondErr(
+  code: string,
+  message: string,
+  details?: unknown,
+  meta?: Record<string, unknown>,
+): void {
+  printJson({ ok: false, error: { code, message, details }, meta: meta || {} });
+}
+
 function formatValue(value: unknown): string {
   if (value == null) return '';
   if (value instanceof Date) return formatDate(value);

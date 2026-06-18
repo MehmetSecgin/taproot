@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson, renderTable, respondOk } from '../core/output.js';
 import { loadProtobufRoot } from '../core/proto-loader.js';
 import {
   buildRequestSkeleton,
@@ -200,7 +200,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         flat = flat.filter((r) => `${r.service} ${r.method} ${r.request} ${r.response}`.toLowerCase().includes(p));
       }
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { methods: flat }, meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName } });
+        respondOk({ methods: flat }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
         return;
       }
       console.log(renderTable(flat));
@@ -218,7 +218,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { matches }, meta: { protoRoot: root, protoRootSource: source, pattern: String(pattern) } });
+        respondOk({ matches }, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
         return;
       }
       if (!matches.length) {

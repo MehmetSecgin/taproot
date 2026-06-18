@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
+import { printJson, printJsonPluck, renderRecord, renderTable, respondOk } from '../core/output.js';
 import { normalizeRelations, validateRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
 
@@ -220,7 +220,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const skipped = parsed.length - normalized.length;
       const result = ctx.kbStore.promoteRelations(normalized);
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { added: result.added, total: result.total, skipped }, meta: {} });
+        respondOk({ added: result.added, total: result.total, skipped });
       } else {
         console.log(`Imported ${result.added} new relation(s) (${normalized.length} valid, ${skipped} skipped). relations.json now holds ${result.total}.`);
       }

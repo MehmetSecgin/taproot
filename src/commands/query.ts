@@ -11,7 +11,7 @@ import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
-import { printJson, printJsonPluck, renderSchemaContextFooter, renderTableSmart, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
+import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, respondErr, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -189,11 +189,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             const code = rpc.error?.code || 'GENERIC';
             const message = rpc.error?.message || 'daemon query failed';
             if (ctx.jsonMode) {
-              printJson({
-                ok: false,
-                error: { code, message, details: rpc.error?.details },
-                meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
-              });
+              respondErr(code, message, rpc.error?.details, { ...(rpc.meta || {}), requestId: rpc.requestId });
               process.exitCode = exitCodeForClass(code);
               return;
             }
