@@ -6,7 +6,7 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
@@ -371,8 +371,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         logVerbose(`phase connect: ${phaseConnectMs}ms`);
         for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
         for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
-        if (connectorChecks.some((c) => c.status === 'fail')) {
-          throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+        if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+          throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
         }
         progress.update(`executing query via ${plugin.manifest.name}`);
         const executeStart = Date.now();

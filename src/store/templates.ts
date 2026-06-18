@@ -1,4 +1,5 @@
 import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { TemplateStatus } from '../types/core.js';
 import type { QueryTemplate } from '../types/core.js';
 import { QueryTemplateListSchema } from './schemas.js';
 
@@ -48,7 +49,7 @@ export class TemplateStore {
   resolveByIntent(input: { datasourceName?: string; datasourceKind?: string; intent: string }): QueryTemplate | undefined {
     const normalized = input.intent.trim().toLowerCase();
     const candidates = this.list().filter((t) => {
-      if (t.status !== 'active') return false;
+      if (t.status !== TemplateStatus.Active) return false;
       if (input.datasourceName && t.datasourceName && t.datasourceName !== input.datasourceName) return false;
       if (input.datasourceKind && t.datasourceKind && t.datasourceKind !== input.datasourceKind) return false;
       return true;

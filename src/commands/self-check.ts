@@ -6,6 +6,7 @@ import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot, nextCommandForReadiness } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from '../core/version.js';
+import { DoctorStatus } from '../types/core.js';
 
 export function registerSelfCheck(program: Command, getCtx: () => AppContext): void {
   program
@@ -30,7 +31,7 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
           : undefined;
       const snapshot = await collectReadinessSnapshot(ctx, { target, createdConfig });
       if (opts.agent) {
-        const trimmedChecks = snapshot.checks.map((check) => check.status === 'ok'
+        const trimmedChecks = snapshot.checks.map((check) => check.status === DoctorStatus.Ok
           ? { check: check.check, status: check.status }
           : check);
         const data = {

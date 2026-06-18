@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import type { RedisPluginParams } from '../../types/plugin-params.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
@@ -282,10 +282,10 @@ export const redisPlugin: TapRootPlugin = {
     const args = cliArgs(input.datasource, input.credentials, false);
     const r = await runRedis(args, ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000);
     if (r.code === 0 && /PONG/i.test(r.stdout)) {
-      return [{ check: 'redis ping', status: 'ok', detail: 'PING -> PONG' }];
+      return [{ check: 'redis ping', status: DoctorStatus.Ok, detail: 'PING -> PONG' }];
     }
     const detail = (r.stderr || r.stdout || `exit=${r.code}`).trim().slice(0, 400) || 'redis-cli failed';
-    return [{ check: 'redis ping', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+    return [{ check: 'redis ping', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
   },
 
   async execute(request, creds): Promise<QueryResult> {

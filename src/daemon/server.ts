@@ -14,7 +14,7 @@ import { nowIso } from '../core/time.js';
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
 import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
 import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
@@ -410,8 +410,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   });
                   phaseConnectMs = Date.now() - connectStart;
                   for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-                  if (connectorChecks.some((c) => c.status === 'fail')) {
-                    throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+                  if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+                    throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
                   }
                   const testHoldMs = Number(req.params._testHoldMs || 0);
                   const executeStart = Date.now();

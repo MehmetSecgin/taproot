@@ -6,6 +6,7 @@ import { reconcileDatasource } from '../core/bootstrap.js';
 import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
+import { DoctorStatus } from '../types/core.js';
 
 function printHumanInit(checks: Array<{ check: string; status: string; detail: string }>, readiness: string, nextActions: string[]): void {
   checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
@@ -23,7 +24,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
     const ctx = getCtx();
     const createdConfig = ensureStarterRuntime(ctx);
     const snapshot = await collectReadinessSnapshot(ctx, { createdConfig });
-    const trimmedChecks = snapshot.checks.map((check) => check.status === 'ok'
+    const trimmedChecks = snapshot.checks.map((check) => check.status === DoctorStatus.Ok
       ? { check: check.check, status: check.status }
       : check);
     const data = {

@@ -7,7 +7,7 @@ import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson, printJsonPluck } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
@@ -262,7 +262,7 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
   for (const check of checks) {
     const label = String(check.check || '').toLowerCase();
     const detail = String(check.detail || '');
-    if (check.status === 'ok') continue;
+    if (check.status === DoctorStatus.Ok) continue;
 
     if (isMissingConnectorConfigCode(check.code)) {
       addActionForCheck(
@@ -396,13 +396,13 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               const checks: DoctorCheck[] = [
                 {
                   check: 'kb routing consistency',
-                  status: 'fail' as const,
+                  status: DoctorStatus.Fail,
                   detail: `MISCONFIGURED_DATASOURCE: ${critical.join('; ')}`,
                 },
               ];
               checks.push({
                 check: 'doctor blocked',
-                status: 'warn',
+                status: DoctorStatus.Warn,
                 detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
               });
               const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
@@ -450,15 +450,15 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         progress.update(`running plugin doctor (${plugin.manifest.name})`);
         checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
 
-        const failCount = checks.filter((c) => c.status === 'fail').length;
-        const warnCount = checks.filter((c) => c.status === 'warn').length;
-        const okCount = checks.filter((c) => c.status === 'ok').length;
+        const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
+        const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
+        const okCount = checks.filter((c) => c.status === DoctorStatus.Ok).length;
         const tableRows = checks.map((c) => ({
           check: c.check,
           status: c.status,
           detail: opts.verboseDetail || ctx.verbose ? c.detail : compactDetail(c.detail),
         }));
-        const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== 'ok');
+        const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== DoctorStatus.Ok);
         const nextActionDetails = doctorNextActions(datasource, checks);
 
         if (ctx.jsonMode) {
@@ -491,8 +491,8 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           }
         }
 
-        if (checks.some((c) => c.status === 'fail')) {
-          const firstFailure = checks.find((c) => c.status === 'fail');
+        if (checks.some((c) => c.status === DoctorStatus.Fail)) {
+          const firstFailure = checks.find((c) => c.status === DoctorStatus.Fail);
           const code = classifyError(firstFailure?.detail || '');
           process.exitCode = exitCodeForClass(code);
         }

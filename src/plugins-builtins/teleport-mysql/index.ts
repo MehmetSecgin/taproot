@@ -5,7 +5,7 @@ import { registerCleanup } from '../../core/cleanup.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
 
 type ProxyRuntime = {
@@ -222,7 +222,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const database = input.datasource.connection.database;
     if (!target || !user || !database) {
       const detail = 'missing target/dbUser/database in datasource+credentials';
-      return [{ check: 'teleport-mysql doctor', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'teleport-mysql doctor', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     }
     const sessionId = `doctor-${process.pid}-${Date.now()}`;
     try {
@@ -236,10 +236,10 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       });
       await conn.query('SELECT 1 AS ok');
       await conn.end();
-      return [{ check: 'teleport-mysql query', status: 'ok', detail: 'connection and read query succeeded' }];
+      return [{ check: 'teleport-mysql query', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
     } catch (error) {
       const detail = (error as Error).message;
-      return [{ check: 'teleport-mysql query', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'teleport-mysql query', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     } finally {
       await closeTeleportMysqlSessionProxies(sessionId);
     }

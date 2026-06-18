@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeNamespace, normalizeService, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
+import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheckCode, RemediationAction } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
@@ -14,7 +15,7 @@ export type ReadinessState =
   | 'missing_creds'
   | 'missing_connector_config'
   | 'blocked_connector_auth';
-export type ReadinessCheckStatus = 'ok' | 'warn' | 'fail';
+export type ReadinessCheckStatus = DoctorStatus;
 
 export interface ReadinessTargetInput {
   datasource?: string;
@@ -93,7 +94,7 @@ function configCheck(ctx: AppContext, createdConfig: boolean): ReadinessCheck {
   const detail = createdConfig ? `${ctx.paths.runtimeConfigFile} (created)` : ctx.paths.runtimeConfigFile;
   return {
     check: 'config_file',
-    status: exists ? 'ok' : 'fail',
+    status: exists ? DoctorStatus.Ok : DoctorStatus.Fail,
     detail,
   };
 }
@@ -103,12 +104,12 @@ function kbCheck(ctx: AppContext): ReadinessCheck {
   const servicesFile = path.join(ctx.paths.kbDir, 'services.json');
   const servicesExists = fs.existsSync(servicesFile);
   if (kbDirExists && servicesExists) {
-    return { check: 'kb_dir', status: 'ok', detail: `${ctx.paths.kbDir} (services.json found)` };
+    return { check: 'kb_dir', status: DoctorStatus.Ok, detail: `${ctx.paths.kbDir} (services.json found)` };
   }
   if (kbDirExists) {
-    return { check: 'kb_dir', status: 'warn', detail: `${ctx.paths.kbDir} (services.json missing)` };
+    return { check: 'kb_dir', status: DoctorStatus.Warn, detail: `${ctx.paths.kbDir} (services.json missing)` };
   }
-  return { check: 'kb_dir', status: 'fail', detail: `${ctx.paths.kbDir} (directory missing)` };
+  return { check: 'kb_dir', status: DoctorStatus.Fail, detail: `${ctx.paths.kbDir} (directory missing)` };
 }
 
 async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
@@ -116,11 +117,11 @@ async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
     const socketPath = defaultSocketPath(ctx.paths.stateRoot);
     const res = await rpcCall({ method: RpcMethod.DaemonStatus, socketPath, timeoutMs: 1000 });
     if (!res.ok) throw new Error(res.error?.message || 'daemon unavailable');
-    return { check: 'daemon', status: 'ok', detail: `reachable via ${socketPath}` };
+    return { check: 'daemon', status: DoctorStatus.Ok, detail: `reachable via ${socketPath}` };
   } catch (error) {
     return {
       check: 'daemon',
-      status: 'warn',
+      status: DoctorStatus.Warn,
       detail: (error as Error)?.message || 'daemon unavailable',
     };
   }
@@ -128,10 +129,10 @@ async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
 
 export function computeReadiness(checks: ReadinessCheck[]): ReadinessState {
   const byName = new Map(checks.map((check) => [check.check, check]));
-  if ((byName.get('kb_dir')?.status || 'ok') !== 'ok') return 'missing_kb';
-  if ((byName.get('config_file')?.status || 'ok') !== 'ok') return 'missing_config';
-  if ((byName.get('datasources')?.status || 'ok') !== 'ok') return 'missing_datasource';
-  if ((byName.get('credentials')?.status || 'ok') !== 'ok') return 'missing_creds';
+  if ((byName.get('kb_dir')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_kb';
+  if ((byName.get('config_file')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_config';
+  if ((byName.get('datasources')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_datasource';
+  if ((byName.get('credentials')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_creds';
   return 'ready';
 }
 
@@ -166,7 +167,7 @@ function isMissingConnectorConfigCheck(check: ReadinessCheck): boolean {
   if (check.code) return MISSING_CONNECTOR_CONFIG_CODES.has(check.code);
   const label = String(check.check || '').toLowerCase();
   const detail = String(check.detail || '').toLowerCase();
-  return /connector plugin not found/.test(detail) || /mode 'doctor' not supported/.test(detail) || /no (status|connect|disconnect|login)command configured/.test(detail) || (label.startsWith('connector:') && check.status !== 'ok');
+  return /connector plugin not found/.test(detail) || /mode 'doctor' not supported/.test(detail) || /no (status|connect|disconnect|login)command configured/.test(detail) || (label.startsWith('connector:') && check.status !== DoctorStatus.Ok);
 }
 
 function targetReadiness(
@@ -176,12 +177,12 @@ function targetReadiness(
   connectorChecks: ReadinessCheck[],
 ): ReadinessState {
   const byName = new Map(baseChecks.map((check) => [check.check, check]));
-  if ((byName.get('kb_dir')?.status || 'ok') !== 'ok') return 'missing_kb';
-  if ((byName.get('config_file')?.status || 'ok') !== 'ok') return 'missing_config';
+  if ((byName.get('kb_dir')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_kb';
+  if ((byName.get('config_file')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_config';
   if (!targetDatasource) return 'missing_datasource';
   if (!targetCredentialPresent) return 'missing_creds';
   if (connectorChecks.some((check) => isMissingConnectorConfigCheck(check))) return 'missing_connector_config';
-  if (connectorChecks.some((check) => check.status !== 'ok')) return 'blocked_connector_auth';
+  if (connectorChecks.some((check) => check.status !== DoctorStatus.Ok)) return 'blocked_connector_auth';
   return 'ready';
 }
 
@@ -279,7 +280,7 @@ export function nextActionDetailsForReadiness(
       break;
     case 'blocked_connector_auth':
       if (input?.datasource) {
-        const blockedChecks = relevantChecks.filter((check) => !isMissingConnectorConfigCheck(check) && check.status !== 'ok');
+        const blockedChecks = relevantChecks.filter((check) => !isMissingConnectorConfigCheck(check) && check.status !== DoctorStatus.Ok);
         add(
           actionForReadiness({
             command: `taproot doctor --datasource ${input.datasource.name} --connect`,
@@ -329,7 +330,7 @@ function withSupplementalReadinessActions(
       }),
     );
   }
-  if (input.checks.find((check) => check.check === 'daemon')?.status !== 'ok') {
+  if (input.checks.find((check) => check.check === 'daemon')?.status !== DoctorStatus.Ok) {
     dedupeAction(
       merged,
       actionForReadiness({
@@ -366,24 +367,24 @@ export async function collectReadinessSnapshot(
   const pluginNames = ctx.pluginRegistry.list().map((plugin) => plugin.manifest.name);
   const datasources = ctx.datasourceStore.list();
   const checks: ReadinessCheck[] = [
-    { check: 'node_version', status: 'ok', detail: process.version },
-    { check: 'state_root', status: fs.existsSync(ctx.paths.stateRoot) ? 'ok' : 'fail', detail: ctx.paths.stateRoot },
+    { check: 'node_version', status: DoctorStatus.Ok, detail: process.version },
+    { check: 'state_root', status: fs.existsSync(ctx.paths.stateRoot) ? DoctorStatus.Ok : DoctorStatus.Fail, detail: ctx.paths.stateRoot },
     kbCheck(ctx),
-    { check: 'plugins', status: 'ok', detail: `${pluginNames.length} loaded: ${pluginNames.join(', ')}` },
+    { check: 'plugins', status: DoctorStatus.Ok, detail: `${pluginNames.length} loaded: ${pluginNames.join(', ')}` },
     {
       check: 'master_key',
-      status: process.env.TAPROOT_MASTER_KEY ? 'ok' : 'warn',
+      status: process.env.TAPROOT_MASTER_KEY ? DoctorStatus.Ok : DoctorStatus.Warn,
       detail: process.env.TAPROOT_MASTER_KEY ? 'TAPROOT_MASTER_KEY is set' : 'TAPROOT_MASTER_KEY is unset; credential storage falls back to a derived local secret',
     },
     configCheck(ctx, Boolean(input?.createdConfig)),
     {
       check: 'datasources',
-      status: datasources.length > 0 ? 'ok' : 'fail',
+      status: datasources.length > 0 ? DoctorStatus.Ok : DoctorStatus.Fail,
       detail: `${datasources.length} datasource profile(s)`,
     },
     {
       check: 'credentials',
-      status: fs.existsSync(ctx.paths.credentialFile) ? 'ok' : 'fail',
+      status: fs.existsSync(ctx.paths.credentialFile) ? DoctorStatus.Ok : DoctorStatus.Fail,
       detail: ctx.paths.credentialFile,
     },
     await daemonCheck(ctx),
@@ -406,7 +407,7 @@ export async function collectReadinessSnapshot(
     targetDatasource = await resolveTargetDatasource(ctx, normalizedTarget);
     checks.push({
       check: 'target_datasource',
-      status: targetDatasource ? 'ok' : 'fail',
+      status: targetDatasource ? DoctorStatus.Ok : DoctorStatus.Fail,
       detail: targetDatasource
         ? targetDatasource.name
         : normalizedTarget.datasource
@@ -418,7 +419,7 @@ export async function collectReadinessSnapshot(
       targetCredentialPresent = Object.keys(creds).length > 0;
       checks.push({
         check: 'target_credentials',
-        status: targetCredentialPresent ? 'ok' : 'fail',
+        status: targetCredentialPresent ? DoctorStatus.Ok : DoctorStatus.Fail,
         detail: targetCredentialPresent
           ? `${targetDatasource.credentialRef} is populated`
           : `${targetDatasource.credentialRef} has no stored values`,

@@ -8,7 +8,7 @@ import { connectivity } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrpcSchema, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus, EnsuredBy } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
 import { bareTableName, schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
@@ -186,7 +186,7 @@ export interface EnsureSchemaResult {
   joins: Array<ReturnType<typeof buildSchemaSnapshot>['joins'][number]>;
   emptyReason: string | null;
   suggestedNextCommand: string | null;
-  ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
+  ensuredBy: EnsuredBy;
 }
 
 function filterRequestedTables(rows: SchemaObservationEntry[], tables?: string[]): SchemaObservationEntry[] {
@@ -276,10 +276,10 @@ export async function ensureSchemaSnapshot(
     });
   }
 
-  let ensuredBy: EnsureSchemaResult['ensuredBy'] = 'empty';
-  if (state.emptyReason === 'datasource_unresolved') ensuredBy = 'unresolved';
+  let ensuredBy: EnsuredBy = EnsuredBy.Empty;
+  if (state.emptyReason === 'datasource_unresolved') ensuredBy = EnsuredBy.Unresolved;
   else if (snapshot.tables.length && state.emptyReason === null) {
-    ensuredBy = shouldRefresh ? 'refreshed-introspection' : 'cached-learning';
+    ensuredBy = shouldRefresh ? EnsuredBy.RefreshedIntrospection : EnsuredBy.CachedLearning;
   }
 
   return {
@@ -314,10 +314,10 @@ export interface GrpcSchemaSnapshot {
   lastSeenAt?: string;
   emptyReason: string | null;
   suggestedNextCommand: string | null;
-  ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
+  ensuredBy: EnsuredBy;
 }
 
-function emptyGrpcSnapshot(input: { datasource?: DatasourceProfile; emptyReason: string | null; suggestedNextCommand: string | null; ensuredBy: GrpcSchemaSnapshot['ensuredBy'] }): GrpcSchemaSnapshot {
+function emptyGrpcSnapshot(input: { datasource?: DatasourceProfile; emptyReason: string | null; suggestedNextCommand: string | null; ensuredBy: EnsuredBy }): GrpcSchemaSnapshot {
   return {
     datasource: input.datasource?.name || null,
     service: input.datasource ? String(input.datasource.service || input.datasource.name) : null,
@@ -333,7 +333,7 @@ function emptyGrpcSnapshot(input: { datasource?: DatasourceProfile; emptyReason:
   };
 }
 
-function buildGrpcSnapshot(entry: GrpcServiceSchemaEntry, detailed: boolean, ensuredBy: GrpcSchemaSnapshot['ensuredBy']): GrpcSchemaSnapshot {
+function buildGrpcSnapshot(entry: GrpcServiceSchemaEntry, detailed: boolean, ensuredBy: EnsuredBy): GrpcSchemaSnapshot {
   const methods: GrpcMethodRow[] = entry.services.flatMap((svc) =>
     svc.methods.map((m) => ({
       service: svc.name,
@@ -374,16 +374,16 @@ export async function ensureGrpcSchemaSnapshot(
     return emptyGrpcSnapshot({
       emptyReason: targeted ? 'datasource_unresolved' : 'no_learning_yet',
       suggestedNextCommand: targeted ? unresolvedNextCommand(opts, ctx) : null,
-      ensuredBy: targeted ? 'unresolved' : 'empty',
+      ensuredBy: targeted ? EnsuredBy.Unresolved : EnsuredBy.Empty,
     });
   }
   const service = String(datasource.service || datasource.name);
   let entry = ctx.learningStore.grpcSchemas(service)[0];
-  let ensuredBy: GrpcSchemaSnapshot['ensuredBy'] = entry ? 'cached-learning' : 'empty';
+  let ensuredBy: EnsuredBy = entry ? EnsuredBy.CachedLearning : EnsuredBy.Empty;
   if ((!entry || opts.refresh) && supportsGrpcSchema(datasource)) {
     await refreshGrpcSchemaForDatasource(ctx, datasource);
     entry = ctx.learningStore.grpcSchemas(service)[0];
-    ensuredBy = 'refreshed-introspection';
+    ensuredBy = EnsuredBy.RefreshedIntrospection;
   }
   if (!entry) {
     const refreshable = supportsGrpcSchema(datasource);
@@ -391,7 +391,7 @@ export async function ensureGrpcSchemaSnapshot(
       datasource,
       emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
       suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
-      ensuredBy: 'empty',
+      ensuredBy: EnsuredBy.Empty,
     });
   }
   return buildGrpcSnapshot(entry, Boolean(opts.detailed), ensuredBy);
@@ -407,7 +407,7 @@ function readGrpcSchemaSnapshot(
     return emptyGrpcSnapshot({
       emptyReason: targeted ? 'datasource_unresolved' : 'no_learning_yet',
       suggestedNextCommand: targeted ? unresolvedNextCommand(opts, ctx) : null,
-      ensuredBy: targeted ? 'unresolved' : 'empty',
+      ensuredBy: targeted ? EnsuredBy.Unresolved : EnsuredBy.Empty,
     });
   }
   const service = String(datasource.service || datasource.name);
@@ -418,10 +418,10 @@ function readGrpcSchemaSnapshot(
       datasource,
       emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
       suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
-      ensuredBy: 'empty',
+      ensuredBy: EnsuredBy.Empty,
     });
   }
-  return buildGrpcSnapshot(entry, Boolean(opts.detailed), 'cached-learning');
+  return buildGrpcSnapshot(entry, Boolean(opts.detailed), EnsuredBy.CachedLearning);
 }
 
 function renderGrpcSnapshotTty(snapshot: GrpcSchemaSnapshot): void {
@@ -554,7 +554,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           pluginRegistry: ctx.pluginRegistry,
           mode: 'doctor',
         });
-        const failures = connectorChecks.filter((check) => check.status === 'fail');
+        const failures = connectorChecks.filter((check) => check.status === DoctorStatus.Fail);
         if (failures.length) {
           const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
           throw connectivity(`${detail}; ensure VPN/teleport/telepresence are up before retrying`, {

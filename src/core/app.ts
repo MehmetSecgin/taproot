@@ -10,6 +10,7 @@ import { RuntimeConfigStore } from '../store/runtime-config.js';
 import { CardStore } from '../store/cards.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
+import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
 export { classifyError } from './error-classification.js';
 
@@ -146,7 +147,7 @@ async function withConnectorTimeout(name: string, mode: string, timeoutMs: numbe
     return [
       {
         check: `connector:${name}`,
-        status: 'fail',
+        status: DoctorStatus.Fail,
         detail: message.slice(0, 400),
         code: message.startsWith('connector_timeout') ? 'connector_timeout' : 'connector_check_failed',
       },
@@ -172,7 +173,7 @@ export async function runDatasourceConnectors(input: {
     connectors.map(async (name): Promise<DoctorCheck[]> => {
       const plugin = input.pluginRegistry.get(name);
       if (!plugin) {
-        return [{ check: `connector:${name}`, status: 'warn', detail: 'connector plugin not found', code: 'connector_plugin_missing' }];
+        return [{ check: `connector:${name}`, status: DoctorStatus.Warn, detail: 'connector plugin not found', code: 'connector_plugin_missing' }];
       }
       const refKey = `${name}CredentialRef`;
       const ref = String(input.datasource.resolverHints?.[refKey] || '').trim();
@@ -195,7 +196,7 @@ export async function runDatasourceConnectors(input: {
       return [
         {
           check: `connector:${name}`,
-          status: 'warn',
+          status: DoctorStatus.Warn,
           detail: `mode '${input.mode}' not supported by plugin`,
           code: 'connector_mode_unsupported',
         },
@@ -212,7 +213,7 @@ export async function runDatasourceConnectors(input: {
       const message = (result.reason as Error)?.message || String(result.reason);
       checks.push({
         check: `connector:${name}`,
-        status: 'fail',
+        status: DoctorStatus.Fail,
         detail: message.slice(0, 400),
         code: 'connector_check_failed',
       });

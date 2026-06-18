@@ -6,7 +6,7 @@ import type {
   SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { GrpcPluginParams } from '../../types/plugin-params.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
@@ -171,7 +171,7 @@ export const grpcPlugin: TapRootPlugin = {
     const hints = (ds.resolverHints || {}) as Record<string, string>;
     const protoRoot = hints.protoRoot;
     if (!protoRoot) {
-      return [{ check: 'grpc proto-root', status: 'warn', detail: "no resolverHints.protoRoot configured; doctor can only open a channel, not exercise a real method.", code: 'executor_configuration_missing' }];
+      return [{ check: 'grpc proto-root', status: DoctorStatus.Warn, detail: "no resolverHints.protoRoot configured; doctor can only open a channel, not exercise a real method.", code: 'executor_configuration_missing' }];
     }
     try {
       const { grpc, pkg, protobufRoot } = await loadGrpcPackage(protoRoot).then((b) => ({
@@ -181,7 +181,7 @@ export const grpcPlugin: TapRootPlugin = {
       }));
       const probe = hints.probeService || listServices(protobufRoot)[0]?.name;
       if (!probe) {
-        return [{ check: 'grpc proto load', status: 'warn', detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
+        return [{ check: 'grpc proto load', status: DoctorStatus.Warn, detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
       }
       const ServiceCtor = lookupServiceCtor(pkg, probe);
       const client = buildClient(grpc, ServiceCtor, ds);
@@ -189,13 +189,13 @@ export const grpcPlugin: TapRootPlugin = {
         await new Promise<void>((resolve, reject) => {
           client.waitForReady(Date.now() + RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs, (err) => (err ? reject(err) : resolve()));
         });
-        return [{ check: 'grpc channel', status: 'ok', detail: `connected to ${ds.connection.host}:${ds.connection.port} (${probe})` }];
+        return [{ check: 'grpc channel', status: DoctorStatus.Ok, detail: `connected to ${ds.connection.host}:${ds.connection.port} (${probe})` }];
       } finally {
         client.close();
       }
     } catch (err) {
       const detail = (err as Error).message || 'unknown grpc doctor error';
-      return [{ check: 'grpc channel', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'grpc channel', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     }
   },
 
