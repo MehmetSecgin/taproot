@@ -16,6 +16,7 @@ import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/que
 import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
 import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
+import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
@@ -72,8 +73,8 @@ function cardParamNames(card: QueryCard): string[] {
 function buildPluginParams(
   reqParams: Record<string, unknown>,
   datasourceKind: string,
-): Record<string, unknown> | undefined {
-  const pluginParams: Record<string, unknown> = {};
+): BuiltinPluginParams | undefined {
+  const pluginParams: BuiltinPluginParams = {};
   if (reqParams.proto) pluginParams.protoMessage = String(reqParams.proto);
   if (reqParams.protoRoot) pluginParams.protoRoot = String(reqParams.protoRoot);
   if (reqParams.allowFlush) pluginParams.allowFlush = true;

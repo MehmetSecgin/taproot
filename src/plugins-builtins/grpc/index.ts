@@ -7,6 +7,7 @@ import type {
   TapRootPlugin,
 } from '../../types/core.js';
 import { AccessMethod } from '../../types/core.js';
+import type { GrpcPluginParams } from '../../types/plugin-params.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -74,7 +75,7 @@ function parseQuery(input: string): ParsedQuery {
 }
 
 function resolveProtoRoot(request: QueryRequest): string {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
   const root = String(pp.protoRoot || hints.protoRoot || '').trim();
   if (!root) {
@@ -84,7 +85,7 @@ function resolveProtoRoot(request: QueryRequest): string {
 }
 
 function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const raw = pp.requestJson;
   if (typeof raw === 'string' && raw.trim()) {
     try {
@@ -203,8 +204,8 @@ export const grpcPlugin: TapRootPlugin = {
     const start = Date.now();
     const { service, method } = parseQuery(request.query);
     const protoRoot = resolveProtoRoot(request);
-    const pp = (request.pluginParams || {}) as Record<string, unknown>;
-    const paramPairs = (pp.params as Record<string, string>) || {};
+    const pp = (request.pluginParams || {}) as GrpcPluginParams;
+    const paramPairs = pp.params || {};
     const payload = resolveRequestPayload(request, paramPairs);
     const bundle = await loadGrpcPackage(protoRoot);
     const services = listServices(bundle.protobufRoot);

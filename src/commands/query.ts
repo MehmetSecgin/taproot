@@ -7,6 +7,7 @@ import { classifyError, environmentPolicy, fillTemplate, normalizeNamespace, nor
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
 import { DatasourceKind } from '../types/core.js';
+import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
@@ -375,7 +376,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
         progress.update(`executing query via ${plugin.manifest.name}`);
         const executeStart = Date.now();
-        const pluginParams: Record<string, unknown> = {};
+        const pluginParams: BuiltinPluginParams = {};
         if (opts.proto) pluginParams.protoMessage = String(opts.proto);
         if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
         if (opts.allowFlush) pluginParams.allowFlush = true;

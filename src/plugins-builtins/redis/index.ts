@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
+import type { RedisPluginParams } from '../../types/plugin-params.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -260,7 +261,7 @@ function decodeWith(root: ProtoRoot, message: string, buf: Buffer): Record<strin
 }
 
 function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoMessage?: string } {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as RedisPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
   const protoRoot = String(pp.protoRoot || hints.protoRoot || '').trim() || undefined;
   const protoMessage = String(pp.protoMessage || hints.protoMessage || '').trim() || undefined;
@@ -291,7 +292,7 @@ export const redisPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const tokens = tokenize(request.query);
-    const pp = (request.pluginParams || {}) as Record<string, unknown>;
+    const pp = (request.pluginParams || {}) as RedisPluginParams;
     const policy = request.datasource.policy;
     const tier = assertCommandAllowed(tokens, {
       capability: request.capability,
