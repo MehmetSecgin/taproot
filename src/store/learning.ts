@@ -1,206 +1,46 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape } from '../types/core.js';
 import { nowIso } from '../core/time.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
 import type { RefreshedSchemaJoin, RefreshedSchemaTable } from '../core/schema-refresh.js';
 import type { SchemaProvenance } from '../types/core.js';
 import { str } from '../core/strings.js';
+import {
+  SCHEMA_METADATA_VERSION,
+  bareTableName,
+  median,
+  normalizeIntent,
+  normalizeSqlTemplate,
+  pickBestByKey,
+  schemaObservationHasCurrentMetadata,
+  stableId,
+} from './learning-utils.js';
+import type {
+  GrpcServiceSchemaEntry,
+  QueryLibraryEntry,
+  QueryStatEntry,
+  ResolutionEntry,
+  SchemaJoinEntry,
+  SchemaObservationEntry,
+  SchemaQueryShapeEntry,
+  SchemaTableColumnStat,
+  TargetSelectionEntry,
+} from './learning-types.js';
 
-export const SCHEMA_METADATA_VERSION = 2;
-
-export function bareTableName(value: unknown): string {
-  return str(value).replace(/`/g, '').trim().split('.').pop() || '';
-}
-
-function pickBestByKey<T extends { key: string }>(rows: T[], isBetter: (candidate: T, current: T) => boolean): T[] {
-  const map = new Map<string, T>();
-  for (const row of rows) {
-    const cur = map.get(row.key);
-    if (!cur || isBetter(row, cur)) map.set(row.key, row);
-  }
-  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
-}
-
-interface ResolutionEntry {
-  key: string;
-  env: string;
-  namespace?: string;
-  service: string;
-  datasourceName: string;
-  kind: string;
-  connection: DatasourceProfile['connection'];
-  credentialRef: string;
-  connectors: string[];
-  resolverHints?: Record<string, string>;
-  lastVerifiedAt: string;
-  successCount: number;
-  failureCount: number;
-  confidence: number;
-}
-
-interface QueryLibraryEntry {
-  id: string;
-  key: string;
-  service: string;
-  intentKey: string;
-  sqlTemplate: string;
-  source: 'learned' | 'kb' | 'manual';
-  lastVerifiedAt: string;
-  successCount: number;
-}
-
-interface TargetSelectionEntry {
-  key: string;
-  env: string;
-  namespace?: string;
-  service: string;
-  intentKey: string;
-  engine: string;
-  target: string;
-  database: string;
-  updatedAt: string;
-  source: 'learned' | 'kb' | 'manual';
-}
-
-interface QueryStatEntry {
-  key: string;
-  datasource: string;
-  templateId: string;
-  lastRunAt: string;
-  lastStatus: 'success' | 'error';
-  lastErrorClass?: string;
-  successCount: number;
-  failureCount: number;
-  latencyMsP50: number;
-}
-
-export interface SchemaTableColumnStat {
-  column: string;
-  selectedCount: number;
-  filterCount: number;
-  groupCount: number;
-  orderCount: number;
-  lastSeenAt: string;
-}
-
-export interface SchemaObservationEntry {
-  key: string;
-  metadataVersion?: number;
-  datasource: string;
-  env: string;
-  service: string;
-  kind: string;
-  database: string;
-  target: string;
-  table: string;
-  aliases: string[];
-  columns: SchemaTableColumnStat[];
-  primaryKey?: string[];
-  indexes?: SchemaIndex[];
-  partition?: SchemaPartition;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sightings: number;
-  confidence: number;
-  sources: SchemaProvenance[];
-}
-
-export function schemaObservationHasCurrentMetadata(row: SchemaObservationEntry): boolean {
-  return (
-    row.metadataVersion === SCHEMA_METADATA_VERSION &&
-    Array.isArray(row.indexes) &&
-    row.columns.length > 0 &&
-    (row.sources.includes('refreshed-metadata') || row.sources.includes('manual'))
-  );
-}
-
-export interface SchemaJoinEntry {
-  key: string;
-  datasource: string;
-  env: string;
-  service: string;
-  kind: string;
-  database: string;
-  leftTable: string;
-  rightTable: string;
-  directionHint: 'left-to-right' | 'right-to-left' | 'unknown';
-  conditionRaw: string;
-  conditionNormalized: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sightings: number;
-  confidence: number;
-  sources: SchemaProvenance[];
-}
-
-export interface SchemaQueryShapeEntry {
-  key: string;
-  datasource: string;
-  env: string;
-  service: string;
-  kind: string;
-  database: string;
-  operation: string;
-  normalizedSql: string;
-  tables: string[];
-  joins: string[];
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sightings: number;
-  confidence: number;
-  sources: SchemaProvenance[];
-}
-
-export interface GrpcServiceSchemaEntry {
-  key: string;
-  datasource: string;
-  env: string;
-  service: string;
-  kind: string;
-  protoRoot: string;
-  services: RpcServiceShape[];
-  messages: Record<string, RpcMessageShape>;
-  enums: Record<string, RpcEnumShape>;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sources: SchemaProvenance[];
-}
-
-function normalizeIntent(value?: string): string {
-  return str(value)
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-}
-
-function normalizeSqlTemplate(sql: string): string {
-  let out = sql.trim().replace(/\s+/g, ' ').toLowerCase();
-  out = out.replace(/'(?:''|[^'])*'/g, ':str');
-  out = out.replace(/\b\d+\.\d+\b/g, ':num');
-  out = out.replace(/\b\d+\b/g, ':num');
-  out = out.replace(/\b(true|false)\b/g, ':bool');
-  out = out.replace(/\s+/g, ' ').trim();
-  return out;
-}
-
-function stableId(value: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
-  }
-  return `q_${(h >>> 0).toString(16)}`;
-}
-
-function median(values: number[]): number {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2) return sorted[mid];
-  return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-}
+export { SCHEMA_METADATA_VERSION, bareTableName, schemaObservationHasCurrentMetadata } from './learning-utils.js';
+export type {
+  GrpcServiceSchemaEntry,
+  QueryLibraryEntry,
+  QueryStatEntry,
+  ResolutionEntry,
+  SchemaJoinEntry,
+  SchemaObservationEntry,
+  SchemaQueryShapeEntry,
+  SchemaTableColumnStat,
+  TargetSelectionEntry,
+} from './learning-types.js';
 
 export class LearningStore {
   private readonly resolutionFile: string;

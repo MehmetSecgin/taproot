@@ -1,64 +1,20 @@
 import { Command } from 'commander';
-import { createInterface } from 'node:readline/promises';
-import { randomUUID } from 'node:crypto';
-import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
-import { classifyError, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
-import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
-import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
-import { DatasourceKind, DoctorStatus } from '../types/core.js';
-import type { BuiltinPluginParams } from '../types/plugin-params.js';
-import { exitCodeForClass } from '../core/exit-codes.js';
-import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
-import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
-import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, respondErr, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
-import { createProgress } from '../core/progress.js';
-import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
+import { environmentPolicy, normalizeNamespace, normalizeService } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
-import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
+import { createProgress } from '../core/progress.js';
+import { parseTimeoutMs } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { rpcCall } from '../daemon/client.js';
-import { RpcMethod } from '../daemon/types.js';
-import { ensureSchemaSnapshot } from './learn.js';
-import { supportsSchemaRefresh } from '../core/schema-refresh.js';
-import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
-import { liveColumnsFromSchemaContext } from '../core/relations.js';
-import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
-import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
-import type { QueryCard } from '../types/cards.js';
 import { str } from '../core/strings.js';
-
-function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const c of columns) out[c] = row[c];
-  return out;
-}
+import { runDaemonQuery } from './query-daemon.js';
+import { runDirectQuery } from './query-direct.js';
+import type { QueryEnv, QueryOpts } from './query-types.js';
 
 function parseDatasourceAlias(value: string | undefined, aliases: Record<string, string>): { env: string; service: string } | null {
   const raw = str(value).trim().toLowerCase();
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
   return { env: m[1], service: normalizeService(m[2], aliases) };
-}
-
-function cardParamNames(card: QueryCard): string[] {
-  return (card.params || []).map((param) => param.name).filter(Boolean);
-}
-
-function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
-  return misconfiguredDatasource(
-    `datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
-  );
-}
-
-async function promptPassword(ref: string): Promise<string> {
-  const rl = createInterface({ input, output });
-  try {
-    const value = await rl.question(`Password for ${ref}: `);
-    return value.trim();
-  } finally {
-    rl.close();
-  }
 }
 
 export function registerQuery(program: Command, getCtx: () => AppContext): void {
@@ -94,7 +50,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
       String(RUNTIME_CONSTANTS.query.defaultTimeoutMs),
     )
-    .action(async (opts) => {
+    .action(async (opts: QueryOpts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
       if (opts.sql && !opts.query) opts.query = opts.sql;
@@ -123,430 +79,28 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       if (opts.explain && !opts.query) {
         throw new Error('Invalid argument: --explain requires --query (raw SQL). Resolve --card/--template/--intent first, then re-run with --query and --explain.');
       }
+      const qenv: QueryEnv = {
+        ctx,
+        opts,
+        progress,
+        logVerbose,
+        env,
+        namespace,
+        timeoutMs,
+        allowDiscovery,
+        explicitProfile,
+        alias,
+      };
       try {
         if (allowDiscovery && !ctx.jsonMode) {
           progress.update('discovery mode enabled, bypassing daemon');
         }
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
         if (!forceDirect) {
-          try {
-            const rpc = await rpcCall({
-              timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, timeoutMs + 1000),
-              method: RpcMethod.QueryExecute,
-              params: {
-                datasource: opts.datasource,
-                env: opts.env,
-                service: opts.service,
-                namespace: opts.namespace,
-                intent: opts.intent,
-                reason: opts.reason,
-                card: opts.card,
-                template: opts.template,
-                query: opts.query,
-                allowDiscovery,
-                allowMutate: Boolean(opts.allowMutate),
-                allowPartitionScan: Boolean(opts.allowPartitionScan),
-                allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
-                rowsObject: Boolean(opts.rowsObject),
-                timeoutMs,
-                param: opts.param || [],
-                proto: opts.proto,
-                protoRoot: opts.protoRoot,
-                allowFlush: Boolean(opts.allowFlush),
-                requestJson: opts.requestJson,
-                skipProtoValidate: Boolean(opts.skipProtoValidate),
-              },
-            });
-            if (rpc.ok) {
-              const columns = (rpc.data?.columns as string[]) || [];
-              const rows = (rpc.data?.rows as unknown[]) || [];
-              const warnings = (rpc.data?.warnings as string[]) || [];
-              if (ctx.jsonMode) {
-                printJsonPluck(
-                  trimQueryJsonEnvelope({
-                    ok: true,
-                    data: rpc.data || {},
-                    meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
-                  }),
-                  opts.pluck ? String(opts.pluck) : undefined,
-                );
-              } else {
-                progress.succeed(`query complete (${rows.length} rows)`);
-                if (warnings.length) {
-                  progress.warn(`warnings: ${warnings.join(' | ')}`);
-                }
-                logVerbose(
-                  `daemon request=${rpc.requestId} session=${rpc.meta?.sessionId || 'n/a'} run=${rpc.meta?.runId || 'n/a'}`,
-                );
-                console.log(renderTableSmart(rows.map((r) => rowToObject(columns, r)), { full: Boolean(opts.full) }));
-                const daemonFooter = renderSchemaContextFooter((rpc.meta as any)?.schemaContext);
-                if (daemonFooter) console.log(daemonFooter);
-                const renderedMemory = renderQueryMemoryTty(rpc.meta?.queryMemory || (rpc.data?.queryMemory as any));
-                if (renderedMemory) console.log(renderedMemory);
-              }
-              return;
-            }
-            const code = rpc.error?.code || 'GENERIC';
-            const message = rpc.error?.message || 'daemon query failed';
-            if (ctx.jsonMode) {
-              respondErr(code, message, rpc.error?.details, { ...(rpc.meta || {}), requestId: rpc.requestId });
-              process.exitCode = exitCodeForClass(code);
-              return;
-            }
-            throw new Error(`${code}: ${message}`);
-          } catch (error) {
-            const msg = str((error as Error).message);
-            if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
-              progress.fail('daemon query failed');
-              throw error;
-            }
-            progress.update('daemon unavailable, falling back to direct mode');
-            logVerbose(`daemon RPC unavailable (${msg})`);
-          }
+          const outcome = await runDaemonQuery(qenv);
+          if (outcome === 'handled') return;
         }
-      const phaseStart = Date.now();
-      let phaseResolveMs = 0;
-      let phaseConnectMs = 0;
-      let phaseExecuteMs = 0;
-      const service = normalizeService(opts.service || explicitProfile?.service || alias?.service || '', aliases);
-      progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
-      const deterministicRequired = policy.deterministicRequired;
-      const resolution = await resolveDatasourceWithFallbacks({
-        ctx,
-        rawDs: opts.datasource,
-        optsEnv: opts.env,
-        env,
-        namespace: namespace || undefined,
-        service,
-        allowDiscovery,
-        deterministicRequired,
-        policy,
-      });
-      for (const line of resolution.verboseLogs) logVerbose(line);
-      let datasource = resolution.datasource;
-      const resolutionSource = resolution.source;
-      if (!datasource && deterministicRequired && !allowDiscovery) {
-        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
-      }
-      if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
-      if (deterministicRequired && !allowDiscovery && resolutionSource === 'learning') {
-        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
-      }
-      const warnings: string[] = [];
-      if (env && service) {
-        const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
-        if (kb) {
-          const critical = criticalDatasourceKbConflicts(datasource, kb);
-          if (critical.length) {
-            throw misconfiguredDatasourceError(datasource.name, env, service, critical);
-          }
-          const conflicts = datasourceKbConflicts(datasource, kb);
-          if (conflicts.length) {
-            const warning = `datasource overrides KB (${conflicts.join('; ')})`;
-            warnings.push(warning);
-            logVerbose(`warning: ${warning}`);
-          }
-        }
-      }
-      phaseResolveMs = Date.now() - phaseStart;
-      progress.update(`datasource ready (${datasource.name})`);
-      logVerbose(`phase resolve: ${phaseResolveMs}ms`);
-
-      const params = parseParamPairs(opts.param || []);
-      let selectedCard: QueryCard | undefined;
-      let query = (opts.query || '').trim();
-      if (opts.card) {
-        selectedCard = ctx.cardStore.get(opts.card);
-        if (!selectedCard) throw new Error(`Query card not found: ${opts.card}`);
-        const allowedParams = cardParamNames(selectedCard);
-        if (allowedParams.length) {
-          const unknownParams = Object.keys(params).filter((key) => !allowedParams.includes(key));
-          if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for card ${selectedCard.id}: ${unknownParams.join(', ')}`);
-        }
-        if (!query) query = fillTemplate(selectedCard.sql, params);
-      }
-      if (!query && opts.template) {
-        const tpl = ctx.templateStore.get(opts.template);
-        if (!tpl) throw new Error(`Template not found: ${opts.template}`);
-        query = fillTemplate(tpl.nativeQueryTemplate, params);
-      }
-      const effectiveIntent = opts.intent || selectedCard?.intent || '';
-      if (!query && effectiveIntent) {
-        const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', effectiveIntent);
-        const tpl =
-          (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
-          ctx.kbStore.resolveQuery(service || datasource.service || '', effectiveIntent) ||
-          ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: effectiveIntent });
-        if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
-      }
-      if (!query) throw new Error('No query resolved. Provide --query/--sql, --template, or --intent.');
-      progress.update('query resolved');
-
-      const referencedTables = collectReferencedTables(query);
-      if (supportsSchemaRefresh(datasource) && referencedTables.length) {
-        const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.service).length;
-        if (priorSnapshotRows === 0 && !ctx.jsonMode) {
-          process.stderr.write(`[taproot] first query against service ${datasource.service} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
-        }
-        try {
-          await ensureSchemaSnapshot(ctx, {
-            datasource: datasource.name,
-            tables: referencedTables,
-            metadataTimeoutMs: 3000,
-          });
-        } catch (err) {
-          logVerbose(`schema prime skipped: ${(err as Error).message}`);
-        }
-      }
-      const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
-      const relationEdges = ctx.kbStore.relationsForTables(
-        str(datasource.service),
-        referencedTables,
-        liveColumnsFromSchemaContext(schemaContext.tables),
-      );
-      if (relationEdges.length) schemaContext.relations = relationEdges;
-      const reason = resolveReason(opts.reason);
-      const queryMemory = buildQueryMemory({
-        ledgerDir: ctx.paths.runsLedgerDir,
-        datasource: datasource.name,
-        env,
-        service,
-        intent: effectiveIntent,
-        reason,
-        sql: query,
-        tables: referencedTables,
-        cardStore: ctx.cardStore,
-        selectedCard,
-      });
-      const capability = opts.allowMutate ? 'executeMutate' : 'executeRead';
-      const plugin = ctx.pluginRegistry.get(datasource.kind);
-      if (!plugin?.execute) throw new Error(`No execute-capable plugin for datasource kind '${datasource.kind}'.`);
-      const execute = plugin.execute;
-      if (!plugin.manifest.capabilities.includes(capability as any)) {
-        throw new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`);
-      }
-
-      let creds = await ctx.credentialStore.get(datasource.credentialRef);
-      const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
-      appendEvent(artifacts.runDir, `query started capability=${capability}`);
-      try {
-        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource });
-        {
-          const cachedRows = ctx.learningStore.schemaTables(datasource.service);
-          const hasRefreshedSchema = cachedRows.some((row) => row.sources.includes('refreshed-metadata') || row.sources.includes('manual'));
-          warnings.push(
-            ...enforceSchemaIntrospectionPolicy({
-              sql: query,
-              service: str(datasource.service),
-              hasRefreshedSchema,
-              allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
-            }),
-          );
-        }
-        warnings.push(
-          ...enforcePartitionPredicate({
-            sql: query,
-            schemaContext,
-            allowPartitionScan: Boolean(opts.allowPartitionScan),
-          }),
-        );
-        const executedQuery = opts.explain ? `EXPLAIN ${query}` : query;
-        progress.update('checking connectors');
-        const connectStart = Date.now();
-        const preflightBudgetMs = Math.max(timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
-        const connectorChecks = await withQueryTimeout({
-          timeoutMs: preflightBudgetMs,
-          run: () =>
-            runDatasourceConnectors({
-              datasource: datasource,
-              credentialStore: ctx.credentialStore,
-              pluginRegistry: ctx.pluginRegistry,
-              mode: 'connect',
-            }),
-        });
-        phaseConnectMs = Date.now() - connectStart;
-        logVerbose(`phase connect: ${phaseConnectMs}ms`);
-        for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-        for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
-        if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
-          throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
-        }
-        progress.update(`executing query via ${plugin.manifest.name}`);
-        const executeStart = Date.now();
-        const pluginParams: BuiltinPluginParams = {};
-        if (opts.proto) pluginParams.protoMessage = String(opts.proto);
-        if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
-        if (opts.allowFlush) pluginParams.allowFlush = true;
-        if (opts.requestJson) pluginParams.requestJson = String(opts.requestJson);
-        if (opts.skipProtoValidate) pluginParams.skipProtoValidate = true;
-        if (datasource.kind === DatasourceKind.Grpc && params && Object.keys(params).length) {
-          pluginParams.params = params;
-        }
-        let result;
-        try {
-          result = await withQueryTimeout({
-            timeoutMs,
-            run: () =>
-              execute(
-                {
-                  datasource: datasource,
-                  query: executedQuery,
-                  capability: capability as any,
-                  timeoutMs,
-                  pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
-                },
-                creds,
-              ),
-          });
-        } catch (err) {
-          const message = (err as Error).message || '';
-          const code = classifyError(message);
-          const canPromptPassword =
-            code === 'ACCESS_DENIED' &&
-            !creds.password &&
-            !ctx.jsonMode &&
-            input.isTTY &&
-            !process.env.CI &&
-            (datasource.kind === DatasourceKind.Mysql || datasource.kind === DatasourceKind.Postgres);
-          if (!canPromptPassword) throw err;
-          progress.update(`password required for ${datasource.credentialRef}`);
-          progress.stop();
-          const password = await promptPassword(datasource.credentialRef);
-          if (!password) throw err;
-          creds = { ...creds, password };
-          await ctx.credentialStore.set(datasource.credentialRef, creds);
-          progress.update('retrying query');
-          result = await withQueryTimeout({
-            timeoutMs,
-            run: () =>
-              execute(
-                {
-                  datasource: datasource,
-                  query: executedQuery,
-                  capability: capability as any,
-                  timeoutMs,
-                  pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
-                },
-                creds,
-              ),
-          });
-        }
-        phaseExecuteMs = Date.now() - executeStart;
-        logVerbose(`phase execute: ${phaseExecuteMs}ms`);
-        result.runId = artifacts.runId;
-        if (warnings.length) result.warnings = [...result.warnings, ...warnings];
-        result.timings = {
-          ...result.timings,
-          phases: {
-            resolveMs: phaseResolveMs,
-            connectMs: phaseConnectMs,
-            executeMs: phaseExecuteMs,
-            totalMs: Date.now() - phaseStart,
-          },
-        };
-        result.resolved = {
-          source: resolutionSource,
-          env,
-          namespace: datasource.namespace || namespace || undefined,
-          service,
-          accessMethod: str(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method),
-          target: str(datasource.connection.target),
-          database: str(datasource.connection.database),
-          engine: datasource.kind,
-        };
-        const pluginMeta = result.meta || {};
-        const pluginSchema = pluginMeta.schemaContext;
-        const mergedSchema = pluginSchema
-          ? {
-              ...schemaContext,
-              ...pluginSchema,
-              tables: { ...(schemaContext.tables || {}), ...(pluginSchema.tables || {}) },
-            }
-          : schemaContext;
-        result.meta = { ...pluginMeta, schemaContext: mergedSchema, queryMemory };
-        appendRunsLedgerEntry(
-          ledgerInputFromResult({
-            ledgerDir: ctx.paths.runsLedgerDir,
-            result,
-            datasource: datasource,
-            intent: effectiveIntent,
-            reason,
-            sql: query,
-            tables: referencedTables,
-            redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
-          }),
-        );
-        writeRunSummary(artifacts.runDir, result);
-        appendEvent(artifacts.runDir, 'query succeeded');
-
-        ctx.learningStore.saveSuccess({ datasource: datasource, queryIntent: effectiveIntent, sql: query, result });
-        const phaseSummary = ctx.verbose
-          ? ` [resolve ${phaseResolveMs}ms · connect ${phaseConnectMs}ms · execute ${phaseExecuteMs}ms]`
-          : '';
-        progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)${phaseSummary}`);
-
-        if (ctx.jsonMode) {
-          const cols = result.result.columns || [];
-          const rowsObject = Boolean(opts.rowsObject);
-          const data: Record<string, unknown> = {
-            columns: cols,
-            rows: rowsObject
-              ? result.result.rows
-              : result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
-            datasource: datasource.name,
-            plugin: result.plugin,
-            classification: result.classification,
-          };
-          if (!rowsObject) data.rowsForm = 'array';
-          if (Array.isArray(result.warnings) && result.warnings.length) data.warnings = result.warnings;
-          const meta: Record<string, unknown> = {
-            ...(result.meta || {}),
-            runId: result.runId,
-            resolved: result.resolved,
-            phases: result.timings.phases,
-            timings: { durationMs: result.timings.durationMs },
-            requestId: randomUUID(),
-          };
-          const envelope = trimQueryJsonEnvelope({ ok: true, data, meta });
-          printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
-        }
-        else {
-          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${str(datasource.connection.target)} database=${str(datasource.connection.database)}`);
-          console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
-          const directFooter = renderSchemaContextFooter(result.meta?.schemaContext);
-          if (directFooter) console.log(directFooter);
-          const renderedMemory = renderQueryMemoryTty(queryMemory);
-          if (renderedMemory) console.log(renderedMemory);
-        }
-        } catch (error) {
-          const message = (error as Error).message;
-          const code = classifyError(message);
-          appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
-          progress.fail(`query failed (${code})`);
-          ctx.learningStore.saveFailure({
-            datasource: datasource,
-            queryIntent: effectiveIntent,
-            sql: query,
-            errorClass: code,
-          });
-          appendRunsLedgerEntry({
-            ledgerDir: ctx.paths.runsLedgerDir,
-            runId: artifacts.runId,
-            datasource: datasource,
-            intent: effectiveIntent,
-            reason,
-            sql: query,
-            tables: referencedTables,
-            capability: capability as any,
-            outcomeCode: code,
-            errorClass: code,
-            redactionTier: ctx.runtimeConfigStore.ledgerRedactionTier(env || datasource.env),
-          });
-          const wrapped = new Error(message.startsWith(`${code}:`) ? message : `${code}: ${message}`);
-          (wrapped as Error & { details?: unknown }).details = (error as Error & { details?: unknown }).details;
-          (wrapped as Error & { meta?: Record<string, unknown> }).meta = { runId: artifacts.runId, schemaContext, queryMemory };
-          throw wrapped;
-        }
+        await runDirectQuery(qenv);
       } finally {
         progress.stop();
       }
