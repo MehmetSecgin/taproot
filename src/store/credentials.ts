@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { str } from '../core/strings.js';
 
 const SERVICE_NAME = 'taproot';
 
@@ -43,7 +44,7 @@ function decryptJson(input: FallbackFileShape): Record<string, Record<string, st
 }
 
 function keychainDisabled(): boolean {
-  const raw = String(process.env.TAPROOT_NO_KEYCHAIN || '').trim().toLowerCase();
+  const raw = str(process.env.TAPROOT_NO_KEYCHAIN).trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 

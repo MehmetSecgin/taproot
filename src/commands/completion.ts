@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
+import { str } from '../core/strings.js';
 
 function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -33,7 +34,7 @@ function findCommand(command: Command, name: string): Command | undefined {
 function valueSuggestions(prev: string, current: string, ctx: AppContext): string[] {
   const datasourceNames = uniqueSorted(ctx.datasourceStore.list().map((d) => d.name));
   const templateIds = uniqueSorted(ctx.templateStore.list().map((t) => t.id));
-  const serviceNames = uniqueSorted(ctx.kbStore.services().map((s: any) => String(s.service || '').trim()).filter(Boolean));
+  const serviceNames = uniqueSorted(ctx.kbStore.services().map((s: any) => str(s.service).trim()).filter(Boolean));
   const connectorNames = uniqueSorted(ctx.pluginRegistry.list().filter((p) => p.manifest.kind === 'connector').map((p) => p.manifest.name));
 
   if (prev === '--datasource') return withPrefix(datasourceNames, current);

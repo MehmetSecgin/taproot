@@ -5,6 +5,7 @@ import type { QueryResult, SchemaContext } from '../types/core.js';
 import { collectReferencedTables } from './schema-context.js';
 import { nowIso } from './time.js';
 import { stringifyQueryCard } from '../store/cards.js';
+import { str } from './strings.js';
 
 export interface PromoteRunInput {
   runsDir: string;
@@ -28,7 +29,7 @@ export interface PromoteRunResult {
 }
 
 function slug(value: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/[`'"]/g, '')
@@ -63,13 +64,13 @@ function paramName(base: string, used: Set<string>): string {
 }
 
 function bareColumn(value: string): string {
-  return String(value || '').replace(/`/g, '').split('.').pop() || 'param';
+  return str(value).replace(/`/g, '').split('.').pop() || 'param';
 }
 
 function parameterizeSql(sql: string): { sql: string; params: CardParam[] } {
   const params: CardParam[] = [];
   const used = new Set<string>();
-  let out = String(sql || '').trim();
+  let out = str(sql).trim();
 
   out = out.replace(
     /(\b[\w.`]+\b)\s+between\s+('(?:''|[^'])*'|\b\d{4}-\d{2}-\d{2}\b|\b\d+(?:\.\d+)?\b)\s+and\s+('(?:''|[^'])*'|\b\d{4}-\d{2}-\d{2}\b|\b\d+(?:\.\d+)?\b)/gi,
@@ -112,7 +113,7 @@ function indexesConsidered(ctx: SchemaContext): string[] {
 function requiresFromSchema(ctx: SchemaContext): CardRequires | undefined {
   const partitionPredicates: Record<string, string[]> = {};
   for (const [table, meta] of Object.entries(ctx.tables || {})) {
-    const kind = String(meta.partition?.kind || '').toUpperCase();
+    const kind = str(meta.partition?.kind).toUpperCase();
     const keys = Array.from(new Set([...(meta.partition?.keys || []), meta.partition?.key || ''].filter(Boolean)));
     if (keys.length && ['RANGE', 'LIST'].includes(kind)) partitionPredicates[table] = keys;
   }
@@ -120,7 +121,7 @@ function requiresFromSchema(ctx: SchemaContext): CardRequires | undefined {
 }
 
 function defaultPurpose(result: QueryResult, tables: string[]): string {
-  const intent = String(result.meta?.queryMemory?.similarPastRuns?.[0]?.reason || '').trim();
+  const intent = str(result.meta?.queryMemory?.similarPastRuns?.[0]?.reason).trim();
   if (intent) return intent;
   return `Reusable ${String(result.capability || 'query')} query for ${tables.join(', ') || result.datasource}.`;
 }
@@ -144,7 +145,7 @@ export function promoteRunToCard(input: PromoteRunInput): PromoteRunResult {
   const card: QueryCard = {
     id: input.id || defaultCardId(result, tables),
     datasource: result.datasource,
-    kind: String(result.resolved?.engine || result.plugin || ''),
+    kind: str(result.resolved?.engine || result.plugin),
     purpose: input.purpose || defaultPurpose(result, tables),
     intent: input.intent || result.meta?.queryMemory?.similarPastRuns?.[0]?.intent || undefined,
     aliases: input.aliases || [],

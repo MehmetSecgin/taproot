@@ -4,6 +4,7 @@ import { bootstrapDatasource, saveKbBootstrapCandidate } from './bootstrap.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from './discovery.js';
 import { AccessMethod } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
+import { str } from './strings.js';
 
 export type ResolutionSource = 'explicit' | 'store' | 'learning' | 'kb' | 'unknown';
 
@@ -68,7 +69,7 @@ function discoverTargets(input: { env: string; service: string; accessMethods: s
   const seen = new Set<string>();
   const out: string[] = [];
   for (const method of input.accessMethods) {
-    const current = String(method || '').trim().toLowerCase();
+    const current = str(method).trim().toLowerCase();
     let next: string[] = [];
     if (current === AccessMethod.QaPortforward) {
       next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, input.policy);
@@ -130,14 +131,14 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
   }
   if (!datasource && env && service && allowDiscovery) {
     const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
-    const kbAccessMethod = String(kb?.access_method || '').trim().toLowerCase();
+    const kbAccessMethod = str(kb?.access_method).trim().toLowerCase();
     const targetNamespace = String(kb?.namespace || namespace || 'default');
     const accessMethods = preferredAccessMethods(policy, kbAccessMethod);
     const targets = discoverTargets({ env, service, accessMethods, namespace: targetNamespace, policy });
     if (targets.length) {
       const target = targets[0];
-      const database = String(kb?.database || inferDatabaseCandidates(service)[0] || '');
-      const dbUser = String(kb?.db_user || '');
+      const database = str(kb?.database || inferDatabaseCandidates(service)[0]);
+      const dbUser = str(kb?.db_user);
       const engine = policy.targetPreference.find((item) => target.toLowerCase().includes(item.toLowerCase()))
         || (String(kb?.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql');
       const accessMethod = accessMethods[0] || kbAccessMethod;

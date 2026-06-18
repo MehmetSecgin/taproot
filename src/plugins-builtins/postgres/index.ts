@@ -6,6 +6,7 @@ import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { baseConnConfig } from '../_shared/db-conn.js';
+import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs?: number) {
   return {
@@ -66,7 +67,7 @@ export const postgresPlugin: TapRootPlugin = {
         classification: 'success',
       };
     } catch (error) {
-      const message = String((error as Error).message || '');
+      const message = str((error as Error).message);
       if (request.timeoutMs && /(statement timeout|query timeout|query read timeout|timeout)/i.test(message)) {
         throw queryTimeoutError(request.timeoutMs);
       }

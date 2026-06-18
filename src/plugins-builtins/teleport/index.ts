@@ -2,13 +2,14 @@ import { spawn } from 'node:child_process';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
+import { str } from '../../core/strings.js';
 
 const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
 const LOGIN_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs;
 
 function summarizeTshStatus(detail: string, ok: boolean): string {
-  if (!ok) return String(detail || '').slice(0, 400);
-  const text = String(detail || '');
+  if (!ok) return str(detail).slice(0, 400);
+  const text = str(detail);
   if (!text || text === 'ok') return 'ok';
   const want = /^\s*(Cluster|Logged in as|Valid until|Profile URL):/;
   const lines = text.split(/\r?\n/).filter((line) => want.test(line)).map((line) => line.trim());

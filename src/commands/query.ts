@@ -26,6 +26,7 @@ import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
 import type { QueryCard } from '../types/cards.js';
+import { str } from '../core/strings.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -34,7 +35,7 @@ function rowFromArray(columns: string[], row: Record<string, unknown>): Record<s
 }
 
 function parseDatasourceAlias(value: string | undefined, aliases: Record<string, string>): { env: string; service: string } | null {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = str(value).trim().toLowerCase();
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
   return { env: m[1], service: normalizeService(m[2], aliases) };
@@ -104,8 +105,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = explicitProfile ? null : parseDatasourceAlias(opts.datasource, aliases);
-      const env = String(opts.env || explicitProfile?.env || alias?.env || '').trim();
-      const namespace = normalizeNamespace(String(opts.namespace || explicitProfile?.namespace || ''));
+      const env = str(opts.env || explicitProfile?.env || alias?.env).trim();
+      const namespace = normalizeNamespace(str(opts.namespace || explicitProfile?.namespace));
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
@@ -198,7 +199,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             }
             throw new Error(`${code}: ${message}`);
           } catch (error) {
-            const msg = String((error as Error).message || '');
+            const msg = str((error as Error).message);
             if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
               progress.fail('daemon query failed');
               throw error;
@@ -303,7 +304,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       }
       const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
       const relationEdges = ctx.kbStore.relationsForTables(
-        String(datasource.service || ''),
+        str(datasource.service),
         referencedTables,
         liveColumnsFromSchemaContext(schemaContext.tables),
       );
@@ -340,7 +341,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           warnings.push(
             ...enforceSchemaIntrospectionPolicy({
               sql: query,
-              service: String(datasource.service || ''),
+              service: str(datasource.service),
               hasRefreshedSchema,
               allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
             }),
@@ -452,9 +453,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           env,
           namespace: datasource.namespace || namespace || undefined,
           service,
-          accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
-          target: String(datasource.connection.target || ''),
-          database: String(datasource.connection.database || ''),
+          accessMethod: str(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method),
+          target: str(datasource.connection.target),
+          database: str(datasource.connection.database),
           engine: datasource.kind,
         };
         const pluginMeta = result.meta || {};
@@ -514,7 +515,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
         }
         else {
-          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
+          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${str(datasource.connection.target)} database=${str(datasource.connection.database)}`);
           console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
           const directFooter = renderSchemaContextFooter(result.meta?.schemaContext);
           if (directFooter) console.log(directFooter);

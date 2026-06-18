@@ -27,6 +27,7 @@ import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
+import { str } from './core/strings.js';
 
 const program = new Command();
 
@@ -45,7 +46,7 @@ program
   .option('--skill-version', 'Print skill version and exit', false);
 
 program.hook('preAction', () => {
-  const fmt = String(program.opts().datetimeFormat || '').trim().toLowerCase();
+  const fmt = str(program.opts().datetimeFormat).trim().toLowerCase();
   if (fmt === 'iso' || fmt === 'js' || fmt === 'epoch') {
     process.env.TAPROOT_DATETIME_FORMAT = fmt;
   } else if (fmt) {
@@ -155,7 +156,7 @@ process.on('uncaughtException', (error) => {
 });
 
 program.parseAsync(process.argv).catch((error) => {
-  const commanderCode = String((error as { code?: string })?.code || '');
+  const commanderCode = str((error as { code?: string })?.code);
   if (commanderCode === 'commander.helpDisplayed' || commanderCode === 'commander.version') {
     process.exit(EXIT_CODES.OK);
     return;

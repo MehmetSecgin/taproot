@@ -7,6 +7,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
+import { str } from '../../core/strings.js';
 
 const READ_COMMANDS = new Set<string>([
   'GET', 'MGET', 'STRLEN', 'GETRANGE', 'EXISTS', 'TYPE', 'TTL', 'PTTL',
@@ -95,7 +96,7 @@ interface GateOptions {
 
 function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier {
   if (!tokens.length) throw new Error('empty redis command');
-  const verb = String(tokens[0] || '').toUpperCase();
+  const verb = str(tokens[0]).toUpperCase();
   const tier = classifyCommand(verb);
   if (tier === 'unknown') {
     throw new Error(`redis command '${verb}' not in allow-list; reject by default.`);
@@ -108,7 +109,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
   // Subcommand allow-list applies only to read-tier composite commands.
   const subAllow = SUBCOMMAND_ALLOW[verb];
   if (subAllow && tier === 'read') {
-    const sub = String(tokens[1] || '').toUpperCase();
+    const sub = str(tokens[1]).toUpperCase();
     if (!subAllow.has(sub)) {
       throw new Error(`redis ${verb} subcommand '${sub || '(none)'}' not in allow-list.`);
     }
@@ -263,8 +264,8 @@ function decodeWith(root: ProtoRoot, message: string, buf: Buffer): Record<strin
 function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoMessage?: string } {
   const pp = (request.pluginParams || {}) as RedisPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const protoRoot = String(pp.protoRoot || hints.protoRoot || '').trim() || undefined;
-  const protoMessage = String(pp.protoMessage || hints.protoMessage || '').trim() || undefined;
+  const protoRoot = str(pp.protoRoot || hints.protoRoot).trim() || undefined;
+  const protoMessage = str(pp.protoMessage || hints.protoMessage).trim() || undefined;
   return { protoRoot, protoMessage };
 }
 

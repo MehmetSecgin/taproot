@@ -6,6 +6,7 @@ import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheckCode, RemediationAction } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
+import { str } from './strings.js';
 
 export type ReadinessState =
   | 'ready'
@@ -147,7 +148,7 @@ const MISSING_CONNECTOR_CONFIG_CODES = new Set<DoctorCheckCode>([
 
 function connectorSetupCommand(datasource: DatasourceProfile, checks: ReadinessCheck[]): string {
   const firstMissing = checks.find((check) => isMissingConnectorConfigCheck(check));
-  const label = String(firstMissing?.check || '').toLowerCase();
+  const label = str(firstMissing?.check).toLowerCase();
   if (label.startsWith('openvpn')) {
     return `taproot connector setup --datasource ${datasource.name} --connector openvpn --connect-command '<command>' --status-command '<command>'`;
   }
@@ -157,7 +158,7 @@ function connectorSetupCommand(datasource: DatasourceProfile, checks: ReadinessC
   if (label.startsWith('kubectl-portforward')) {
     return `taproot connector setup --datasource ${datasource.name} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`;
   }
-  const connector = String(label.match(/^connector:([^ ]+)/)?.[1] || '').trim();
+  const connector = str(label.match(/^connector:([^ ]+)/)?.[1]).trim();
   return connector
     ? `taproot connector setup --datasource ${datasource.name} --connector ${connector} ...`
     : `taproot connector setup --datasource ${datasource.name} --connector <name> ...`;
@@ -165,8 +166,8 @@ function connectorSetupCommand(datasource: DatasourceProfile, checks: ReadinessC
 
 function isMissingConnectorConfigCheck(check: ReadinessCheck): boolean {
   if (check.code) return MISSING_CONNECTOR_CONFIG_CODES.has(check.code);
-  const label = String(check.check || '').toLowerCase();
-  const detail = String(check.detail || '').toLowerCase();
+  const label = str(check.check).toLowerCase();
+  const detail = str(check.detail).toLowerCase();
   return /connector plugin not found/.test(detail) || /mode 'doctor' not supported/.test(detail) || /no (status|connect|disconnect|login)command configured/.test(detail) || (label.startsWith('connector:') && check.status !== DoctorStatus.Ok);
 }
 
@@ -353,9 +354,9 @@ export function nextCommandForReadiness(
 
 async function resolveTargetDatasource(ctx: AppContext, target: ReadinessTargetInput): Promise<DatasourceProfile | undefined> {
   if (target.datasource) return ctx.datasourceStore.get(String(target.datasource).trim());
-  const env = String(target.env || '').trim();
-  const namespace = normalizeNamespace(String(target.namespace || '').trim());
-  const service = normalizeService(String(target.service || '').trim(), ctx.runtimeConfigStore.serviceAliases());
+  const env = str(target.env).trim();
+  const namespace = normalizeNamespace(str(target.namespace).trim());
+  const service = normalizeService(str(target.service).trim(), ctx.runtimeConfigStore.serviceAliases());
   if (!env || !service) return undefined;
   return ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
 }
@@ -393,10 +394,10 @@ export async function collectReadinessSnapshot(
   const target = input?.target;
   const normalizedTarget = target
     ? {
-        datasource: String(target.datasource || '').trim() || undefined,
-        env: String(target.env || '').trim() || undefined,
-        namespace: normalizeNamespace(String(target.namespace || '').trim()) || undefined,
-        service: normalizeService(String(target.service || '').trim(), ctx.runtimeConfigStore.serviceAliases()) || undefined,
+        datasource: str(target.datasource).trim() || undefined,
+        env: str(target.env).trim() || undefined,
+        namespace: normalizeNamespace(str(target.namespace).trim()) || undefined,
+        service: normalizeService(str(target.service).trim(), ctx.runtimeConfigStore.serviceAliases()) || undefined,
       }
     : undefined;
 

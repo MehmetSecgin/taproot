@@ -5,13 +5,14 @@ import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 import { promoteRunToCard } from '../core/card-promotion.js';
 import { readRunsLedgerEntries, type RunsLedgerEntry } from '../core/runs-ledger.js';
+import { str } from '../core/strings.js';
 
 function appendList(value: string, prior: string[] = []): string[] {
   return [...prior, value];
 }
 
 function cardSlug(value: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/[`'"]/g, '')

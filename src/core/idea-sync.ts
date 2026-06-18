@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatasourceKind, type DatasourceProfile } from '../types/core.js';
+import { str } from './strings.js';
 
 export interface IdeaDriverSpec {
   driverRef: string;
@@ -91,7 +92,7 @@ export function describeDriver(profile: DatasourceProfile): IdeaDriverSpec | { s
   const host = profile.connection?.host?.trim();
   const port = profile.connection?.port;
   const database = profile.connection?.database?.trim() || '';
-  const kind = String(profile.kind || '').toLowerCase();
+  const kind = str(profile.kind).toLowerCase();
 
   if (kind === DatasourceKind.Mysql || kind === 'tidb') {
     if (!host || !port) return { skip: 'missing host or port' };

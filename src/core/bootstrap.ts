@@ -4,6 +4,7 @@ import { criticalDatasourceKbConflicts } from './conflicts.js';
 import { nowIso } from './time.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
+import { str } from './strings.js';
 
 export interface BootstrapResult {
   profile: DatasourceProfile;
@@ -35,7 +36,7 @@ function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapRes
   const refs = new Set<string>();
   if (profile.credentialRef) refs.add(profile.credentialRef);
   for (const value of Object.values(profile.resolverHints || {})) {
-    const ref = String(value || '').trim();
+    const ref = str(value).trim();
     if (ref) refs.add(ref);
   }
   return {
@@ -126,7 +127,7 @@ function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate 
 }
 
 function buildNativeCandidate(c: BootstrapContext): KbBootstrapCandidate | undefined {
-  const host = String(c.kb.host || '').trim();
+  const host = str(c.kb.host).trim();
   if (!host) return undefined;
   const port = Number(c.kb.port || 0) || (c.engine.includes('postgres') ? 5432 : 3306);
   return {
@@ -196,7 +197,7 @@ export function buildKbBootstrapCandidate(
   kb: Record<string, unknown>,
   options?: KbBootstrapOptions,
 ): KbBootstrapCandidate | undefined {
-  const accessMethod = String(kb.access_method || '').toLowerCase();
+  const accessMethod = str(kb.access_method).toLowerCase();
   const strategy = BOOTSTRAP_STRATEGIES.find((s) => s.accessMethod === accessMethod);
   if (!strategy) return undefined;
   const c: BootstrapContext = {
@@ -205,13 +206,13 @@ export function buildKbBootstrapCandidate(
     datasourceName,
     kb,
     engine: String(kb.engine || 'mysql').toLowerCase(),
-    database: String(kb.database || ''),
-    dbUser: String(kb.db_user || ''),
-    target: String(options?.targetOverride || kb.target || ''),
+    database: str(kb.database),
+    dbUser: str(kb.db_user),
+    target: str(options?.targetOverride || kb.target),
     credentialRef: env,
     tags: options?.tags || ['auto-bootstrap', 'kb-derived'],
     confidence: options?.confidence ?? 0.9,
-    namespace: String(kb.namespace || '').trim() || undefined,
+    namespace: str(kb.namespace).trim() || undefined,
   };
   return strategy.build(c);
 }
@@ -256,7 +257,7 @@ export async function bootstrapDatasource(
 
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
-  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
   const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
   if (!profile) return undefined;
   return {
@@ -276,7 +277,7 @@ export async function reconcileDatasource(
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
 
-  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
   const candidate = buildKbBootstrapCandidate(env, service, resolvedName, kb);
   if (!candidate) return undefined;
 

@@ -1,6 +1,7 @@
 import parserPkg from 'node-sql-parser';
 import type { SchemaContext, TableContext } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type LearningStore, type SchemaObservationEntry } from '../store/learning.js';
+import { str } from './strings.js';
 
 const { Parser } = parserPkg as unknown as {
   Parser: new () => { astify: (sql: string, opts?: Record<string, unknown>) => unknown };
@@ -14,7 +15,7 @@ export interface PredicateColumnRefs {
 }
 
 function normalizeName(value: string): string {
-  return String(value || '').replace(/`/g, '').trim();
+  return str(value).replace(/`/g, '').trim();
 }
 
 function bareName(value: string): string {
@@ -161,7 +162,7 @@ export function collectPredicateColumns(sql: string): PredicateColumnRefs {
 }
 
 export function isSchemaMetadataQuery(sql: string): boolean {
-  const text = String(sql || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const text = str(sql).trim().replace(/\s+/g, ' ').toLowerCase();
   return /^(show\s+(create\s+table|tables\b|full\s+columns\b|index\b)|describe\b|desc\b|explain\b)/.test(text);
 }
 
@@ -172,7 +173,7 @@ function matchesTable(row: SchemaObservationEntry, table: string): boolean {
 export function buildSchemaContext(sql: string, target: string | { service?: string }, store: LearningStore): SchemaContext {
   const referenced = collectReferencedTables(sql);
   if (!referenced.length) return { tables: {} };
-  const service = typeof target === 'string' ? target : String(target?.service || '');
+  const service = typeof target === 'string' ? target : str(target?.service);
   const rows = store.schemaTables(service || undefined);
   const out: Record<string, TableContext> = {};
   for (const table of referenced) {

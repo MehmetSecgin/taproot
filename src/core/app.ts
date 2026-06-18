@@ -12,6 +12,7 @@ import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
 import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
+import { str } from './strings.js';
 export { classifyError } from './error-classification.js';
 
 export interface AppContext {
@@ -176,7 +177,7 @@ export async function runDatasourceConnectors(input: {
         return [{ check: `connector:${name}`, status: DoctorStatus.Warn, detail: 'connector plugin not found', code: 'connector_plugin_missing' }];
       }
       const refKey = `${name}CredentialRef`;
-      const ref = String(input.datasource.resolverHints?.[refKey] || '').trim();
+      const ref = str(input.datasource.resolverHints?.[refKey]).trim();
       const creds = ref ? await input.credentialStore.get(ref) : {};
       if (input.mode === 'doctor' && plugin.doctor) {
         return await withConnectorTimeout(name, 'doctor', perCheckTimeoutMs, () =>

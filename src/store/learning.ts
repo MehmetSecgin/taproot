@@ -6,11 +6,12 @@ import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { extractQueryShape, type ColumnRole } from '../core/schema-learning.js';
 import type { RefreshedSchemaJoin, RefreshedSchemaTable } from '../core/schema-refresh.js';
 import type { SchemaProvenance } from '../types/core.js';
+import { str } from '../core/strings.js';
 
 export const SCHEMA_METADATA_VERSION = 2;
 
 export function bareTableName(value: unknown): string {
-  return String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
+  return str(value).replace(/`/g, '').trim().split('.').pop() || '';
 }
 
 function pickBestByKey<T extends { key: string }>(rows: T[], isBetter: (candidate: T, current: T) => boolean): T[] {
@@ -168,7 +169,7 @@ export interface GrpcServiceSchemaEntry {
 }
 
 function normalizeIntent(value?: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
@@ -434,14 +435,14 @@ export class LearningStore {
     const joins = this.loadSchemaJoins();
     const shapes = this.loadSchemaShapes();
     const datasource = input.datasource;
-    const env = String(datasource.env || '');
-    const service = String(datasource.service || '');
-    const database = String(datasource.connection.database || '');
-    const target = String(datasource.connection.target || '');
+    const env = str(datasource.env);
+    const service = str(datasource.service);
+    const database = str(datasource.connection.database);
+    const target = str(datasource.connection.target);
 
     const bare = bareTableName;
     const isSystemTable = (value: string): boolean => {
-      const lower = String(value || '').toLowerCase();
+      const lower = str(value).toLowerCase();
       return lower.startsWith('information_schema.') || lower.startsWith('performance_schema.') || lower.startsWith('mysql.')
         || lower === 'information_schema' || lower === 'performance_schema' || lower === 'mysql';
     };
@@ -593,7 +594,7 @@ export class LearningStore {
     const entry: GrpcServiceSchemaEntry = {
       key,
       datasource: datasource.name,
-      env: String(datasource.env || ''),
+      env: str(datasource.env),
       service,
       kind: datasource.kind,
       protoRoot: input.protoRoot,
@@ -621,10 +622,10 @@ export class LearningStore {
     const joins = this.loadSchemaJoins();
     const shapes = this.loadSchemaShapes();
     const datasource = input.datasource;
-    const env = String(datasource.env || '');
-    const service = String(datasource.service || '');
-    const database = String(datasource.connection.database || '');
-    const target = String(datasource.connection.target || '');
+    const env = str(datasource.env);
+    const service = str(datasource.service);
+    const database = str(datasource.connection.database);
+    const target = str(datasource.connection.target);
 
     for (const table of input.tables) {
       const key = [service, table.table].join('|');
@@ -778,7 +779,7 @@ export class LearningStore {
     const intentKey = normalizeIntent(intent);
     if (!intentKey) return undefined;
     return this.loadTargetSelections()
-      .filter((row) => row.env === env && row.service === service && row.intentKey === intentKey && String(row.namespace || '') === String(namespace || ''))
+      .filter((row) => row.env === env && row.service === service && row.intentKey === intentKey && str(row.namespace) === str(namespace))
       .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0];
   }
 
@@ -793,9 +794,9 @@ export class LearningStore {
     source?: 'learned' | 'kb' | 'manual';
   }): TargetSelectionEntry {
     const rows = this.loadTargetSelections();
-    const env = String(input.env || '').trim();
-    const namespace = String(input.namespace || '').trim();
-    const service = String(input.service || '').trim();
+    const env = str(input.env).trim();
+    const namespace = str(input.namespace).trim();
+    const service = str(input.service).trim();
     const intentKey = normalizeIntent(input.intent);
     const key = `${env}|${namespace}|${service}|${intentKey}`;
     const next: TargetSelectionEntry = {
@@ -804,9 +805,9 @@ export class LearningStore {
       namespace: namespace || undefined,
       service,
       intentKey,
-      engine: String(input.engine || '').trim(),
-      target: String(input.target || '').trim(),
-      database: String(input.database || '').trim(),
+      engine: str(input.engine).trim(),
+      target: str(input.target).trim(),
+      database: str(input.database).trim(),
       updatedAt: nowIso(),
       source: input.source || 'manual',
     };
@@ -824,7 +825,7 @@ export class LearningStore {
     source?: 'learned' | 'kb' | 'manual';
   }): QueryLibraryEntry {
     const library = this.loadLibrary();
-    const service = String(input.service || '').trim();
+    const service = str(input.service).trim();
     const intentKey = normalizeIntent(input.intent);
     const sqlTemplate = normalizeSqlTemplate(input.sqlTemplate);
     const key = `${service}|${intentKey}|${sqlTemplate}`;
@@ -858,9 +859,9 @@ export class LearningStore {
     const stats = this.loadStats();
     const now = nowIso();
 
-    const env = String(input.datasource.env || '').trim();
-    const namespace = String(input.datasource.namespace || '').trim();
-    const service = String(input.datasource.service || '').trim();
+    const env = str(input.datasource.env).trim();
+    const namespace = str(input.datasource.namespace).trim();
+    const service = str(input.datasource.service).trim();
     if (env && service) {
       const key = namespace ? `${env}|${namespace}|${service}` : `${env}|${service}`;
       const idx = resolution.findIndex((r) => r.key === key);
@@ -890,9 +891,9 @@ export class LearningStore {
         namespace: namespace || undefined,
         service,
         intent: input.queryIntent,
-        engine: String(input.result.resolved.engine || input.datasource.kind || ''),
-        target: String(input.result.resolved.target || ''),
-        database: String(input.result.resolved.database || ''),
+        engine: str(input.result.resolved.engine || input.datasource.kind),
+        target: str(input.result.resolved.target),
+        database: str(input.result.resolved.database),
         source: 'learned',
       });
     }
@@ -952,9 +953,9 @@ export class LearningStore {
     const stats = this.loadStats();
     const targetSelections = this.loadTargetSelections();
     const now = nowIso();
-    const env = String(input.datasource.env || '').trim();
-    const namespace = String(input.datasource.namespace || '').trim();
-    const service = String(input.datasource.service || '').trim();
+    const env = str(input.datasource.env).trim();
+    const namespace = str(input.datasource.namespace).trim();
+    const service = str(input.datasource.service).trim();
 
     if (env && service) {
       const key = namespace ? `${env}|${namespace}|${service}` : `${env}|${service}`;

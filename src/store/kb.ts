@@ -2,9 +2,10 @@ import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { normalizeRelations, relationsForTables } from '../core/relations.js';
 import type { KbRelation, SchemaRelationEdge } from '../types/core.js';
+import { str } from '../core/strings.js';
 
 function normalizeText(value: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
@@ -60,43 +61,43 @@ export class KbStore {
     return Array.from(
       new Set(
         this.services()
-          .map((row) => String(row.service || '').trim())
+          .map((row) => str(row.service).trim())
           .filter(Boolean),
       ),
     ).sort((a, b) => a.localeCompare(b));
   }
 
   resolveConnection(service: string, env: string, namespace?: string): Record<string, unknown> | null {
-    const svc = this.services().find((s) => String(s.service || '').trim().toLowerCase() === service.toLowerCase());
+    const svc = this.services().find((s) => str(s.service).trim().toLowerCase() === service.toLowerCase());
     if (!svc) return null;
     const conns = Array.isArray(svc.connections) ? svc.connections : [];
     const active = conns.filter((c: any) => {
       if (String(c.env) !== env || String(c.status || 'active') !== 'active') return false;
       if (namespace == null || namespace === '') return true;
-      return String(c.namespace || '') === namespace;
+      return str(c.namespace) === namespace;
     });
     if (!active.length) return null;
-    return active.sort((a: any, b: any) => String(b.verified_at_utc || '').localeCompare(String(a.verified_at_utc || '')))[0];
+    return active.sort((a: any, b: any) => str(b.verified_at_utc).localeCompare(str(a.verified_at_utc)))[0];
   }
 
   resolveQuery(service: string, intent: string): Record<string, unknown> | null {
     const normalized = normalizeText(intent);
-    const cands = this.templates().filter((t) => String(t.service || '').toLowerCase() === service.toLowerCase() && String(t.status || 'active') === 'active');
+    const cands = this.templates().filter((t) => str(t.service).toLowerCase() === service.toLowerCase() && String(t.status || 'active') === 'active');
     if (!cands.length) return null;
     const ranked = cands
       .map((t) => ({
         t,
-        exact: Number(normalizeText(String(t.intent || '')) === normalized),
+        exact: Number(normalizeText(str(t.intent)) === normalized),
         aliasExact: Number((Array.isArray(t.aliases) ? t.aliases : []).some((a: string) => normalizeText(String(a)) === normalized)),
         contains: Number(
-          normalizeText(String(t.intent || '')).includes(normalized) ||
-            normalized.includes(normalizeText(String(t.intent || ''))) ||
+          normalizeText(str(t.intent)).includes(normalized) ||
+            normalized.includes(normalizeText(str(t.intent))) ||
             (Array.isArray(t.aliases) ? t.aliases : []).some(
               (a: string) => normalizeText(String(a)).includes(normalized) || normalized.includes(normalizeText(String(a))),
             ),
         ),
       }))
-      .sort((a, b) => b.exact - a.exact || b.aliasExact - a.aliasExact || b.contains - a.contains || String(a.t.id || '').localeCompare(String(b.t.id || '')));
+      .sort((a, b) => b.exact - a.exact || b.aliasExact - a.aliasExact || b.contains - a.contains || str(a.t.id).localeCompare(str(b.t.id)));
     if (!ranked[0].exact && !ranked[0].aliasExact && !ranked[0].contains) return null;
     return ranked[0].t;
   }

@@ -7,6 +7,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
+import { str } from '../../core/strings.js';
 
 type ProxyRuntime = {
   key: string;
@@ -158,7 +159,7 @@ async function ensureProxy(sessionId: string, target: string, user: string, data
     // ignore
   });
   proc.once('error', (error) => {
-    spawnError = String((error as Error)?.message || error || '');
+    spawnError = str((error as Error)?.message || error);
   });
   proc.once('exit', (code, signal) => {
     exitState.value = { code, signal };
@@ -251,7 +252,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const target = request.datasource.connection.target;
     const user = creds.dbUser || creds.user;
     const database = request.datasource.connection.database;
-    const sessionId = String(creds.__sessionId || '').trim();
+    const sessionId = str(creds.__sessionId).trim();
     if (!target || !user || !database) {
       throw new Error('teleport-mysql requires target, dbUser/user, and database');
     }
@@ -273,7 +274,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
         );
         const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-        const columns = Array.isArray(fields) ? fields.map((f: any) => String(f.name || '')) : Object.keys(normalizedRows[0] || {});
+        const columns = Array.isArray(fields) ? fields.map((f: any) => str(f.name)) : Object.keys(normalizedRows[0] || {});
         return {
           runId: '',
           datasource: request.datasource.name,
@@ -286,7 +287,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           classification: 'success',
         };
       } catch (error) {
-        const message = String((error as Error).message || '');
+        const message = str((error as Error).message);
         if (request.timeoutMs && /timeout/i.test(message)) {
           (conn as any).destroy?.();
           throw queryTimeoutError(request.timeoutMs);
@@ -298,7 +299,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         });
       }
     } catch (proxyError) {
-      if (String((proxyError as Error).message || '').startsWith('QUERY_TIMEOUT:')) {
+      if (str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {
         throw proxyError;
       }
       throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);

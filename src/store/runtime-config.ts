@@ -1,6 +1,7 @@
 import { readJsonFile } from '../core/json.js';
 import type { EnvironmentPolicy, LedgerRedactionTier, RuntimeConfig } from '../types/core.js';
 import { RuntimeConfigSchema } from './schemas.js';
+import { str } from '../core/strings.js';
 
 const DEFAULT_ENVIRONMENT_POLICY: EnvironmentPolicy = {
   deterministicRequired: false,
@@ -10,7 +11,7 @@ const DEFAULT_ENVIRONMENT_POLICY: EnvironmentPolicy = {
 };
 
 function normalizeKey(value?: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '-');
@@ -51,7 +52,7 @@ export class RuntimeConfigStore {
   cardRoots(): string[] {
     const config = this.get();
     return [...(config.defaults?.cardRoots || []), ...(config.cardRoots || [])]
-      .map((item) => String(item || '').trim())
+      .map((item) => str(item).trim())
       .filter(Boolean);
   }
 

@@ -10,6 +10,7 @@ import {
   searchMethods,
   type ProtoDescriptor,
 } from '../core/grpc-introspect.js';
+import { str } from '../core/strings.js';
 
 function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string; datasource?: string } {
   if (opts.protoRoot) return { root: String(opts.protoRoot), source: 'flag', datasource: opts.datasource };
@@ -21,7 +22,7 @@ function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoo
   if (ds.kind !== 'grpc') {
     throw new Error(`Datasource '${opts.datasource}' is kind=${ds.kind}; grpc describe needs a grpc datasource.`);
   }
-  const root = String((ds.resolverHints || {})['protoRoot'] || '');
+  const root = str((ds.resolverHints || {})['protoRoot']);
   if (!root) throw new Error(`Datasource '${opts.datasource}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
   return { root, source: `datasource:${opts.datasource}`, datasource: opts.datasource };
 }

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Capability, DatasourceProfile, LedgerRedactionTier, QueryResult } from '../types/core.js';
 import { nowIso } from './time.js';
+import { str } from './strings.js';
 
 export interface RunsLedgerEntry {
   runId: string;
@@ -69,7 +70,7 @@ function stableHash(value: string): string {
 }
 
 export function normalizeSqlForLedger(sql: string): string {
-  let out = String(sql || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  let out = str(sql).trim().replace(/\s+/g, ' ').toLowerCase();
   out = out.replace(/'(?:''|[^'])*'/g, ':str');
   out = out.replace(/"(?:\\"|[^"])*"/g, ':str');
   out = out.replace(/\b\d+\.\d+\b/g, ':num');
@@ -85,7 +86,7 @@ export function queryFingerprint(input: { datasource: string; intent?: string; n
 }
 
 export function redactSqlForLedger(sql: string, tier: LedgerRedactionTier): string {
-  let out = String(sql || '');
+  let out = str(sql);
   for (const [pattern, replacement] of ALWAYS_REDACT_PATTERNS) out = out.replace(pattern, replacement);
   if (tier === 'raw') return out;
   out = out.replace(/'(?:''|[^'])*'/g, "'[REDACTED]'");
@@ -116,14 +117,14 @@ export function makeRunsLedgerEntry(input: LedgerWriteInput): RunsLedgerEntry {
   return {
     runId: input.runId,
     sessionId: input.sessionId || undefined,
-    agentId: String(process.env.TAPROOT_AGENT_ID || '').trim() || undefined,
+    agentId: str(process.env.TAPROOT_AGENT_ID).trim() || undefined,
     ts,
     datasource: input.datasource.name,
     env: input.datasource.env || undefined,
     namespace: input.datasource.namespace || undefined,
     service: input.datasource.service || undefined,
-    intent: String(input.intent || '').trim() || undefined,
-    reason: String(input.reason || '').trim() || undefined,
+    intent: str(input.intent).trim() || undefined,
+    reason: str(input.reason).trim() || undefined,
     fingerprint: queryFingerprint({ datasource: input.datasource.name, intent: input.intent, normalizedSql }),
     sql: redactSqlForLedger(input.sql, input.redactionTier),
     normalizedSql,
@@ -140,7 +141,7 @@ export function makeRunsLedgerEntry(input: LedgerWriteInput): RunsLedgerEntry {
 }
 
 export function appendRunsLedgerEntry(input: LedgerWriteInput): RunsLedgerEntry | undefined {
-  if (String(process.env.TAPROOT_LEDGER || '').toLowerCase() === 'off') return undefined;
+  if (str(process.env.TAPROOT_LEDGER).toLowerCase() === 'off') return undefined;
   const entry = makeRunsLedgerEntry(input);
   fs.mkdirSync(input.ledgerDir, { recursive: true });
   fs.appendFileSync(path.join(input.ledgerDir, monthFileName(entry.ts)), `${JSON.stringify(entry)}\n`, 'utf8');

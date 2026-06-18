@@ -2,6 +2,7 @@ import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { missingPartitionPredicate, redundantIntrospection } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
+import { str } from './strings.js';
 
 const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
 const READ_PREFIX_RE = /^\s*(select|show|describe|desc|explain|with)\b/i;
@@ -39,7 +40,7 @@ function partitionKeys(partition: SchemaPartition): string[] {
 }
 
 function partitionKind(partition: SchemaPartition): string {
-  return String(partition.kind || '').trim().toUpperCase();
+  return str(partition.kind).trim().toUpperCase();
 }
 
 function isHardPartitionKind(partition: SchemaPartition): boolean {
@@ -53,7 +54,7 @@ function isWarnOnlyPartitionKind(partition: SchemaPartition): boolean {
 const REDUNDANT_INTROSPECTION_RE = /^\s*(show\s+create\s+table|show\s+(full\s+)?columns\s+from|show\s+index(es)?\s+from|describe\s+|desc\s+)/i;
 
 export function isRedundantIntrospectionQuery(sql: string): boolean {
-  return REDUNDANT_INTROSPECTION_RE.test(String(sql || ''));
+  return REDUNDANT_INTROSPECTION_RE.test(str(sql));
 }
 
 export function enforceSchemaIntrospectionPolicy(input: {

@@ -9,6 +9,7 @@ import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
+import { str } from '../core/strings.js';
 
 function compactDetail(detail: string, max = 160): string {
   const oneLine = detail.replace(/\s+/g, ' ').trim();
@@ -104,11 +105,11 @@ const ACTION_PRIORITIES = {
 } as const;
 
 function connectorNameFromCheck(check: string): string {
-  const label = String(check || '').toLowerCase();
+  const label = str(check).toLowerCase();
   if (label.startsWith('openvpn')) return 'openvpn';
   if (label.startsWith('teleport')) return 'teleport';
   if (label.startsWith('kubectl-portforward')) return 'kubectl-portforward';
-  return String(label.match(/^connector:([^ ]+)/)?.[1] || '').trim();
+  return str(label.match(/^connector:([^ ]+)/)?.[1]).trim();
 }
 
 function isMissingConnectorConfigCode(code?: DoctorCheckCode): boolean {
@@ -260,8 +261,8 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
   const actions = new Map<string, PrioritizedAction>();
   const orderRef = { current: 0 };
   for (const check of checks) {
-    const label = String(check.check || '').toLowerCase();
-    const detail = String(check.detail || '');
+    const label = str(check.check).toLowerCase();
+    const detail = str(check.detail);
     if (check.status === DoctorStatus.Ok) continue;
 
     if (isMissingConnectorConfigCode(check.code)) {

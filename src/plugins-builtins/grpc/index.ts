@@ -1,3 +1,4 @@
+import { str } from '../../core/strings.js';
 import type {
   DoctorCheck,
   QueryRequest,
@@ -65,7 +66,7 @@ function getOrCreateClient(
 interface ParsedQuery { service: string; method: string }
 
 function parseQuery(input: string): ParsedQuery {
-  const text = String(input || '').trim();
+  const text = str(input).trim();
   if (!text) throw new Error('empty grpc query; expected "<package.Service/Method>"');
   const slash = text.indexOf('/');
   if (slash <= 0 || slash === text.length - 1) {
@@ -77,7 +78,7 @@ function parseQuery(input: string): ParsedQuery {
 function resolveProtoRoot(request: QueryRequest): string {
   const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const root = String(pp.protoRoot || hints.protoRoot || '').trim();
+  const root = str(pp.protoRoot || hints.protoRoot).trim();
   if (!root) {
     throw new Error("grpc plugin needs a proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
   }

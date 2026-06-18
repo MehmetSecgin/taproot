@@ -11,12 +11,13 @@ import { deriveRelationCandidates, validateRelations } from '../core/relations.j
 import { DatasourceKind, DoctorStatus, EnsuredBy } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
 import { bareTableName, schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
+import { str } from '../core/strings.js';
 
 async function resolveDatasource(ctx: AppContext, opts: { datasource?: string; env?: string; namespace?: string; service?: string }): Promise<DatasourceProfile | undefined> {
   if (opts.datasource) return ctx.datasourceStore.get(String(opts.datasource));
-  const env = String(opts.env || '').trim();
-  const namespace = normalizeNamespace(String(opts.namespace || ''));
-  const service = normalizeService(String(opts.service || ''), ctx.runtimeConfigStore.serviceAliases());
+  const env = str(opts.env).trim();
+  const namespace = normalizeNamespace(str(opts.namespace));
+  const service = normalizeService(str(opts.service), ctx.runtimeConfigStore.serviceAliases());
   if (!env || !service) return undefined;
   const ds = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
   if (ds) return ds;
@@ -29,11 +30,11 @@ function isTargetedRequest(opts: { datasource?: string; env?: string; namespace?
 }
 
 function unresolvedNextCommand(opts: { datasource?: string; env?: string; namespace?: string; service?: string }, ctx?: AppContext): string | null {
-  const datasource = String(opts.datasource || '').trim();
+  const datasource = str(opts.datasource).trim();
   if (datasource) return `taproot --json datasource show --name ${datasource}`;
-  const env = String(opts.env || '').trim();
-  const namespace = normalizeNamespace(String(opts.namespace || ''));
-  const service = String(opts.service || '').trim();
+  const env = str(opts.env).trim();
+  const namespace = normalizeNamespace(str(opts.namespace));
+  const service = str(opts.service).trim();
   if (!env || !service) return null;
   // If a datasource for this service already exists, prefer pointing the caller at it
   // (e.g. user passed `--env qa-develop` instead of `--env qa --namespace develop`).
@@ -51,7 +52,7 @@ function unresolvedNextCommand(opts: { datasource?: string; env?: string; namesp
 function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted: boolean; load: (key?: string) => T[]; keyKind?: 'service' | 'datasource' }): T[] {
   if (input.datasource) {
     const kind = input.keyKind || 'service';
-    const key = kind === 'service' ? String(input.datasource.service || '') : input.datasource.name;
+    const key = kind === 'service' ? str(input.datasource.service) : input.datasource.name;
     return input.load(key || undefined);
   }
   if (input.targeted) return [];
@@ -120,7 +121,7 @@ type JoinSnapshot = {
 
 function trimIndex(index: { name?: string; columns?: string[]; unique?: boolean; type?: string }): SchemaIndexProjection {
   const out: SchemaIndexProjection = {
-    name: String(index.name || ''),
+    name: str(index.name),
     columns: index.columns || [],
   };
   if (index.unique) out.unique = true;
@@ -475,7 +476,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
 
   l.command('replay').requiredOption('--run-id <id>').action((opts) => {
     const ctx = getCtx();
-    const runId = String(opts.runId || '').trim();
+    const runId = str(opts.runId).trim();
     const runDir = path.join(ctx.paths.runsDir, runId);
     const summaryFile = path.join(runDir, 'summary.json');
     if (!runId || !fs.existsSync(summaryFile)) {
@@ -568,7 +569,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         // ignore preflight infra errors and let refresh attempt itself
       }
       const refreshed = await refreshSchemaForDatasource(ctx, datasource);
-      const service = String(datasource.service || '').toLowerCase();
+      const service = str(datasource.service).toLowerCase();
       const serviceRelations = service
         ? ctx.kbStore.typedRelations().filter((r) => r.from.service.toLowerCase() === service || r.to.service.toLowerCase() === service)
         : [];

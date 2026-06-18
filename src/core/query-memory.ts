@@ -3,6 +3,7 @@ import type { QueryCard } from '../types/cards.js';
 import type { CardStore } from '../store/cards.js';
 import { normalizeSqlForLedger, queryFingerprint, readRunsLedgerEntries, type RunsLedgerEntry } from './runs-ledger.js';
 import { collectPredicateColumns } from './schema-context.js';
+import { str } from './strings.js';
 
 export interface BuildQueryMemoryInput {
   ledgerDir: string;
@@ -19,9 +20,9 @@ export interface BuildQueryMemoryInput {
 
 export function resolveReason(value?: string): string {
   return (
-    String(value || '').trim() ||
-    String(process.env.TAPROOT_REASON || '').trim() ||
-    String(process.env.TAPROOT_AGENT_TASK || '').trim()
+    str(value).trim() ||
+    str(process.env.TAPROOT_REASON).trim() ||
+    str(process.env.TAPROOT_AGENT_TASK).trim()
   );
 }
 
@@ -65,7 +66,7 @@ function recurringFailureHints(rows: RunsLedgerEntry[], tables: string[]): strin
 }
 
 function bareColumn(value: string): string {
-  return String(value || '').trim().toLowerCase().split('.').pop() || '';
+  return str(value).trim().toLowerCase().split('.').pop() || '';
 }
 
 function cardRequirementWarnings(card: QueryCard, sql: string): string[] {
@@ -75,13 +76,13 @@ function cardRequirementWarnings(card: QueryCard, sql: string): string[] {
   for (const filter of requires.must_filter || []) {
     const required = bareColumn(filter);
     if (!required) continue;
-    const table = String(filter || '').includes('.') ? String(filter).split('.').slice(0, -1).join('.') : '';
+    const table = str(filter).includes('.') ? String(filter).split('.').slice(0, -1).join('.') : '';
     const tableCols = table ? predicates.byTable.get(table) || predicates.byTable.get(table.split('.').pop() || table) : undefined;
     const present = predicates.bare.has(required) || [...predicates.byTable.values()].some((cols) => cols.has(required)) || Boolean(tableCols?.has(required));
     if (!present) warnings.push(`card_requires_must_filter:${card.id}:${filter}`);
   }
   if (requires.max_range_days) {
-    const dates = [...String(sql || '').matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)]
+    const dates = [...str(sql).matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)]
       .map((match) => new Date(`${match[1]}T00:00:00Z`).getTime())
       .filter((time) => Number.isFinite(time))
       .sort((a, b) => a - b);
@@ -123,11 +124,11 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   const warnings: string[] = [];
   for (const match of cards.slice(0, 3)) warnings.push(...cardRequirementWarnings(match.card, input.sql));
   const hints: string[] = [];
-  if (!String(input.reason || '').trim()) {
+  if (!str(input.reason).trim()) {
     // Only nag when the same caller has run multiple queries in the recent ledger without a reason.
     // One-off interactive queries shouldn't trigger the hint.
     const recentNoReason = rows
-      .filter((row) => !String(row.reason || '').trim())
+      .filter((row) => !str(row.reason).trim())
       .filter((row) => row.datasource === input.datasource);
     if (recentNoReason.length >= 2) {
       hints.push('reason_missing: pass --reason or TAPROOT_REASON so future agents can understand why this query ran');
