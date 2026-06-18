@@ -14,8 +14,9 @@ import { nowIso } from '../core/time.js';
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
 import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
+import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
@@ -27,6 +28,7 @@ import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, resolveReason } from '../core/query-memory.js';
 import type { QueryCard } from '../types/cards.js';
+import { str } from '../core/strings.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -72,8 +74,8 @@ function cardParamNames(card: QueryCard): string[] {
 function buildPluginParams(
   reqParams: Record<string, unknown>,
   datasourceKind: string,
-): Record<string, unknown> | undefined {
-  const pluginParams: Record<string, unknown> = {};
+): BuiltinPluginParams | undefined {
+  const pluginParams: BuiltinPluginParams = {};
   if (reqParams.proto) pluginParams.protoMessage = String(reqParams.proto);
   if (reqParams.protoRoot) pluginParams.protoRoot = String(reqParams.protoRoot);
   if (reqParams.allowFlush) pluginParams.allowFlush = true;
@@ -116,9 +118,9 @@ function buildResolvedMeta(input: {
     env,
     namespace: datasource.namespace || namespace || undefined,
     service,
-    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
-    target: String(datasource.connection.target || ''),
-    database: String(datasource.connection.database || ''),
+    accessMethod: str(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method),
+    target: str(datasource.connection.target),
+    database: str(datasource.connection.database),
     engine: datasource.kind,
   };
 }
@@ -196,10 +198,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
             } else if (req.method === RpcMethod.SessionOpen) {
               const session = sessions.open({
                 datasourceName: String(req.params.datasource || req.params.datasourceName || 'unknown'),
-                env: String(req.params.env || ''),
-                namespace: String(req.params.namespace || ''),
-                service: String(req.params.service || ''),
-                kind: String(req.params.kind || ''),
+                env: str(req.params.env),
+                namespace: str(req.params.namespace),
+                service: str(req.params.service),
+                kind: str(req.params.kind),
                 connection: (req.params.connection as Record<string, unknown>) || {},
                 connectors: Array.isArray(req.params.connectors) ? (req.params.connectors as string[]) : [],
               });
@@ -210,7 +212,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = true;
               base.data = { sessions: sessions.list() };
             } else if (req.method === RpcMethod.SessionInspect) {
-              const sessionId = String(req.params.sessionId || '');
+              const sessionId = str(req.params.sessionId);
               const session = sessions.get(sessionId);
               if (!session) {
                 base.ok = false;
@@ -221,7 +223,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.meta.sessionId = session.sessionId;
               }
             } else if (req.method === RpcMethod.SessionClose) {
-              const sessionId = String(req.params.sessionId || '');
+              const sessionId = str(req.params.sessionId);
               const closed = sessions.close(sessionId);
               if (!closed) {
                 base.ok = false;
@@ -243,11 +245,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               let phaseConnectMs = 0;
               let phaseExecuteMs = 0;
               const allowDiscovery = Boolean(req.params.allowDiscovery);
-              const rawDs = String(req.params.datasource || '').trim();
+              const rawDs = str(req.params.datasource).trim();
               const alias = rawDs.match(/^([a-z0-9]+)-([a-z0-9-]+)$/i);
-              const env = String(req.params.env || alias?.[1] || '').trim();
-              const namespace = normalizeNamespace(String(req.params.namespace || ''));
-              const service = normalizeService(String(req.params.service || alias?.[2] || ''), ctx.runtimeConfigStore.serviceAliases());
+              const env = str(req.params.env || alias?.[1]).trim();
+              const namespace = normalizeNamespace(str(req.params.namespace));
+              const service = normalizeService(str(req.params.service || alias?.[2]), ctx.runtimeConfigStore.serviceAliases());
               const policy = environmentPolicy(ctx, env);
               if (allowDiscovery || policy.allowDiscoveryByDefault) {
                 throw discoveryUnavailable('discovery mode is only available in direct CLI mode when daemon is bypassed.');
@@ -305,7 +307,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   () => sessions.heartbeatLease(session.sessionId, leaseId),
                   RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
                 );
-                let query = String(req.params.query || '').trim();
+                let query = str(req.params.query).trim();
                 const params = parseQueryParams(req.params);
                 let selectedCard: QueryCard | undefined;
                 if (req.params.card) {
@@ -323,7 +325,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   if (!tpl) throw new Error(`Template not found: ${String(req.params.template)}`);
                   query = fillTemplate(tpl.nativeQueryTemplate, params);
                 }
-                const effectiveIntent = String(req.params.intent || selectedCard?.intent || '');
+                const effectiveIntent = str(req.params.intent || selectedCard?.intent);
                 if (!query && effectiveIntent) {
                   const intent = effectiveIntent;
                   const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', intent);
@@ -349,12 +351,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 }
                 const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
                 const relationEdges = ctx.kbStore.relationsForTables(
-                  String(datasource.service || ''),
+                  str(datasource.service),
                   referencedTables,
                   liveColumnsFromSchemaContext(schemaContext.tables),
                 );
                 if (relationEdges.length) schemaContext.relations = relationEdges;
-                const reason = resolveReason(String(req.params.reason || ''));
+                const reason = resolveReason(str(req.params.reason));
                 const queryMemory = buildQueryMemory({
                   ledgerDir: ctx.paths.runsLedgerDir,
                   datasource: datasource.name,
@@ -387,7 +389,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                     warnings.push(
                       ...enforceSchemaIntrospectionPolicy({
                         sql: query,
-                        service: String(datasource.service || ''),
+                        service: str(datasource.service),
                         hasRefreshedSchema,
                         allowSchemaIntrospection: Boolean(req.params.allowSchemaIntrospection),
                       }),
@@ -409,8 +411,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   });
                   phaseConnectMs = Date.now() - connectStart;
                   for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-                  if (connectorChecks.some((c) => c.status === 'fail')) {
-                    throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+                  if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+                    throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
                   }
                   const testHoldMs = Number(req.params._testHoldMs || 0);
                   const executeStart = Date.now();

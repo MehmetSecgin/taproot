@@ -2,8 +2,9 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
+import { printJson, printJsonPluck, renderRecord, renderTable, respondOk } from '../core/output.js';
 import { normalizeRelations, validateRelations } from '../core/relations.js';
+import { str } from '../core/strings.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
@@ -14,7 +15,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     const namespace = normalizeNamespace(opts.namespace) || undefined;
     const out = ctx.kbStore.resolveConnection(service, opts.env, namespace);
     if (!out) {
-      const svc = ctx.kbStore.services().find((s) => String(s.service || '').trim().toLowerCase() === service.toLowerCase());
+      const svc = ctx.kbStore.services().find((s) => str(s.service).trim().toLowerCase() === service.toLowerCase());
       if (!svc) {
         const known = ctx.kbStore.listServices();
         throw new Error(`No KB connection match: service '${service}' is not registered in KB. Known services: ${known.slice(0, 10).join(', ')}${known.length > 10 ? ` (+${known.length - 10})` : ''}`);
@@ -80,8 +81,8 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .action((opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const matchText = String(opts.match || opts.text || '').trim();
-      const rows = ctx.kbStore.tables().filter((r) => String(r.service || '').toLowerCase() === service.toLowerCase());
+      const matchText = str(opts.match || opts.text).trim();
+      const rows = ctx.kbStore.tables().filter((r) => str(r.service).toLowerCase() === service.toLowerCase());
       const scoped = rows.filter((r) => !opts.env || String(r.env) === String(opts.env));
       const filtered = scoped.map((r) => ({
         ...r,
@@ -96,18 +97,18 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       }
       if (opts.list) {
         const flat = filtered.flatMap((r) => (r.tables || []).map((t: string) => ({
-          service: String(r.service || ''),
-          env: String(r.env || ''),
-          database: String(r.database || ''),
+          service: str(r.service),
+          env: str(r.env),
+          database: str(r.database),
           table: t,
         })));
         console.log(renderTable(flat));
         return;
       }
       const tableRows = filtered.map((r) => ({
-        service: String(r.service || ''),
-        env: String(r.env || ''),
-        database: String(r.database || ''),
+        service: str(r.service),
+        env: str(r.env),
+        database: str(r.database),
         tables: Array.isArray(r.tables) ? r.tables.length : 0,
       }));
       console.log(renderTable(tableRows));
@@ -219,7 +220,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const skipped = parsed.length - normalized.length;
       const result = ctx.kbStore.promoteRelations(normalized);
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { added: result.added, total: result.total, skipped }, meta: {} });
+        respondOk({ added: result.added, total: result.total, skipped });
       } else {
         console.log(`Imported ${result.added} new relation(s) (${normalized.length} valid, ${skipped} skipped). relations.json now holds ${result.total}.`);
       }

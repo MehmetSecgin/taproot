@@ -4,7 +4,9 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson, printJsonPluck } from '../core/output.js';
+import { DoctorStatus } from '../types/core.js';
 import type { Capability } from '../types/core.js';
+import { str } from '../core/strings.js';
 
 function parseHintPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -168,7 +170,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         try {
           const creds = await ctx.credentialStore.get(saved.credentialRef);
           const checks = await plugin.doctor({ datasource: saved, credentials: creds });
-          const failures = checks.filter((c) => c.status === 'fail');
+          const failures = checks.filter((c) => c.status === DoctorStatus.Fail);
           if (failures.length) {
             if (!existed) ctx.datasourceStore.remove(saved.name);
             const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
@@ -220,7 +222,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       }
       const kb = ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined);
       if (!kb) throw new Error(`No datasource profile found for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
-      const name = defaultDatasourceName(opts.env, service, String(kb.namespace || namespace || '').trim() || undefined);
+      const name = defaultDatasourceName(opts.env, service, str(kb.namespace || namespace).trim() || undefined);
       const profile = await saveKbBootstrapCandidate(ctx, opts.env, service, name, kb, {
         confidence: 0.85,
       });

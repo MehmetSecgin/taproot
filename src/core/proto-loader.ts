@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { str } from './strings.js';
 
 export interface ProtobufType {
   decode: (buf: Uint8Array) => unknown;
@@ -32,7 +33,7 @@ export interface GrpcPackageBundle extends LoadedProtoBundle {
 }
 
 export function splitProtoRoots(value: string): string[] {
-  return String(value || '')
+  return str(value)
     .split(/[,;:]/)
     .map((p) => p.trim())
     .filter(Boolean);

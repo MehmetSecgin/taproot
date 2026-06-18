@@ -1,6 +1,7 @@
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { DatasourceProfileListSchema } from './schemas.js';
+import { str } from '../core/strings.js';
 
 export class DatasourceStore {
   constructor(private readonly file: string) {}
@@ -36,7 +37,7 @@ export class DatasourceStore {
       const filtered = all.filter((d) => {
         if (d.env !== envValue || d.service !== service) return false;
         if (nsValue == null || nsValue === '') return true;
-        return String(d.namespace || '') === nsValue;
+        return str(d.namespace) === nsValue;
       });
       if (!filtered.length) return undefined;
       return filtered.sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];

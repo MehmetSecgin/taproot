@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { z } from 'zod';
 import type { QueryCard, QueryCardMatch } from '../types/cards.js';
 import type { RuntimeConfigStore } from './runtime-config.js';
+import { str } from '../core/strings.js';
 
 const CardParamSchema = z.union([
   z.string().transform((name) => ({ name })),
@@ -96,11 +97,11 @@ function walkYamlFiles(root: string): string[] {
 }
 
 function tableBare(value: string): string {
-  return String(value || '').trim().toLowerCase().split('.').pop() || '';
+  return str(value).trim().toLowerCase().split('.').pop() || '';
 }
 
 function normalizeText(value?: string): string {
-  return String(value || '').trim().toLowerCase();
+  return str(value).trim().toLowerCase();
 }
 
 export class CardStore {
@@ -179,9 +180,9 @@ export class CardStore {
       aliases: Array.from(new Set(parsed.data.aliases.map((item) => item.trim()).filter(Boolean))),
       tables: Array.from(new Set(parsed.data.tables.map((item) => item.trim()).filter(Boolean))),
       forbids: Array.from(new Set(parsed.data.forbids.map((item) => item.trim()).filter(Boolean))),
-      notes: parsed.data.notes.map((item) => String(item || '').trim()).filter(Boolean),
-      indexes_considered: parsed.data.indexes_considered.map((item) => String(item || '').trim()).filter(Boolean),
-      owners: parsed.data.owners.map((item) => String(item || '').trim()).filter(Boolean),
+      notes: parsed.data.notes.map((item) => str(item).trim()).filter(Boolean),
+      indexes_considered: parsed.data.indexes_considered.map((item) => str(item).trim()).filter(Boolean),
+      owners: parsed.data.owners.map((item) => str(item).trim()).filter(Boolean),
       params: parsed.data.params.map((param) => ({ ...param, name: param.name.trim() })).filter((param) => param.name),
       sourcePath: filePath,
     };

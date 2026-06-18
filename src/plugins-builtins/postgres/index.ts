@@ -1,11 +1,12 @@
 import { Client } from 'pg';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { baseConnConfig } from '../_shared/db-conn.js';
+import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs?: number) {
   return {
@@ -32,10 +33,10 @@ export const postgresPlugin: TapRootPlugin = {
     try {
       await client.connect();
       await client.query('SELECT 1 AS ok');
-      return [{ check: 'postgres connect', status: 'ok', detail: 'connection and read query succeeded' }];
+      return [{ check: 'postgres connect', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
     } catch (error) {
       const detail = (error as Error).message;
-      return [{ check: 'postgres connect', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'postgres connect', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     } finally {
       await client.end().catch(() => {});
     }
@@ -66,7 +67,7 @@ export const postgresPlugin: TapRootPlugin = {
         classification: 'success',
       };
     } catch (error) {
-      const message = String((error as Error).message || '');
+      const message = str((error as Error).message);
       if (request.timeoutMs && /(statement timeout|query timeout|query read timeout|timeout)/i.test(message)) {
         throw queryTimeoutError(request.timeoutMs);
       }

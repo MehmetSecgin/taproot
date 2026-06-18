@@ -4,6 +4,7 @@ import { criticalDatasourceKbConflicts } from './conflicts.js';
 import { nowIso } from './time.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
+import { str } from './strings.js';
 
 export interface BootstrapResult {
   profile: DatasourceProfile;
@@ -35,7 +36,7 @@ function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapRes
   const refs = new Set<string>();
   if (profile.credentialRef) refs.add(profile.credentialRef);
   for (const value of Object.values(profile.resolverHints || {})) {
-    const ref = String(value || '').trim();
+    const ref = str(value).trim();
     if (ref) refs.add(ref);
   }
   return {
@@ -59,6 +60,136 @@ export async function ensureCredentialDefaults(
   if (changed) await ctx.credentialStore.set(ref, merged);
 }
 
+interface BootstrapContext {
+  env: string;
+  service: string;
+  datasourceName: string;
+  kb: Record<string, unknown>;
+  engine: string;
+  database: string;
+  dbUser: string;
+  target: string;
+  credentialRef: string;
+  tags: string[];
+  confidence: number;
+  namespace?: string;
+}
+
+interface BootstrapStrategy {
+  accessMethod: string;
+  build(c: BootstrapContext): KbBootstrapCandidate | undefined;
+}
+
+const VPN_STATUS_COMMAND = 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)';
+const VPN_CREDENTIAL_DEFAULT: CredentialDefaultSpec = {
+  ref: 'vpn:work',
+  defaults: { statusCommand: VPN_STATUS_COMMAND },
+};
+
+function sqlKindFromEngine(engine: string): string {
+  return engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql;
+}
+
+function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
+  const effectiveNamespace = String(c.namespace || 'default');
+  const context = String(process.env.TAPROOT_QA_CONTEXT || c.kb.k8s_context || c.env || effectiveNamespace);
+  const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
+  const logFile = `/tmp/taproot-pf-${c.env}-${c.service}.log`;
+  const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
+  const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${c.target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
+  const kpfRef = `kpf:${c.env}:${c.namespace || 'default'}:${c.service}`;
+  return {
+    kb: c.kb,
+    profile: {
+      name: c.datasourceName,
+      kind: sqlKindFromEngine(c.engine),
+      env: c.env,
+      namespace: c.namespace,
+      service: c.service,
+      tags: c.tags,
+      connection: { host: '127.0.0.1', port: localPort, database: c.database },
+      credentialRef: c.credentialRef,
+      connectors: ['openvpn', 'kubectl-portforward'],
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        'kubectl-portforwardCredentialRef': kpfRef,
+      },
+      updatedAt: nowIso(),
+      confidence: c.confidence,
+    },
+    credentialDefaults: [
+      { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
+      VPN_CREDENTIAL_DEFAULT,
+      { ref: kpfRef, defaults: { statusCommand, connectCommand }, overwrite: true },
+    ],
+  };
+}
+
+function buildNativeCandidate(c: BootstrapContext): KbBootstrapCandidate | undefined {
+  const host = str(c.kb.host).trim();
+  if (!host) return undefined;
+  const port = Number(c.kb.port || 0) || (c.engine.includes('postgres') ? 5432 : 3306);
+  return {
+    kb: c.kb,
+    profile: {
+      name: c.datasourceName,
+      kind: sqlKindFromEngine(c.engine),
+      env: c.env,
+      namespace: c.namespace,
+      service: c.service,
+      tags: c.tags,
+      connection: { host, port, database: c.database },
+      credentialRef: c.credentialRef,
+      connectors: ['openvpn'],
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      resolverHints: { openvpnCredentialRef: 'vpn:work' },
+      updatedAt: nowIso(),
+      confidence: c.confidence,
+    },
+    credentialDefaults: [
+      { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
+      VPN_CREDENTIAL_DEFAULT,
+    ],
+  };
+}
+
+function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
+  const tshRef = `tsh:${c.env}`;
+  return {
+    kb: c.kb,
+    profile: {
+      name: c.datasourceName,
+      kind: DatasourceKind.TeleportMysql,
+      env: c.env,
+      namespace: c.namespace,
+      service: c.service,
+      tags: c.tags,
+      connection: { database: c.database, target: c.target },
+      credentialRef: c.credentialRef,
+      connectors: ['openvpn', 'teleport'],
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      resolverHints: {
+        openvpnCredentialRef: 'vpn:work',
+        teleportCredentialRef: tshRef,
+      },
+      updatedAt: nowIso(),
+      confidence: c.confidence,
+    },
+    credentialDefaults: [
+      { ref: c.credentialRef, defaults: { dbUser: c.dbUser } },
+      VPN_CREDENTIAL_DEFAULT,
+      { ref: tshRef, defaults: { statusCommand: 'tsh status' } },
+    ],
+  };
+}
+
+const BOOTSTRAP_STRATEGIES: BootstrapStrategy[] = [
+  { accessMethod: AccessMethod.QaPortforward, build: buildQaPortforwardCandidate },
+  { accessMethod: AccessMethod.Native, build: buildNativeCandidate },
+  { accessMethod: AccessMethod.Tsh, build: buildTshCandidate },
+];
+
 export function buildKbBootstrapCandidate(
   env: string,
   service: string,
@@ -66,165 +197,24 @@ export function buildKbBootstrapCandidate(
   kb: Record<string, unknown>,
   options?: KbBootstrapOptions,
 ): KbBootstrapCandidate | undefined {
-  const accessMethod = String(kb.access_method || '').toLowerCase();
-  const engine = String(kb.engine || 'mysql').toLowerCase();
-  const database = String(kb.database || '');
-  const dbUser = String(kb.db_user || '');
-  const target = String(options?.targetOverride || kb.target || '');
-  const credentialRef = env;
-  const tags = options?.tags || ['auto-bootstrap', 'kb-derived'];
-  const confidence = options?.confidence ?? 0.9;
-  const namespace = String(kb.namespace || '').trim() || undefined;
-
-  if (accessMethod === AccessMethod.QaPortforward) {
-    const effectiveNamespace = String(namespace || 'default');
-    const context = String(process.env.TAPROOT_QA_CONTEXT || kb.k8s_context || env || effectiveNamespace);
-    const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
-    const logFile = `/tmp/taproot-pf-${env}-${service}.log`;
-    const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
-    const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${effectiveNamespace} port-forward svc/${target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
-
-    return {
-      kb,
-      profile: {
-        name: datasourceName,
-        kind: engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql,
-        env,
-        namespace,
-        service,
-        tags,
-        connection: {
-          host: '127.0.0.1',
-          port: localPort,
-          database,
-        },
-        credentialRef,
-        connectors: ['openvpn', 'kubectl-portforward'],
-        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: {
-          openvpnCredentialRef: 'vpn:work',
-          'kubectl-portforwardCredentialRef': `kpf:${env}:${namespace || 'default'}:${service}`,
-        },
-        updatedAt: nowIso(),
-        confidence,
-      },
-      credentialDefaults: [
-        {
-          ref: credentialRef,
-          defaults: {
-            user: dbUser || 'root',
-          },
-        },
-        {
-          ref: 'vpn:work',
-          defaults: {
-            statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
-          },
-        },
-        {
-          ref: `kpf:${env}:${namespace || 'default'}:${service}`,
-          defaults: {
-            statusCommand,
-            connectCommand,
-          },
-          overwrite: true,
-        },
-      ],
-    };
-  }
-
-  if (accessMethod === AccessMethod.Native) {
-    const host = String(kb.host || '').trim();
-    const port = Number(kb.port || 0) || (engine.includes('postgres') ? 5432 : 3306);
-    if (!host) return undefined;
-    return {
-      kb,
-      profile: {
-        name: datasourceName,
-        kind: engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql,
-        env,
-        namespace,
-        service,
-        tags,
-        connection: {
-          host,
-          port,
-          database,
-        },
-        credentialRef,
-        connectors: ['openvpn'],
-        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: {
-          openvpnCredentialRef: 'vpn:work',
-        },
-        updatedAt: nowIso(),
-        confidence,
-      },
-      credentialDefaults: [
-        {
-          ref: credentialRef,
-          defaults: {
-            user: dbUser || 'root',
-          },
-        },
-        {
-          ref: 'vpn:work',
-          defaults: {
-            statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
-          },
-        },
-      ],
-    };
-  }
-
-  if (accessMethod === AccessMethod.Tsh) {
-    return {
-      kb,
-      profile: {
-        name: datasourceName,
-        kind: DatasourceKind.TeleportMysql,
-        env,
-        namespace,
-        service,
-        tags,
-        connection: {
-          database,
-          target,
-        },
-        credentialRef,
-        connectors: ['openvpn', 'teleport'],
-        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: {
-          openvpnCredentialRef: 'vpn:work',
-          teleportCredentialRef: `tsh:${env}`,
-        },
-        updatedAt: nowIso(),
-        confidence,
-      },
-      credentialDefaults: [
-        {
-          ref: credentialRef,
-          defaults: {
-            dbUser,
-          },
-        },
-        {
-          ref: 'vpn:work',
-          defaults: {
-            statusCommand: 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)',
-          },
-        },
-        {
-          ref: `tsh:${env}`,
-          defaults: {
-            statusCommand: 'tsh status',
-          },
-        },
-      ],
-    };
-  }
-
-  return undefined;
+  const accessMethod = str(kb.access_method).toLowerCase();
+  const strategy = BOOTSTRAP_STRATEGIES.find((s) => s.accessMethod === accessMethod);
+  if (!strategy) return undefined;
+  const c: BootstrapContext = {
+    env,
+    service,
+    datasourceName,
+    kb,
+    engine: String(kb.engine || 'mysql').toLowerCase(),
+    database: str(kb.database),
+    dbUser: str(kb.db_user),
+    target: str(options?.targetOverride || kb.target),
+    credentialRef: env,
+    tags: options?.tags || ['auto-bootstrap', 'kb-derived'],
+    confidence: options?.confidence ?? 0.9,
+    namespace: str(kb.namespace).trim() || undefined,
+  };
+  return strategy.build(c);
 }
 
 async function applyCredentialDefaults(ctx: AppContext, specs: CredentialDefaultSpec[]): Promise<void> {
@@ -267,7 +257,7 @@ export async function bootstrapDatasource(
 
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
-  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
   const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
   if (!profile) return undefined;
   return {
@@ -287,7 +277,7 @@ export async function reconcileDatasource(
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
 
-  const resolvedName = defaultDatasourceName(env, service, String(kb.namespace || namespace || '').trim() || undefined);
+  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
   const candidate = buildKbBootstrapCandidate(env, service, resolvedName, kb);
   if (!candidate) return undefined;
 

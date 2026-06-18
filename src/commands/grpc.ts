@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson, renderTable, respondOk } from '../core/output.js';
 import { loadProtobufRoot } from '../core/proto-loader.js';
 import {
   buildRequestSkeleton,
@@ -10,6 +10,7 @@ import {
   searchMethods,
   type ProtoDescriptor,
 } from '../core/grpc-introspect.js';
+import { str } from '../core/strings.js';
 
 function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string; datasource?: string } {
   if (opts.protoRoot) return { root: String(opts.protoRoot), source: 'flag', datasource: opts.datasource };
@@ -21,7 +22,7 @@ function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoo
   if (ds.kind !== 'grpc') {
     throw new Error(`Datasource '${opts.datasource}' is kind=${ds.kind}; grpc describe needs a grpc datasource.`);
   }
-  const root = String((ds.resolverHints || {})['protoRoot'] || '');
+  const root = str((ds.resolverHints || {})['protoRoot']);
   if (!root) throw new Error(`Datasource '${opts.datasource}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
   return { root, source: `datasource:${opts.datasource}`, datasource: opts.datasource };
 }
@@ -199,7 +200,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         flat = flat.filter((r) => `${r.service} ${r.method} ${r.request} ${r.response}`.toLowerCase().includes(p));
       }
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { methods: flat }, meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName } });
+        respondOk({ methods: flat }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
         return;
       }
       console.log(renderTable(flat));
@@ -217,7 +218,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));
       if (ctx.jsonMode) {
-        printJson({ ok: true, data: { matches }, meta: { protoRoot: root, protoRootSource: source, pattern: String(pattern) } });
+        respondOk({ matches }, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
         return;
       }
       if (!matches.length) {

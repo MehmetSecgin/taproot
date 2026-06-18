@@ -1,3 +1,4 @@
+import { KbRelationSource } from '../types/core.js';
 import type { KbRelation, RelationEndpoint, RelationEndpointStatus, RelationValidation, SchemaRelationEdge } from '../types/core.js';
 import type { SchemaObservationEntry } from '../store/learning.js';
 
@@ -29,7 +30,7 @@ export function normalizeRelations(raw: unknown[]): KbRelation[] {
       relationship: str(obj.relationship) || undefined,
       notes: str(obj.notes) || undefined,
       confidence: typeof obj.confidence === 'number' ? obj.confidence : undefined,
-      source: obj.source === 'derived' ? 'derived' : 'curated',
+      source: obj.source === KbRelationSource.Derived ? KbRelationSource.Derived : KbRelationSource.Curated,
     });
   }
   return out;
@@ -190,7 +191,7 @@ export function deriveRelationCandidates(rows: SchemaObservationEntry[]): KbRela
           relationship: anchor ? 'many_to_one' : undefined,
           notes: `Auto-derived from shared join key '${column}' across services.`,
           confidence: Math.min(0.9, Number(confidence.toFixed(2))),
-          source: 'derived',
+          source: KbRelationSource.Derived,
         });
       }
     }

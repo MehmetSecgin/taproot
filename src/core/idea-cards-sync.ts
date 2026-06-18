@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { QueryCard } from '../types/cards.js';
+import { str } from './strings.js';
 
 const MARKER = 'taproot-managed-card';
 const MARKER_RE = /^--\s*taproot-managed-card:\s*(.+?)\s*$/m;
@@ -66,7 +67,7 @@ function sha1(input: string): string {
 }
 
 function slug(input: string): string {
-  return String(input || '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unsorted';
+  return str(input).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'unsorted';
 }
 
 export function buildCardBody(card: QueryCard): string {

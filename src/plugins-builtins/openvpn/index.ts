@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 
@@ -92,7 +92,7 @@ export const openvpnPlugin: TapRootPlugin = {
     const statusCommand = input.credentials.statusCommand || DEFAULT_STATUS_COMMAND;
     const pre = await runAsync(statusCommand, STATUS_TIMEOUT_MS);
     if (pre.ok) {
-      return [{ check: 'openvpn connect', status: 'ok', detail: 'already connected' }];
+      return [{ check: 'openvpn connect', status: DoctorStatus.Ok, detail: 'already connected' }];
     }
 
     const connectCommand = input.credentials.connectCommand || DEFAULT_CONNECT_COMMAND;
@@ -102,20 +102,20 @@ export const openvpnPlugin: TapRootPlugin = {
     const deadlineAt = Date.now() + Math.max(1000, waitMs);
     const post = await pollUntilConnected(statusCommand, deadlineAt);
     if (post.ok) {
-      return [{ check: 'openvpn connect', status: 'ok', detail: 'connected' }];
+      return [{ check: 'openvpn connect', status: DoctorStatus.Ok, detail: 'connected' }];
     }
 
     if (started.ok) {
       return [
         {
           check: 'openvpn connect',
-          status: 'fail',
+          status: DoctorStatus.Fail,
           detail: 'connect command executed but VPN did not report connected state',
           code: 'connector_connect_blocked',
         },
       ];
     }
-    return [{ check: 'openvpn connect', status: 'fail', detail: started.detail, code: 'connector_connect_blocked' }];
+    return [{ check: 'openvpn connect', status: DoctorStatus.Fail, detail: started.detail, code: 'connector_connect_blocked' }];
   },
 
   async disconnect(input): Promise<DoctorCheck[]> {

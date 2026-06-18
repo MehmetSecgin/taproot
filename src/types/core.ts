@@ -26,6 +26,33 @@ export const AccessMethod = {
 } as const;
 export type AccessMethod = (typeof AccessMethod)[keyof typeof AccessMethod];
 
+export const DoctorStatus = {
+  Ok: 'ok',
+  Warn: 'warn',
+  Fail: 'fail',
+} as const;
+export type DoctorStatus = (typeof DoctorStatus)[keyof typeof DoctorStatus];
+
+export const EnsuredBy = {
+  CachedLearning: 'cached-learning',
+  RefreshedIntrospection: 'refreshed-introspection',
+  Unresolved: 'unresolved',
+  Empty: 'empty',
+} as const;
+export type EnsuredBy = (typeof EnsuredBy)[keyof typeof EnsuredBy];
+
+export const TemplateStatus = {
+  Active: 'active',
+  Inactive: 'inactive',
+} as const;
+export type TemplateStatus = (typeof TemplateStatus)[keyof typeof TemplateStatus];
+
+export const KbRelationSource = {
+  Curated: 'curated',
+  Derived: 'derived',
+} as const;
+export type KbRelationSource = (typeof KbRelationSource)[keyof typeof KbRelationSource];
+
 export interface PluginManifest {
   name: string;
   version: string;
@@ -104,7 +131,7 @@ export interface QueryTemplate {
   params: string[];
   resultShape: 'table' | 'json' | 'summary';
   tags: string[];
-  status: 'active' | 'inactive';
+  status: TemplateStatus;
   verifiedAt?: string;
 }
 
@@ -226,7 +253,7 @@ export interface KbRelation {
   relationship?: string;
   notes?: string;
   confidence?: number;
-  source?: 'curated' | 'derived';
+  source?: KbRelationSource;
 }
 
 export interface SchemaRelationEdge {
@@ -310,7 +337,7 @@ export type DoctorCheckCode =
 
 export interface DoctorCheck {
   check: string;
-  status: 'ok' | 'warn' | 'fail';
+  status: DoctorStatus;
   detail: string;
   code?: DoctorCheckCode;
 }

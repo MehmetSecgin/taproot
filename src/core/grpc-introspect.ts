@@ -1,4 +1,5 @@
 import { loadProtobufRoot, type ProtobufRoot } from './proto-loader.js';
+import { str } from './strings.js';
 import type {
   RpcEnumShape,
   RpcFieldShape,
@@ -273,7 +274,7 @@ export interface NameResolution {
 }
 
 export function resolveName(query: string, names: string[]): NameResolution {
-  const q = String(query || '').trim();
+  const q = str(query).trim();
   if (!q) return { candidates: names };
   if (names.includes(q)) return { match: q, candidates: [q] };
   const ql = q.toLowerCase();
@@ -299,7 +300,7 @@ function methodStreams(m: RpcMethodShape): string {
 }
 
 export function searchMethods(root: ProtobufRoot, pattern: string): MethodMatch[] {
-  const p = String(pattern || '').toLowerCase();
+  const p = str(pattern).toLowerCase();
   const out: MethodMatch[] = [];
   for (const svc of listServices(root)) {
     for (const m of svc.methods) {

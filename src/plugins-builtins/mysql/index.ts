@@ -1,11 +1,12 @@
 import mysql from 'mysql2/promise';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { baseConnConfig } from '../_shared/db-conn.js';
+import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
   return {
@@ -30,10 +31,10 @@ export const mysqlPlugin: TapRootPlugin = {
       const conn = await mysql.createConnection(connConfig(input.datasource, input.credentials));
       await conn.query('SELECT 1 AS ok');
       await conn.end();
-      return [{ check: 'mysql connect', status: 'ok', detail: 'connection and read query succeeded' }];
+      return [{ check: 'mysql connect', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
     } catch (error) {
       const detail = (error as Error).message;
-      return [{ check: 'mysql connect', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'mysql connect', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     }
   },
 
@@ -46,7 +47,7 @@ export const mysqlPlugin: TapRootPlugin = {
         request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
       );
       const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-      const columns = Array.isArray(fields) ? fields.map((f: any) => String(f.name || '')) : Object.keys(normalizedRows[0] || {});
+      const columns = Array.isArray(fields) ? fields.map((f: any) => str(f.name)) : Object.keys(normalizedRows[0] || {});
       return {
         runId: '',
         datasource: request.datasource.name,
@@ -63,7 +64,7 @@ export const mysqlPlugin: TapRootPlugin = {
         classification: 'success',
       };
     } catch (error) {
-      const message = String((error as Error).message || '');
+      const message = str((error as Error).message);
       if (request.timeoutMs && /timeout/i.test(message)) {
         (conn as any).destroy?.();
         throw queryTimeoutError(request.timeoutMs);

@@ -3,15 +3,15 @@ import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
 import { stdin as input, stdout as output } from 'node:process';
 import type { AppContext } from '../core/app.js';
-import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { classifyError, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
-import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
-import { AccessMethod, DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
+import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
-import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
-import { printJson, printJsonPluck, renderSchemaContextFooter, renderTableSmart, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
+import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
+import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, respondErr, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -26,6 +26,7 @@ import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
 import type { QueryCard } from '../types/cards.js';
+import { str } from '../core/strings.js';
 
 function rowFromArray(columns: string[], row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -34,7 +35,7 @@ function rowFromArray(columns: string[], row: Record<string, unknown>): Record<s
 }
 
 function parseDatasourceAlias(value: string | undefined, aliases: Record<string, string>): { env: string; service: string } | null {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = str(value).trim().toLowerCase();
   const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
   if (!m) return null;
   return { env: m[1], service: normalizeService(m[2], aliases) };
@@ -42,34 +43,6 @@ function parseDatasourceAlias(value: string | undefined, aliases: Record<string,
 
 function cardParamNames(card: QueryCard): string[] {
   return (card.params || []).map((param) => param.name).filter(Boolean);
-}
-
-function preferredAccessMethods(ctx: AppContext, env: string, kbAccessMethod?: string): string[] {
-  const policy = environmentPolicy(ctx, env);
-  const out = [...policy.preferredAccessMethods];
-  if (kbAccessMethod && !out.includes(kbAccessMethod)) out.push(kbAccessMethod);
-  return out.filter(Boolean);
-}
-
-function discoverTargets(ctx: AppContext, input: { env: string; service: string; accessMethods: string[]; namespace?: string }): string[] {
-  const policy = environmentPolicy(ctx, input.env);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const method of input.accessMethods) {
-    const current = String(method || '').trim().toLowerCase();
-    let next: string[] = [];
-    if (current === AccessMethod.QaPortforward) {
-      next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, policy);
-    } else if (current === AccessMethod.Tsh) {
-      next = discoverTeleportTargets(input.service, input.env, policy);
-    }
-    for (const target of next) {
-      if (seen.has(target)) continue;
-      seen.add(target);
-      out.push(target);
-    }
-  }
-  return out;
 }
 
 function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
@@ -132,8 +105,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = explicitProfile ? null : parseDatasourceAlias(opts.datasource, aliases);
-      const env = String(opts.env || explicitProfile?.env || alias?.env || '').trim();
-      const namespace = normalizeNamespace(String(opts.namespace || explicitProfile?.namespace || ''));
+      const env = str(opts.env || explicitProfile?.env || alias?.env).trim();
+      const namespace = normalizeNamespace(str(opts.namespace || explicitProfile?.namespace));
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
@@ -216,17 +189,13 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             const code = rpc.error?.code || 'GENERIC';
             const message = rpc.error?.message || 'daemon query failed';
             if (ctx.jsonMode) {
-              printJson({
-                ok: false,
-                error: { code, message, details: rpc.error?.details },
-                meta: { ...(rpc.meta || {}), requestId: rpc.requestId },
-              });
+              respondErr(code, message, rpc.error?.details, { ...(rpc.meta || {}), requestId: rpc.requestId });
               process.exitCode = exitCodeForClass(code);
               return;
             }
             throw new Error(`${code}: ${message}`);
           } catch (error) {
-            const msg = String((error as Error).message || '');
+            const msg = str((error as Error).message);
             if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
               progress.fail('daemon query failed');
               throw error;
@@ -239,85 +208,23 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       let phaseResolveMs = 0;
       let phaseConnectMs = 0;
       let phaseExecuteMs = 0;
-      let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const service = normalizeService(opts.service || explicitProfile?.service || alias?.service || '', aliases);
       progress.update(`resolving datasource (${opts.datasource || `${env}-${service || 'unknown'}`})`);
-      let resolutionSource: 'explicit' | 'store' | 'learning' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
       const deterministicRequired = policy.deterministicRequired;
-      if (!datasource && opts.env && service) {
-        datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
-        if (datasource) resolutionSource = 'store';
-      }
-      if (!datasource && env && service) {
-        datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
-        if (datasource) resolutionSource = 'store';
-      }
-      if (!datasource && env && service && (!deterministicRequired || allowDiscovery)) {
-        const learned = ctx.learningStore.resolveConnection(env, service, namespace || undefined);
-        if (learned) {
-          datasource = ctx.datasourceStore.save({
-            name: learned.datasourceName,
-            kind: learned.kind,
-            env: learned.env,
-            namespace: learned.namespace,
-            service: learned.service,
-            tags: ['learning-derived'],
-            connection: learned.connection,
-            credentialRef: learned.credentialRef,
-            connectors: learned.connectors,
-            policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-            resolverHints: learned.resolverHints || {},
-            updatedAt: new Date().toISOString(),
-            confidence: learned.confidence,
-          } as any);
-          resolutionSource = 'learning';
-        }
-      }
-      if (!datasource && env && service) {
-        datasource = (await bootstrapDatasource(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined))?.profile;
-        if (datasource) {
-          resolutionSource = 'kb';
-          logVerbose(`auto-bootstrapped datasource from KB (${datasource.name})`);
-        }
-      }
-      if (!datasource && env && service && allowDiscovery) {
-        const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
-        const kbAccessMethod = String(kb?.access_method || '').trim().toLowerCase();
-        const targetNamespace = String(kb?.namespace || namespace || 'default');
-        const accessMethods = preferredAccessMethods(ctx, env, kbAccessMethod);
-        const targets = discoverTargets(ctx, { env, service, accessMethods, namespace: targetNamespace });
-        if (targets.length) {
-          const target = targets[0];
-          const engine = policy.targetPreference.find((item) => target.toLowerCase().includes(item.toLowerCase())) || (String(kb?.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql');
-          const database = String(kb?.database || inferDatabaseCandidates(service)[0] || '');
-          const dbUser = String(kb?.db_user || '');
-          const accessMethod = accessMethods[0] || kbAccessMethod;
-          const syntheticKb = {
-            access_method: accessMethod,
-            engine,
-            database,
-            db_user: dbUser,
-            target,
-            namespace: targetNamespace,
-            ...(kb || {}),
-          };
-          if (accessMethod === AccessMethod.Tsh) {
-            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
-              targetOverride: target,
-              tags: ['discovery-derived'],
-              confidence: 0.6,
-            });
-            resolutionSource = 'kb';
-          } else if (accessMethod === AccessMethod.QaPortforward) {
-            datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
-              targetOverride: target,
-              tags: ['discovery-derived'],
-              confidence: 0.6,
-            });
-            resolutionSource = 'kb';
-          }
-        }
-      }
+      const resolution = await resolveDatasourceWithFallbacks({
+        ctx,
+        rawDs: opts.datasource,
+        optsEnv: opts.env,
+        env,
+        namespace: namespace || undefined,
+        service,
+        allowDiscovery,
+        deterministicRequired,
+        policy,
+      });
+      for (const line of resolution.verboseLogs) logVerbose(line);
+      let datasource = resolution.datasource;
+      const resolutionSource = resolution.source;
       if (!datasource && deterministicRequired && !allowDiscovery) {
         throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
       }
@@ -393,7 +300,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       }
       const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
       const relationEdges = ctx.kbStore.relationsForTables(
-        String(datasource.service || ''),
+        str(datasource.service),
         referencedTables,
         liveColumnsFromSchemaContext(schemaContext.tables),
       );
@@ -430,7 +337,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           warnings.push(
             ...enforceSchemaIntrospectionPolicy({
               sql: query,
-              service: String(datasource.service || ''),
+              service: str(datasource.service),
               hasRefreshedSchema,
               allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
             }),
@@ -461,12 +368,12 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         logVerbose(`phase connect: ${phaseConnectMs}ms`);
         for (const c of connectorChecks) appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
         for (const c of connectorChecks) logVerbose(`connector ${c.check}: ${c.status}`);
-        if (connectorChecks.some((c) => c.status === 'fail')) {
-          throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+        if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+          throw new Error(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
         }
         progress.update(`executing query via ${plugin.manifest.name}`);
         const executeStart = Date.now();
-        const pluginParams: Record<string, unknown> = {};
+        const pluginParams: BuiltinPluginParams = {};
         if (opts.proto) pluginParams.protoMessage = String(opts.proto);
         if (opts.protoRoot) pluginParams.protoRoot = String(opts.protoRoot);
         if (opts.allowFlush) pluginParams.allowFlush = true;
@@ -542,9 +449,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           env,
           namespace: datasource.namespace || namespace || undefined,
           service,
-          accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
-          target: String(datasource.connection.target || ''),
-          database: String(datasource.connection.database || ''),
+          accessMethod: str(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method),
+          target: str(datasource.connection.target),
+          database: str(datasource.connection.database),
           engine: datasource.kind,
         };
         const pluginMeta = result.meta || {};
@@ -604,7 +511,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
         }
         else {
-          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${String(datasource.connection.target || '')} database=${String(datasource.connection.database || '')}`);
+          console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${str(datasource.connection.target)} database=${str(datasource.connection.database)}`);
           console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
           const directFooter = renderSchemaContextFooter(result.meta?.schemaContext);
           if (directFooter) console.log(directFooter);

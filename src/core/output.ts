@@ -1,10 +1,11 @@
 import type { CliOutputEnvelope } from '../types/core.js';
 import Table from 'cli-table3';
+import { str } from './strings.js';
 
 export type DatetimeFormat = 'iso' | 'js' | 'epoch';
 
 function datetimeFormat(): DatetimeFormat {
-  const raw = String(process.env.TAPROOT_DATETIME_FORMAT || '').trim().toLowerCase();
+  const raw = str(process.env.TAPROOT_DATETIME_FORMAT).trim().toLowerCase();
   if (raw === 'js' || raw === 'epoch') return raw;
   return 'iso';
 }
@@ -58,7 +59,7 @@ export function printJson(data: unknown): void {
 }
 
 export function pluckPath(obj: unknown, path: string): unknown {
-  const trimmed = String(path || '').trim();
+  const trimmed = str(path).trim();
   if (!trimmed) return obj;
   const parts = trimmed.split('.').filter(Boolean);
   let cur: unknown = obj;
@@ -124,6 +125,19 @@ export function printEnvelope(
 ): void {
   const env: CliOutputEnvelope = { ok, data, error, meta };
   printJson(env);
+}
+
+export function respondOk<T = unknown>(data: T, meta?: Record<string, unknown>): void {
+  printJson({ ok: true, data, meta: meta || {} });
+}
+
+export function respondErr(
+  code: string,
+  message: string,
+  details?: unknown,
+  meta?: Record<string, unknown>,
+): void {
+  printJson({ ok: false, error: { code, message, details }, meta: meta || {} });
 }
 
 function formatValue(value: unknown): string {

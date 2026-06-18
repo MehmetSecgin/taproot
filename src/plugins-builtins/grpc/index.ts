@@ -1,3 +1,4 @@
+import { str } from '../../core/strings.js';
 import type {
   DoctorCheck,
   QueryRequest,
@@ -6,7 +7,8 @@ import type {
   SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
+import type { GrpcPluginParams } from '../../types/plugin-params.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -64,7 +66,7 @@ function getOrCreateClient(
 interface ParsedQuery { service: string; method: string }
 
 function parseQuery(input: string): ParsedQuery {
-  const text = String(input || '').trim();
+  const text = str(input).trim();
   if (!text) throw new Error('empty grpc query; expected "<package.Service/Method>"');
   const slash = text.indexOf('/');
   if (slash <= 0 || slash === text.length - 1) {
@@ -74,9 +76,9 @@ function parseQuery(input: string): ParsedQuery {
 }
 
 function resolveProtoRoot(request: QueryRequest): string {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const root = String(pp.protoRoot || hints.protoRoot || '').trim();
+  const root = str(pp.protoRoot || hints.protoRoot).trim();
   if (!root) {
     throw new Error("grpc plugin needs a proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
   }
@@ -84,7 +86,7 @@ function resolveProtoRoot(request: QueryRequest): string {
 }
 
 function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const raw = pp.requestJson;
   if (typeof raw === 'string' && raw.trim()) {
     try {
@@ -170,7 +172,7 @@ export const grpcPlugin: TapRootPlugin = {
     const hints = (ds.resolverHints || {}) as Record<string, string>;
     const protoRoot = hints.protoRoot;
     if (!protoRoot) {
-      return [{ check: 'grpc proto-root', status: 'warn', detail: "no resolverHints.protoRoot configured; doctor can only open a channel, not exercise a real method.", code: 'executor_configuration_missing' }];
+      return [{ check: 'grpc proto-root', status: DoctorStatus.Warn, detail: "no resolverHints.protoRoot configured; doctor can only open a channel, not exercise a real method.", code: 'executor_configuration_missing' }];
     }
     try {
       const { grpc, pkg, protobufRoot } = await loadGrpcPackage(protoRoot).then((b) => ({
@@ -180,7 +182,7 @@ export const grpcPlugin: TapRootPlugin = {
       }));
       const probe = hints.probeService || listServices(protobufRoot)[0]?.name;
       if (!probe) {
-        return [{ check: 'grpc proto load', status: 'warn', detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
+        return [{ check: 'grpc proto load', status: DoctorStatus.Warn, detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
       }
       const ServiceCtor = lookupServiceCtor(pkg, probe);
       const client = buildClient(grpc, ServiceCtor, ds);
@@ -188,13 +190,13 @@ export const grpcPlugin: TapRootPlugin = {
         await new Promise<void>((resolve, reject) => {
           client.waitForReady(Date.now() + RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs, (err) => (err ? reject(err) : resolve()));
         });
-        return [{ check: 'grpc channel', status: 'ok', detail: `connected to ${ds.connection.host}:${ds.connection.port} (${probe})` }];
+        return [{ check: 'grpc channel', status: DoctorStatus.Ok, detail: `connected to ${ds.connection.host}:${ds.connection.port} (${probe})` }];
       } finally {
         client.close();
       }
     } catch (err) {
       const detail = (err as Error).message || 'unknown grpc doctor error';
-      return [{ check: 'grpc channel', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+      return [{ check: 'grpc channel', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     }
   },
 
@@ -203,8 +205,8 @@ export const grpcPlugin: TapRootPlugin = {
     const start = Date.now();
     const { service, method } = parseQuery(request.query);
     const protoRoot = resolveProtoRoot(request);
-    const pp = (request.pluginParams || {}) as Record<string, unknown>;
-    const paramPairs = (pp.params as Record<string, string>) || {};
+    const pp = (request.pluginParams || {}) as GrpcPluginParams;
+    const paramPairs = pp.params || {};
     const payload = resolveRequestPayload(request, paramPairs);
     const bundle = await loadGrpcPackage(protoRoot);
     const services = listServices(bundle.protobufRoot);

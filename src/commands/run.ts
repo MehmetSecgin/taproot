@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson, printJsonPluck, renderTable } from '../core/output.js';
+import { str } from '../core/strings.js';
 
 function readSummary(runsDir: string, runId: string): Record<string, unknown> {
   const direct = path.join(runsDir, runId, 'summary.json');
@@ -31,7 +32,7 @@ function listRuns(runsDir: string, limit: number, datasource?: string): Array<{ 
     } catch {
       continue;
     }
-    const ds = String(parsed.datasource || '');
+    const ds = str(parsed.datasource);
     if (datasource && ds !== datasource) continue;
     const result = (parsed.result as Record<string, unknown> | undefined) || {};
     const timings = (parsed.timings as Record<string, unknown> | undefined) || {};
@@ -39,7 +40,7 @@ function listRuns(runsDir: string, limit: number, datasource?: string): Array<{ 
     out.push({
       runId,
       datasource: ds,
-      classification: String(parsed.classification || ''),
+      classification: str(parsed.classification),
       durationMs: typeof timings.durationMs === 'number' ? (timings.durationMs as number) : '',
       rowCount: rows,
     });

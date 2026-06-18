@@ -5,6 +5,7 @@ import { nowIso } from './time.js';
 import type { AppContext } from './app.js';
 import { DatasourceKind, type DatasourceProfile } from '../types/core.js';
 import type { AccessMethod } from '../types/core.js';
+import { str } from './strings.js';
 
 export type DiscoverySource = 'kubectl' | 'teleport' | 'kb';
 export type DiscoveryMode = AccessMethod;
@@ -159,7 +160,7 @@ function tshDbName(db: TshDatabase): string {
 }
 
 function tshDbProtocol(db: TshDatabase): string {
-  return String(db.spec?.protocol || db.protocol || '').trim().toLowerCase();
+  return str(db.spec?.protocol || db.protocol).trim().toLowerCase();
 }
 
 function tshDbLabels(db: TshDatabase): Record<string, string> {
@@ -306,7 +307,7 @@ function kbConnectionToProposal(
   conn: Record<string, unknown>,
   env: string,
 ): DiscoveryProposal | null {
-  const namespace = (String(conn.namespace || '').trim() || undefined);
+  const namespace = (str(conn.namespace).trim() || undefined);
   const datasourceName = defaultDatasourceName(env, service, namespace);
   const candidate = buildKbBootstrapCandidate(env, service, datasourceName, conn, { tags: ['discovered', 'source:kb', 'kb-derived'] });
   if (!candidate) return null;
@@ -323,7 +324,7 @@ function kbConnectionToProposal(
     resolverHints: p.resolverHints || {},
     source: 'kb',
     confidence: p.confidence ?? 0.9,
-    reason: `KB connection: access_method=${String(conn.access_method || '')} engine=${String(conn.engine || '')} target=${String(conn.target || '')}`.trim(),
+    reason: `KB connection: access_method=${str(conn.access_method)} engine=${str(conn.engine)} target=${str(conn.target)}`.trim(),
   };
 }
 
@@ -333,22 +334,22 @@ export function buildKbProposals(ctx: AppContext, opts: KbDiscoverOptions): { pr
   const aliases = ctx.runtimeConfigStore.serviceAliases();
   const services = ctx.kbStore.services() as KbServiceEntry[];
   for (const entry of services) {
-    const rawService = String(entry.service || '').trim();
+    const rawService = str(entry.service).trim();
     if (!rawService) continue;
     if (opts.service && rawService.toLowerCase() !== opts.service.toLowerCase()) continue;
     const service = normalizeService(rawService, aliases);
     const conns = Array.isArray(entry.connections) ? entry.connections : [];
     let matched = 0;
     for (const conn of conns) {
-      if (String(conn.env || '').trim() !== opts.env) continue;
+      if (str(conn.env).trim() !== opts.env) continue;
       if (String(conn.status || 'active').trim() !== 'active') continue;
-      if (opts.namespace && String(conn.namespace || '').trim() !== opts.namespace) continue;
+      if (opts.namespace && str(conn.namespace).trim() !== opts.namespace) continue;
       const proposal = kbConnectionToProposal(service, conn, opts.env);
       if (proposal) {
         proposals.push(proposal);
         matched += 1;
       } else {
-        skipped.push({ service: rawService, reason: `unsupported access_method=${String(conn.access_method || '')}` });
+        skipped.push({ service: rawService, reason: `unsupported access_method=${str(conn.access_method)}` });
       }
     }
     if (!matched && !opts.service) continue;
@@ -368,20 +369,20 @@ export async function applyKbProposals(
   const aliases = ctx.runtimeConfigStore.serviceAliases();
   const services = ctx.kbStore.services() as KbServiceEntry[];
   for (const entry of services) {
-    const rawService = String(entry.service || '').trim();
+    const rawService = str(entry.service).trim();
     if (!rawService) continue;
     if (opts.service && rawService.toLowerCase() !== opts.service.toLowerCase()) continue;
     const service = normalizeService(rawService, aliases);
     const conns = Array.isArray(entry.connections) ? entry.connections : [];
     for (const conn of conns) {
-      if (String(conn.env || '').trim() !== opts.env) continue;
+      if (str(conn.env).trim() !== opts.env) continue;
       if (String(conn.status || 'active').trim() !== 'active') continue;
-      if (opts.namespace && String(conn.namespace || '').trim() !== opts.namespace) continue;
-      const namespace = (String(conn.namespace || '').trim() || undefined);
+      if (opts.namespace && str(conn.namespace).trim() !== opts.namespace) continue;
+      const namespace = (str(conn.namespace).trim() || undefined);
       const datasourceName = defaultDatasourceName(opts.env, service, namespace);
       const candidate = buildKbBootstrapCandidate(opts.env, service, datasourceName, conn, { tags: ['discovered', 'source:kb', 'kb-derived'] });
       if (!candidate) {
-        result.skipped.push({ name: datasourceName, reason: `unsupported access_method=${String(conn.access_method || '')}` });
+        result.skipped.push({ name: datasourceName, reason: `unsupported access_method=${str(conn.access_method)}` });
         continue;
       }
       const existing = ctx.datasourceStore.get(candidate.profile.name);

@@ -4,6 +4,7 @@ import { fillTemplate, parseParamPairs } from '../core/app.js';
 import { EXIT_CODES } from '../core/exit-codes.js';
 import { nowIso } from '../core/time.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { TemplateStatus } from '../types/core.js';
 
 function extractTemplateParams(sql: string): string[] {
   const seen = new Set<string>();
@@ -76,7 +77,7 @@ export function registerTemplate(program: Command, getCtx: () => AppContext): vo
         datasourceKind: opts.datasourceKind,
         resultShape: 'table',
         tags: [],
-        status: 'active',
+        status: TemplateStatus.Active,
         verifiedAt: nowIso(),
       } as any);
       if (ctx.jsonMode) printJson(saved);

@@ -1,6 +1,6 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
-import { DatasourceKind } from '../types/core.js';
+import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
@@ -154,8 +154,8 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
     pluginRegistry: ctx.pluginRegistry,
     mode: 'connect',
   });
-  if (connectorChecks.some((c) => c.status === 'fail')) {
-    throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === 'fail').map((c) => c.detail).join(' | ')}`);
+  if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+    throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
   }
   return plugin.execute(
     {

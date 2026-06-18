@@ -1,4 +1,5 @@
 import type { DoctorCheckCode } from '../types/core.js';
+import { str } from './strings.js';
 
 export const EXIT_CODES = {
   OK: 0,
@@ -110,7 +111,7 @@ export const connectivity = makeThrower('CONNECTIVITY');
 export const authExpired = makeThrower('AUTH_EXPIRED');
 
 export function classifyExecutorDoctorCode(message: string): DoctorCheckCode | undefined {
-  const normalized = String(message || '').trim();
+  const normalized = str(message).trim();
   if (!normalized) return undefined;
   if (/missing target\/dbuser\/database/i.test(normalized)) return 'executor_configuration_missing';
   switch (classifyError(normalized)) {

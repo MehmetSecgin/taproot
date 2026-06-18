@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import type { AppContext, AppContext as Ctx } from '../core/app.js';
 import { runDatasourceConnectors } from '../core/app.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
+import { DoctorStatus } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
   const oneLine = detail.replace(/\s+/g, ' ').trim();
@@ -117,9 +118,9 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
       });
       const checks = opts.connector ? allChecks.filter((x) => x.check.toLowerCase().startsWith(String(opts.connector).toLowerCase())) : allChecks;
       const summary = {
-        ok: checks.filter((x) => x.status === 'ok').length,
-        warn: checks.filter((x) => x.status === 'warn').length,
-        fail: checks.filter((x) => x.status === 'fail').length,
+        ok: checks.filter((x) => x.status === DoctorStatus.Ok).length,
+        warn: checks.filter((x) => x.status === DoctorStatus.Warn).length,
+        fail: checks.filter((x) => x.status === DoctorStatus.Fail).length,
         total: checks.length,
       };
       if (ctx.jsonMode) {
@@ -135,7 +136,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
           detail: opts.verboseDetail ? x.detail : formatDetail(x.check, x.detail, false),
         }));
         const showAll = opts.all || ctx.verbose || opts.verboseDetail;
-        const visible = showAll ? rows : rows.filter((r) => r.status !== 'ok');
+        const visible = showAll ? rows : rows.filter((r) => r.status !== DoctorStatus.Ok);
         if (visible.length) {
           console.log(renderTable(visible));
           if (opts.verboseDetail) printTeleportDetailTables(checks);
@@ -192,7 +193,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
         ref,
         keys: Object.keys(merged),
       };
-      if (ctx.jsonMode) printJson({ ok: true, data: out });
+      if (ctx.jsonMode) respondOk(out);
       else {
         console.log(renderRecord(out));
       }

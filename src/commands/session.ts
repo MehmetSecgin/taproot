@@ -3,6 +3,7 @@ import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
+import { str } from '../core/strings.js';
 
 export function registerSession(program: Command, getCtx: () => AppContext): void {
   const s = program.command('session').description('Session operations via taprootd');
@@ -39,11 +40,11 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
     const res = await rpcCall({ method: RpcMethod.SessionList });
     if (!res.ok) throw new Error(res.error?.message || 'session.list failed');
     const rows = ((res.data?.sessions as Array<Record<string, unknown>>) || []).map((v) => ({
-      sessionId: String(v.sessionId || ''),
-      datasource: String(v.datasourceName || ''),
-      state: String(v.state || ''),
+      sessionId: str(v.sessionId),
+      datasource: str(v.datasourceName),
+      state: str(v.state),
       leases: Number(v.leaseCount || 0),
-      lastUsedAt: String(v.lastUsedAt || ''),
+      lastUsedAt: str(v.lastUsedAt),
     }));
     if (ctx.jsonMode) {
       printJson({

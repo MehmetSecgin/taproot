@@ -1,17 +1,18 @@
 import { spawnSync } from 'node:child_process';
 import type { EnvironmentPolicy } from '../types/core.js';
+import { str } from './strings.js';
 
 function runJson(command: string, args: string[]): { status: number; stdout: string; stderr: string } {
   const proc = spawnSync(command, args, { encoding: 'utf8' });
   return {
     status: proc.status || 0,
-    stdout: String(proc.stdout || ''),
-    stderr: String(proc.stderr || ''),
+    stdout: str(proc.stdout),
+    stderr: str(proc.stderr),
   };
 }
 
 function normalizeText(value: string): string {
-  return String(value || '')
+  return str(value)
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-_\s]+/g, ' ')
@@ -33,7 +34,7 @@ function targetScore(target: string, service: string, env: string, policy: Envir
     if (lower.includes(token)) score += 3;
   }
   for (let i = 0; i < policy.targetPreference.length; i += 1) {
-    const pref = String(policy.targetPreference[i] || '').trim().toLowerCase();
+    const pref = str(policy.targetPreference[i]).trim().toLowerCase();
     if (pref && lower.includes(pref)) score += 20 - i;
   }
   return score;

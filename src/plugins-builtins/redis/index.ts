@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
-import { AccessMethod } from '../../types/core.js';
+import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
+import type { RedisPluginParams } from '../../types/plugin-params.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
+import { str } from '../../core/strings.js';
 
 const READ_COMMANDS = new Set<string>([
   'GET', 'MGET', 'STRLEN', 'GETRANGE', 'EXISTS', 'TYPE', 'TTL', 'PTTL',
@@ -94,7 +96,7 @@ interface GateOptions {
 
 function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier {
   if (!tokens.length) throw new Error('empty redis command');
-  const verb = String(tokens[0] || '').toUpperCase();
+  const verb = str(tokens[0]).toUpperCase();
   const tier = classifyCommand(verb);
   if (tier === 'unknown') {
     throw new Error(`redis command '${verb}' not in allow-list; reject by default.`);
@@ -107,7 +109,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
   // Subcommand allow-list applies only to read-tier composite commands.
   const subAllow = SUBCOMMAND_ALLOW[verb];
   if (subAllow && tier === 'read') {
-    const sub = String(tokens[1] || '').toUpperCase();
+    const sub = str(tokens[1]).toUpperCase();
     if (!subAllow.has(sub)) {
       throw new Error(`redis ${verb} subcommand '${sub || '(none)'}' not in allow-list.`);
     }
@@ -260,10 +262,10 @@ function decodeWith(root: ProtoRoot, message: string, buf: Buffer): Record<strin
 }
 
 function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoMessage?: string } {
-  const pp = (request.pluginParams || {}) as Record<string, unknown>;
+  const pp = (request.pluginParams || {}) as RedisPluginParams;
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const protoRoot = String(pp.protoRoot || hints.protoRoot || '').trim() || undefined;
-  const protoMessage = String(pp.protoMessage || hints.protoMessage || '').trim() || undefined;
+  const protoRoot = str(pp.protoRoot || hints.protoRoot).trim() || undefined;
+  const protoMessage = str(pp.protoMessage || hints.protoMessage).trim() || undefined;
   return { protoRoot, protoMessage };
 }
 
@@ -281,17 +283,17 @@ export const redisPlugin: TapRootPlugin = {
     const args = cliArgs(input.datasource, input.credentials, false);
     const r = await runRedis(args, ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000);
     if (r.code === 0 && /PONG/i.test(r.stdout)) {
-      return [{ check: 'redis ping', status: 'ok', detail: 'PING -> PONG' }];
+      return [{ check: 'redis ping', status: DoctorStatus.Ok, detail: 'PING -> PONG' }];
     }
     const detail = (r.stderr || r.stdout || `exit=${r.code}`).trim().slice(0, 400) || 'redis-cli failed';
-    return [{ check: 'redis ping', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
+    return [{ check: 'redis ping', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
   },
 
   async execute(request, creds): Promise<QueryResult> {
     const startedAt = nowIso();
     const start = Date.now();
     const tokens = tokenize(request.query);
-    const pp = (request.pluginParams || {}) as Record<string, unknown>;
+    const pp = (request.pluginParams || {}) as RedisPluginParams;
     const policy = request.datasource.policy;
     const tier = assertCommandAllowed(tokens, {
       capability: request.capability,
