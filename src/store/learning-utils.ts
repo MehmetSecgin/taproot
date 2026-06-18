@@ -7,6 +7,18 @@ export function bareTableName(value: unknown): string {
   return str(value).replace(/`/g, '').trim().split('.').pop() || '';
 }
 
+export function isSystemTable(value: unknown): boolean {
+  const lower = str(value).toLowerCase();
+  return (
+    lower.startsWith('information_schema.') ||
+    lower.startsWith('performance_schema.') ||
+    lower.startsWith('mysql.') ||
+    lower === 'information_schema' ||
+    lower === 'performance_schema' ||
+    lower === 'mysql'
+  );
+}
+
 export function pickBestByKey<T extends { key: string }>(rows: T[], isBetter: (candidate: T, current: T) => boolean): T[] {
   const map = new Map<string, T>();
   for (const row of rows) {
