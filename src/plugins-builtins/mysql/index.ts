@@ -1,20 +1,17 @@
 import mysql from 'mysql2/promise';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
-
-const CONNECT_TIMEOUT_MS = 5000;
+import { baseConnConfig } from '../_shared/db-conn.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
   return {
-    host: ds.connection.host || '127.0.0.1',
-    port: Number(ds.connection.port || 3306),
-    user: creds.user,
-    password: creds.password,
-    database: ds.connection.database,
+    ...baseConnConfig(ds, creds, RUNTIME_CONSTANTS.defaultPorts.mysql),
     ssl: ds.connection.ssl ? {} : undefined,
-    connectTimeout: CONNECT_TIMEOUT_MS,
+    connectTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
   };
 }
 
@@ -24,13 +21,13 @@ export const mysqlPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['native', 'qa-portforward'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {
     try {
-      const conn = await mysql.createConnection(connConfig(input.datasource as any, input.credentials));
+      const conn = await mysql.createConnection(connConfig(input.datasource, input.credentials));
       await conn.query('SELECT 1 AS ok');
       await conn.end();
       return [{ check: 'mysql connect', status: 'ok', detail: 'connection and read query succeeded' }];

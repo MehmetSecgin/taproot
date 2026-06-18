@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { DatasourceProfile } from '../types/core.js';
+import { DatasourceKind, type DatasourceProfile } from '../types/core.js';
 
 export interface IdeaDriverSpec {
   driverRef: string;
@@ -62,7 +62,7 @@ function configuredInlineAuth(env?: string): InlineAuth | undefined {
 function inlineAuthFor(profile: DatasourceProfile): InlineAuth | undefined {
   const configured = configuredInlineAuth(profile.env);
   if (configured) return configured;
-  if (String(profile.kind).toLowerCase() === 'teleport-mysql') {
+  if (String(profile.kind).toLowerCase() === DatasourceKind.TeleportMysql) {
     const user = defaultDbUser(profile);
     if (user) return { username: user, password: '' };
   }
@@ -93,7 +93,7 @@ export function describeDriver(profile: DatasourceProfile): IdeaDriverSpec | { s
   const database = profile.connection?.database?.trim() || '';
   const kind = String(profile.kind || '').toLowerCase();
 
-  if (kind === 'mysql' || kind === 'tidb') {
+  if (kind === DatasourceKind.Mysql || kind === 'tidb') {
     if (!host || !port) return { skip: 'missing host or port' };
     const base = `jdbc:mysql://${host}:${port}/${database}?allowPublicKeyRetrieval=true&useSSL=false`;
     const auth = inlineAuthFor(profile);
@@ -105,7 +105,7 @@ export function describeDriver(profile: DatasourceProfile): IdeaDriverSpec | { s
       jdbcUrl,
     };
   }
-  if (kind === 'postgres' || kind === 'postgresql') {
+  if (kind === DatasourceKind.Postgres || kind === 'postgresql') {
     if (!host || !port) return { skip: 'missing host or port' };
     return {
       driverRef: 'postgresql',
@@ -114,7 +114,7 @@ export function describeDriver(profile: DatasourceProfile): IdeaDriverSpec | { s
       jdbcUrl: `jdbc:postgresql://${host}:${port}/${database}`,
     };
   }
-  if (kind === 'teleport-mysql') {
+  if (kind === DatasourceKind.TeleportMysql) {
     const target = profile.connection?.target?.trim();
     if (!target) return { skip: 'teleport-mysql missing connection.target' };
     const localPort = deterministicLocalPort(profile.name);

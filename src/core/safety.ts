@@ -1,5 +1,6 @@
 import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
+import { missingPartitionPredicate, redundantIntrospection } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
 
 const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
@@ -72,16 +73,14 @@ export function enforceSchemaIntrospectionPolicy(input: {
     return warnings;
   }
 
-  const err = new Error(
-    `REDUNDANT_INTROSPECTION: service ${input.service} schema is already cached; use 'taproot --json learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
+  throw redundantIntrospection(
+    `service ${input.service} schema is already cached; use 'taproot --json learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
+    {
+      service: input.service,
+      nextAction: `taproot --json learn ensure-schema --service ${input.service}`,
+      nextCommand: `taproot --json learn ensure-schema --service ${input.service}`,
+    },
   );
-  (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'REDUNDANT_INTROSPECTION';
-  (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
-    service: input.service,
-    nextAction: `taproot --json learn ensure-schema --service ${input.service}`,
-    nextCommand: `taproot --json learn ensure-schema --service ${input.service}`,
-  };
-  throw err;
 }
 
 export function enforcePartitionPredicate(input: {
@@ -120,19 +119,17 @@ export function enforcePartitionPredicate(input: {
     }
 
     const target = requiredKeys.length ? missingKeys.join(', ') : String(partition.expr || partition.kind || 'partition expression');
-    const err = new Error(
-      `MISSING_PARTITION_PREDICATE: ${table} is partitioned by ${target}; add a WHERE/JOIN predicate on the partition column before retrying`,
+    throw missingPartitionPredicate(
+      `${table} is partitioned by ${target}; add a WHERE/JOIN predicate on the partition column before retrying`,
+      {
+        table,
+        partition,
+        missingKeys,
+        nextAction: requiredKeys.length
+          ? `Add a WHERE or JOIN predicate on ${missingKeys.join(', ')} before retrying.`
+          : 'TapRoot could not derive the partition key; inspect schemaContext.partition and add the partition predicate before retrying.',
+      },
     );
-    (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'MISSING_PARTITION_PREDICATE';
-    (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
-      table,
-      partition,
-      missingKeys,
-      nextAction: requiredKeys.length
-        ? `Add a WHERE or JOIN predicate on ${missingKeys.join(', ')} before retrying.`
-        : 'TapRoot could not derive the partition key; inspect schemaContext.partition and add the partition predicate before retrying.',
-    };
-    throw err;
   }
 
   return warnings;

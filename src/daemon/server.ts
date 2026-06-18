@@ -3,20 +3,23 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext, classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import type { AppContext } from '../core/app.js';
+import { buildContext, classifyError, environmentPolicy, fillTemplate, nextAction, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { nowIso } from '../core/time.js';
-import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
-import type { DatasourceProfile } from '../types/core.js';
-import type { RpcRequest, RpcResponse } from './types.js';
+import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../core/error-classification.js';
+import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../core/query-timeout.js';
+import { resolveCanonicalDatasource } from '../core/resolve-datasource.js';
+import { DatasourceKind } from '../types/core.js';
+import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
+import { RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
-import { bootstrapDatasource } from '../core/bootstrap.js';
 import { ensureSchemaSnapshot } from '../commands/learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
@@ -64,6 +67,60 @@ function parseQueryParams(params: Record<string, unknown>): Record<string, strin
 
 function cardParamNames(card: QueryCard): string[] {
   return (card.params || []).map((param) => param.name).filter(Boolean);
+}
+
+function buildPluginParams(
+  reqParams: Record<string, unknown>,
+  datasourceKind: string,
+): Record<string, unknown> | undefined {
+  const pluginParams: Record<string, unknown> = {};
+  if (reqParams.proto) pluginParams.protoMessage = String(reqParams.proto);
+  if (reqParams.protoRoot) pluginParams.protoRoot = String(reqParams.protoRoot);
+  if (reqParams.allowFlush) pluginParams.allowFlush = true;
+  if (reqParams.requestJson) pluginParams.requestJson = String(reqParams.requestJson);
+  if (reqParams.skipProtoValidate) pluginParams.skipProtoValidate = true;
+  if (datasourceKind === DatasourceKind.Grpc && reqParams.param) {
+    const grpcParams: Record<string, string> = {};
+    for (const pair of reqParams.param as string[]) {
+      const idx = pair.indexOf('=');
+      if (idx > 0) grpcParams[pair.slice(0, idx)] = pair.slice(idx + 1);
+    }
+    if (Object.keys(grpcParams).length) pluginParams.params = grpcParams;
+  }
+  return Object.keys(pluginParams).length ? pluginParams : undefined;
+}
+
+function mergeSchemaContext(
+  base: SchemaContext,
+  pluginSchema: SchemaContext | undefined,
+): SchemaContext {
+  if (!pluginSchema) return base;
+  return {
+    ...base,
+    ...pluginSchema,
+    tables: { ...(base.tables || {}), ...(pluginSchema.tables || {}) },
+  };
+}
+
+function buildResolvedMeta(input: {
+  ctx: AppContext;
+  datasource: DatasourceProfile;
+  env: string;
+  namespace: string;
+  service: string;
+  source: string;
+}): NonNullable<QueryResult['resolved']> {
+  const { ctx, datasource, env, namespace, service, source } = input;
+  return {
+    source,
+    env,
+    namespace: datasource.namespace || namespace || undefined,
+    service,
+    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
+    target: String(datasource.connection.target || ''),
+    database: String(datasource.connection.database || ''),
+    engine: datasource.kind,
+  };
 }
 
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
@@ -120,7 +177,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
           const begin = Date.now();
           const base = responseBase(req);
           try {
-            if (req.method === 'daemon.status') {
+            if (req.method === RpcMethod.DaemonStatus) {
               base.ok = true;
               base.data = {
                 pid: process.pid,
@@ -136,7 +193,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   maxConcurrentLeases: RUNTIME_CONSTANTS.session.maxConcurrentLeases,
                 },
               };
-            } else if (req.method === 'session.open') {
+            } else if (req.method === RpcMethod.SessionOpen) {
               const session = sessions.open({
                 datasourceName: String(req.params.datasource || req.params.datasourceName || 'unknown'),
                 env: String(req.params.env || ''),
@@ -149,10 +206,10 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = true;
               base.data = { session };
               base.meta.sessionId = session.sessionId;
-            } else if (req.method === 'session.list') {
+            } else if (req.method === RpcMethod.SessionList) {
               base.ok = true;
               base.data = { sessions: sessions.list() };
-            } else if (req.method === 'session.inspect') {
+            } else if (req.method === RpcMethod.SessionInspect) {
               const sessionId = String(req.params.sessionId || '');
               const session = sessions.get(sessionId);
               if (!session) {
@@ -163,7 +220,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.data = { session };
                 base.meta.sessionId = session.sessionId;
               }
-            } else if (req.method === 'session.close') {
+            } else if (req.method === RpcMethod.SessionClose) {
               const sessionId = String(req.params.sessionId || '');
               const closed = sessions.close(sessionId);
               if (!closed) {
@@ -175,12 +232,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 base.data = { closed: true, sessionId };
                 base.meta.sessionId = sessionId;
               }
-            } else if (req.method === 'session.closeAll') {
+            } else if (req.method === RpcMethod.SessionCloseAll) {
               const closedCount = sessions.closeAll();
               await closeAllTeleportMysqlProxies();
               base.ok = true;
               base.data = { closedCount };
-            } else if (req.method === 'query.execute') {
+            } else if (req.method === RpcMethod.QueryExecute) {
               const phaseStart = Date.now();
               let phaseResolveMs = 0;
               let phaseConnectMs = 0;
@@ -193,24 +250,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const service = normalizeService(String(req.params.service || alias?.[2] || ''), ctx.runtimeConfigStore.serviceAliases());
               const policy = environmentPolicy(ctx, env);
               if (allowDiscovery || policy.allowDiscoveryByDefault) {
-                throw new Error('DISCOVERY_UNAVAILABLE: discovery mode is only available in direct CLI mode when daemon is bypassed.');
+                throw discoveryUnavailable('discovery mode is only available in direct CLI mode when daemon is bypassed.');
               }
-              let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
-              let resolutionSource: 'explicit' | 'store' | 'kb' | 'unknown' = datasource ? 'explicit' : 'unknown';
-              if (!datasource && env && service) {
-                datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
-                if (datasource) resolutionSource = 'store';
-              }
-              if (!datasource && env && service) {
-                const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined);
-                if (bootstrapped) {
-                  datasource = bootstrapped.profile;
-                  resolutionSource = 'kb';
-                }
-              }
+              const resolution = await resolveCanonicalDatasource({ ctx, rawDs, env, namespace, service });
+              let datasource = resolution.datasource;
+              const resolutionSource = resolution.source;
               if (!datasource) {
                 if (policy.deterministicRequired) {
-                  throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
+                  throw deterministicRequired(`environment '${env || 'unknown'}' requires datasource profile/KB resolution. Use --datasource or --env+--service.`);
                 }
                 throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
               }
@@ -219,7 +266,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               const timeoutMs = parseTimeoutMs(req.params.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
               const timeoutController = new AbortController();
               const timeoutTimer = setTimeout(() => {
-                timeoutController.abort(new Error(`QUERY_TIMEOUT: query exceeded timeout (${timeoutMs}ms) and was aborted.`));
+                timeoutController.abort(queryTimeoutError(timeoutMs));
               }, timeoutMs);
               const startedAtMs = Date.now();
               const remainingTimeoutMs = (): number => Math.max(1, timeoutMs - (Date.now() - startedAtMs));
@@ -234,8 +281,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   if (kb) {
                     const critical = criticalDatasourceKbConflicts(datasource as DatasourceProfile, kb);
                     if (critical.length) {
-                      throw new Error(
-                        `MISCONFIGURED_DATASOURCE: datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+                      throw misconfiguredDatasource(
+                        `datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
                       );
                     }
                     const conflicts = datasourceKbConflicts(datasource as DatasourceProfile, kb);
@@ -373,42 +420,26 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                       if (process.env.NODE_ENV === 'test' && testHoldMs > 0) {
                         await new Promise((r) => setTimeout(r, testHoldMs));
                       }
-                      const pluginParams: Record<string, unknown> = {};
-                      if (req.params.proto) pluginParams.protoMessage = String(req.params.proto);
-                      if (req.params.protoRoot) pluginParams.protoRoot = String(req.params.protoRoot);
-                      if (req.params.allowFlush) pluginParams.allowFlush = true;
-                      if (req.params.requestJson) pluginParams.requestJson = String(req.params.requestJson);
-                      if (req.params.skipProtoValidate) pluginParams.skipProtoValidate = true;
-                      if (datasource.kind === 'grpc' && req.params.param) {
-                        const grpcParams: Record<string, string> = {};
-                        for (const pair of req.params.param as string[]) {
-                          const idx = pair.indexOf('=');
-                          if (idx > 0) grpcParams[pair.slice(0, idx)] = pair.slice(idx + 1);
-                        }
-                        if (Object.keys(grpcParams).length) pluginParams.params = grpcParams;
-                      }
                       return await execute(
                         {
                           datasource: datasource as DatasourceProfile,
                           query,
                           capability: capability as any,
                           timeoutMs: remainingTimeoutMs(),
-                          pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
+                          pluginParams: buildPluginParams(req.params, datasource.kind),
                         },
                         execCreds,
                       );
                     },
                   });
-                  result.resolved = {
-                    source: resolutionSource,
+                  result.resolved = buildResolvedMeta({
+                    ctx,
+                    datasource,
                     env,
-                    namespace: datasource.namespace || namespace || undefined,
+                    namespace,
                     service,
-                    accessMethod: String(ctx.kbStore.resolveConnection(service, env, namespace || undefined)?.access_method || ''),
-                    target: String(datasource.connection.target || ''),
-                    database: String(datasource.connection.database || ''),
-                    engine: datasource.kind,
-                  };
+                    source: resolutionSource,
+                  });
                   phaseExecuteMs = Date.now() - executeStart;
                   result.runId = artifacts.runId;
                   if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
@@ -422,14 +453,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                   (base.meta as Record<string, unknown>).phases = phases;
                   (base.meta as Record<string, unknown>).resolved = result.resolved;
                   const pluginMeta = result.meta || {};
-                  const pluginSchema = pluginMeta.schemaContext;
-                  const mergedSchema = pluginSchema
-                    ? {
-                        ...schemaContext,
-                        ...pluginSchema,
-                        tables: { ...(schemaContext.tables || {}), ...(pluginSchema.tables || {}) },
-                      }
-                    : schemaContext;
+                  const mergedSchema = mergeSchemaContext(schemaContext, pluginMeta.schemaContext);
                   result.meta = { ...pluginMeta, schemaContext: mergedSchema, queryMemory };
                   base.meta.schemaContext = mergedSchema;
                   appendRunsLedgerEntry(
@@ -497,7 +521,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
                 if (leaseSessionId && leaseId) sessions.releaseLease(leaseSessionId, leaseId);
                 releaseGlobal();
               }
-            } else if (req.method === 'daemon.stop') {
+            } else if (req.method === RpcMethod.DaemonStop) {
               base.ok = true;
               base.data = { stopping: true };
               write({

@@ -6,6 +6,8 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from '../core/discovery.js';
+import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
+import { AccessMethod, DatasourceKind } from '../types/core.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
 import { createRunArtifacts, writeRunSummary, appendEvent } from '../core/artifacts.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from '../core/bootstrap.js';
@@ -16,6 +18,7 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { parseTimeoutMs, withQueryTimeout } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 import { ensureSchemaSnapshot } from './learn.js';
 import { supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
@@ -55,9 +58,9 @@ function discoverTargets(ctx: AppContext, input: { env: string; service: string;
   for (const method of input.accessMethods) {
     const current = String(method || '').trim().toLowerCase();
     let next: string[] = [];
-    if (current === 'qa-portforward') {
+    if (current === AccessMethod.QaPortforward) {
       next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, policy);
-    } else if (current === 'tsh') {
+    } else if (current === AccessMethod.Tsh) {
       next = discoverTeleportTargets(input.service, input.env, policy);
     }
     for (const target of next) {
@@ -70,8 +73,8 @@ function discoverTargets(ctx: AppContext, input: { env: string; service: string;
 }
 
 function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
-  return new Error(
-    `MISCONFIGURED_DATASOURCE: datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+  return misconfiguredDatasource(
+    `datasource '${datasourceName}' conflicts with KB for env=${env} service=${service} (${conflicts.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
   );
 }
 
@@ -156,7 +159,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           try {
             const rpc = await rpcCall({
               timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, timeoutMs + 1000),
-              method: 'query.execute',
+              method: RpcMethod.QueryExecute,
               params: {
                 datasource: opts.datasource,
                 env: opts.env,
@@ -298,14 +301,14 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             namespace: targetNamespace,
             ...(kb || {}),
           };
-          if (accessMethod === 'tsh') {
+          if (accessMethod === AccessMethod.Tsh) {
             datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
               confidence: 0.6,
             });
             resolutionSource = 'kb';
-          } else if (accessMethod === 'qa-portforward') {
+          } else if (accessMethod === AccessMethod.QaPortforward) {
             datasource = await saveKbBootstrapCandidate(ctx, env, service, opts.datasource || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
               targetOverride: target,
               tags: ['discovery-derived'],
@@ -316,21 +319,21 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
       }
       if (!datasource && deterministicRequired && !allowDiscovery) {
-        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
+        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`);
       }
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
       if (deterministicRequired && !allowDiscovery && resolutionSource === 'learning') {
-        throw new Error(`DETERMINISTIC_REQUIRED: environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
+        throw deterministicRequiredErr(`environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`);
       }
       const warnings: string[] = [];
       if (env && service) {
         const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
         if (kb) {
-          const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+          const critical = criticalDatasourceKbConflicts(datasource, kb);
           if (critical.length) {
             throw misconfiguredDatasourceError(datasource.name, env, service, critical);
           }
-          const conflicts = datasourceKbConflicts(datasource as any, kb);
+          const conflicts = datasourceKbConflicts(datasource, kb);
           if (conflicts.length) {
             const warning = `datasource overrides KB (${conflicts.join('; ')})`;
             warnings.push(warning);
@@ -373,7 +376,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       progress.update('query resolved');
 
       const referencedTables = collectReferencedTables(query);
-      if (supportsSchemaRefresh(datasource as any) && referencedTables.length) {
+      if (supportsSchemaRefresh(datasource) && referencedTables.length) {
         const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.service).length;
         if (priorSnapshotRows === 0 && !ctx.jsonMode) {
           process.stderr.write(`[taproot] first query against service ${datasource.service} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
@@ -420,7 +423,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const artifacts = createRunArtifacts(ctx.paths.runsDir, datasource.name.replace(/[^a-z0-9-]/gi, '-'));
       appendEvent(artifacts.runDir, `query started capability=${capability}`);
       try {
-        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource as any });
+        enforceMutationPolicy({ sql: query, allowMutate: Boolean(opts.allowMutate), datasource: datasource });
         {
           const cachedRows = ctx.learningStore.schemaTables(datasource.service);
           const hasRefreshedSchema = cachedRows.some((row) => row.sources.includes('refreshed-metadata') || row.sources.includes('manual'));
@@ -448,7 +451,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           timeoutMs: preflightBudgetMs,
           run: () =>
             runDatasourceConnectors({
-              datasource: datasource as any,
+              datasource: datasource,
               credentialStore: ctx.credentialStore,
               pluginRegistry: ctx.pluginRegistry,
               mode: 'connect',
@@ -469,7 +472,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         if (opts.allowFlush) pluginParams.allowFlush = true;
         if (opts.requestJson) pluginParams.requestJson = String(opts.requestJson);
         if (opts.skipProtoValidate) pluginParams.skipProtoValidate = true;
-        if (datasource.kind === 'grpc' && params && Object.keys(params).length) {
+        if (datasource.kind === DatasourceKind.Grpc && params && Object.keys(params).length) {
           pluginParams.params = params;
         }
         let result;
@@ -479,7 +482,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             run: () =>
               execute(
                 {
-                  datasource: datasource as any,
+                  datasource: datasource,
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
@@ -497,7 +500,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             !ctx.jsonMode &&
             input.isTTY &&
             !process.env.CI &&
-            (datasource.kind === 'mysql' || datasource.kind === 'postgres');
+            (datasource.kind === DatasourceKind.Mysql || datasource.kind === DatasourceKind.Postgres);
           if (!canPromptPassword) throw err;
           progress.update(`password required for ${datasource.credentialRef}`);
           progress.stop();
@@ -511,7 +514,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
             run: () =>
               execute(
                 {
-                  datasource: datasource as any,
+                  datasource: datasource,
                   query: executedQuery,
                   capability: capability as any,
                   timeoutMs,
@@ -558,7 +561,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           ledgerInputFromResult({
             ledgerDir: ctx.paths.runsLedgerDir,
             result,
-            datasource: datasource as any,
+            datasource: datasource,
             intent: effectiveIntent,
             reason,
             sql: query,
@@ -569,7 +572,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         writeRunSummary(artifacts.runDir, result);
         appendEvent(artifacts.runDir, 'query succeeded');
 
-        ctx.learningStore.saveSuccess({ datasource: datasource as any, queryIntent: effectiveIntent, sql: query, result });
+        ctx.learningStore.saveSuccess({ datasource: datasource, queryIntent: effectiveIntent, sql: query, result });
         const phaseSummary = ctx.verbose
           ? ` [resolve ${phaseResolveMs}ms · connect ${phaseConnectMs}ms · execute ${phaseExecuteMs}ms]`
           : '';
@@ -614,7 +617,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
           progress.fail(`query failed (${code})`);
           ctx.learningStore.saveFailure({
-            datasource: datasource as any,
+            datasource: datasource,
             queryIntent: effectiveIntent,
             sql: query,
             errorClass: code,
@@ -622,7 +625,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           appendRunsLedgerEntry({
             ledgerDir: ctx.paths.runsLedgerDir,
             runId: artifacts.runId,
-            datasource: datasource as any,
+            datasource: datasource,
             intent: effectiveIntent,
             reason,
             sql: query,

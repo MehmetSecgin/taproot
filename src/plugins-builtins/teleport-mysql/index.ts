@@ -2,17 +2,18 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
-import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
+import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
+import { AccessMethod } from '../../types/core.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
 
 type ProxyRuntime = {
   key: string;
   sessionId: string;
   target: string;
-  dbUser: string;
-  dbName: string;
+  user: string;
+  database: string;
   port: number;
   process: ChildProcess;
   cleanupRegistered: boolean;
@@ -22,8 +23,8 @@ const proxiesByKey = new Map<string, ProxyRuntime>();
 const proxyKeyBySession = new Map<string, Set<string>>();
 let globalCleanupRegistered = false;
 
-function proxyKey(sessionId: string, target: string, dbUser: string, dbName: string): string {
-  return `${sessionId}|${target}|${dbUser}|${dbName}`;
+function proxyKey(sessionId: string, target: string, user: string, database: string): string {
+  return `${sessionId}|${target}|${user}|${database}`;
 }
 
 function ensureGlobalCleanup(): void {
@@ -87,7 +88,7 @@ async function waitForTcpReady(host: string, port: number, timeoutMs: number, sh
     if (ok) return;
     await new Promise((r) => setTimeout(r, 120));
   }
-  throw new Error(`CONNECTIVITY: timed out waiting for teleport db proxy on ${host}:${port}`);
+  throw connectivity(`timed out waiting for teleport db proxy on ${host}:${port}`);
 }
 
 async function stopProxy(proxy: ProxyRuntime): Promise<void> {
@@ -137,14 +138,14 @@ export async function closeAllTeleportMysqlProxies(): Promise<void> {
   proxyKeyBySession.clear();
 }
 
-async function ensureProxy(sessionId: string, target: string, dbUser: string, dbName: string): Promise<ProxyRuntime> {
+async function ensureProxy(sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
   ensureGlobalCleanup();
-  const key = proxyKey(sessionId, target, dbUser, dbName);
+  const key = proxyKey(sessionId, target, user, database);
   const existing = proxiesByKey.get(key);
   if (existing && !existing.process.killed) return existing;
 
   const port = await getFreePort();
-  const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', dbUser, '--db-name', dbName, target];
+  const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', user, '--db-name', database, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   type ExitInfo = { code: number | null; signal: NodeJS.Signals | null };
   let stderr = '';
@@ -167,8 +168,8 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
     key,
     sessionId,
     target,
-    dbUser,
-    dbName,
+    user,
+    database,
     port,
     process: proc,
     cleanupRegistered: true,
@@ -193,14 +194,14 @@ async function ensureProxy(sessionId: string, target: string, dbUser: string, db
     await stopProxy(runtime);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
-    if (spawnError) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`);
+    if (spawnError) throw connectivity(`teleport proxy path unavailable; ${spawnError}`);
     const exit = exitState.value;
     if (exit) {
       const detail = stderr.trim() || `tsh proxy db exited code=${exit.code} signal=${exit.signal ?? 'none'}`;
-      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
+      throw connectivity(`teleport proxy path unavailable; ${detail}`);
     }
     const detail = stderr.trim();
-    if (detail) throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${detail}`);
+    if (detail) throw connectivity(`teleport proxy path unavailable; ${detail}`);
     throw error;
   }
 }
@@ -211,27 +212,27 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['tsh'],
+    accessMethods: [AccessMethod.Tsh],
     priority: 100,
   },
 
   async doctor(input) {
     const target = input.datasource.connection.target;
-    const dbUser = input.credentials.dbUser || input.credentials.user;
-    const dbName = input.datasource.connection.database;
-    if (!target || !dbUser || !dbName) {
+    const user = input.credentials.dbUser || input.credentials.user;
+    const database = input.datasource.connection.database;
+    if (!target || !user || !database) {
       const detail = 'missing target/dbUser/database in datasource+credentials';
       return [{ check: 'teleport-mysql doctor', status: 'fail', detail, code: classifyExecutorDoctorCode(detail) }];
     }
     const sessionId = `doctor-${process.pid}-${Date.now()}`;
     try {
-      const proxy = await ensureProxy(sessionId, String(target), String(dbUser), String(dbName));
+      const proxy = await ensureProxy(sessionId, String(target), String(user), String(database));
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
-        user: String(dbUser),
+        user: String(user),
         password: input.credentials.password,
-        database: String(dbName),
+        database: String(database),
       });
       await conn.query('SELECT 1 AS ok');
       await conn.end();
@@ -248,10 +249,10 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const target = request.datasource.connection.target;
-    const dbUser = creds.dbUser || creds.user;
-    const dbName = request.datasource.connection.database;
+    const user = creds.dbUser || creds.user;
+    const database = request.datasource.connection.database;
     const sessionId = String(creds.__sessionId || '').trim();
-    if (!target || !dbUser || !dbName) {
+    if (!target || !user || !database) {
       throw new Error('teleport-mysql requires target, dbUser/user, and database');
     }
 
@@ -259,13 +260,13 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const effectiveSessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
     const shouldCleanup = !sessionId;
     try {
-      const proxy = await ensureProxy(effectiveSessionId, String(target), String(dbUser), String(dbName));
+      const proxy = await ensureProxy(effectiveSessionId, String(target), String(user), String(database));
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
-        user: String(dbUser),
+        user: String(user),
         password: creds.password,
-        database: String(dbName),
+        database: String(database),
       });
       try {
         const [rows, fields] = await conn.query(
@@ -300,7 +301,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       if (String((proxyError as Error).message || '').startsWith('QUERY_TIMEOUT:')) {
         throw proxyError;
       }
-      throw new Error(`CONNECTIVITY: teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
+      throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
     } finally {
       if (shouldCleanup) {
         await closeTeleportMysqlSessionProxies(effectiveSessionId);

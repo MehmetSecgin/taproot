@@ -1,5 +1,17 @@
 import type { QueryMemory, QueryPhaseTimings, SchemaContext } from '../types/core.js';
 
+export const RpcMethod = {
+  DaemonStatus: 'daemon.status',
+  DaemonStop: 'daemon.stop',
+  SessionOpen: 'session.open',
+  SessionList: 'session.list',
+  SessionInspect: 'session.inspect',
+  SessionClose: 'session.close',
+  SessionCloseAll: 'session.closeAll',
+  QueryExecute: 'query.execute',
+} as const;
+export type RpcMethod = (typeof RpcMethod)[keyof typeof RpcMethod];
+
 export interface RpcRequest {
   protocolVersion: number;
   requestId: string;

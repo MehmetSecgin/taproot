@@ -1,22 +1,19 @@
 import { Client } from 'pg';
-import type { DoctorCheck, QueryResult, TapRootPlugin } from '../../types/core.js';
+import { AccessMethod } from '../../types/core.js';
+import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
+import { baseConnConfig } from '../_shared/db-conn.js';
 
-const CONNECT_TIMEOUT_MS = 5000;
-
-function connConfig(ds: any, creds: Record<string, string>, timeoutMs?: number) {
+function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs?: number) {
   return {
-    host: ds.connection.host || '127.0.0.1',
-    port: Number(ds.connection.port || 5432),
-    user: creds.user,
-    password: creds.password,
-    database: ds.connection.database,
+    ...baseConnConfig(ds, creds, RUNTIME_CONSTANTS.defaultPorts.postgres),
     ssl: ds.connection.ssl ? { rejectUnauthorized: false } : undefined,
     statement_timeout: timeoutMs,
     query_timeout: timeoutMs,
-    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+    connectionTimeoutMillis: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
   };
 }
 
@@ -26,7 +23,7 @@ export const postgresPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: ['native', 'qa-portforward'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 

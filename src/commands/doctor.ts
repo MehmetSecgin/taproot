@@ -7,6 +7,7 @@ import { exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson, printJsonPluck } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 
 function compactDetail(detail: string, max = 160): string {
@@ -49,18 +50,48 @@ function upsertAction(
   });
 }
 
+const CONNECTOR_SETUP_HINTS: Record<string, (datasourceName: string) => string> = {
+  openvpn: (name) =>
+    `taproot connector setup --datasource ${name} --connector openvpn --connect-command '<command>' --status-command '<command>'`,
+  teleport: (name) =>
+    `taproot connector setup --datasource ${name} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`,
+  'kubectl-portforward': (name) =>
+    `taproot connector setup --datasource ${name} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`,
+};
+
 function connectorSetupHint(datasourceName: string, connector: string): string {
-  if (connector === 'openvpn') {
-    return `taproot connector setup --datasource ${datasourceName} --connector openvpn --connect-command '<command>' --status-command '<command>'`;
-  }
-  if (connector === 'teleport') {
-    return `taproot connector setup --datasource ${datasourceName} --connector teleport --login-command 'tsh login --proxy <proxy> --auth <auth>'`;
-  }
-  if (connector === 'kubectl-portforward') {
-    return `taproot connector setup --datasource ${datasourceName} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`;
-  }
+  const builder = CONNECTOR_SETUP_HINTS[connector];
+  if (builder) return builder(datasourceName);
   return `taproot connector setup --datasource ${datasourceName} --connector ${connector || '<name>'} ...`;
 }
+
+interface ConnectorActionStrategy {
+  prefix: string;
+  missingConfigRegex: RegExp;
+  setupReason: string;
+  reconnectReason: string;
+}
+
+const CONNECTOR_ACTION_STRATEGIES: ConnectorActionStrategy[] = [
+  {
+    prefix: 'openvpn',
+    missingConfigRegex: /no connectcommand configured/i,
+    setupReason: 'OpenVPN is missing required commands, so connector setup is the first repair.',
+    reconnectReason: 'OpenVPN reported a blocked state, so retry the connector connect flow first.',
+  },
+  {
+    prefix: 'teleport',
+    missingConfigRegex: /no logincommand configured/i,
+    setupReason: 'Teleport is missing login wiring, so connector setup is required first.',
+    reconnectReason: 'Teleport reported a blocked session, so reconnect is the fastest next step.',
+  },
+  {
+    prefix: 'kubectl-portforward',
+    missingConfigRegex: /no connectcommand configured|no statuscommand configured/i,
+    setupReason: 'kubectl port-forward wiring is incomplete, so setup is required before reconnecting.',
+    reconnectReason: 'kubectl port-forward reported a blocked state, so retry the connector connect flow first.',
+  },
+];
 
 const ACTION_PRIORITIES = {
   connectorSetup: 10,
@@ -92,7 +123,7 @@ function isMissingConnectorConfigCode(code?: DoctorCheckCode): boolean {
 }
 
 function credentialRepairHint(datasource: DatasourceProfile): string {
-  if (datasource.kind === 'teleport-mysql') {
+  if (datasource.kind === DatasourceKind.TeleportMysql) {
     return `taproot --json creds set --ref ${datasource.credentialRef} --db-user <user> --password <password>`;
   }
   return `taproot --json creds set --ref ${datasource.credentialRef} --user <user> --password <password>`;
@@ -249,15 +280,16 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
       continue;
     }
 
-    if (label.startsWith('openvpn')) {
-      if (/no connectcommand configured/i.test(detail)) {
+    for (const strategy of CONNECTOR_ACTION_STRATEGIES) {
+      if (!label.startsWith(strategy.prefix)) continue;
+      if (strategy.missingConfigRegex.test(detail)) {
         addActionForCheck(
           actions,
-          connectorSetupHint(datasource.name, 'openvpn'),
+          connectorSetupHint(datasource.name, strategy.prefix),
           ACTION_PRIORITIES.connectorSetup,
           orderRef,
           check,
-          'OpenVPN is missing required commands, so connector setup is the first repair.',
+          strategy.setupReason,
         );
       } else {
         addActionForCheck(
@@ -266,49 +298,7 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
           ACTION_PRIORITIES.connectorConnect,
           orderRef,
           check,
-          'OpenVPN reported a blocked state, so retry the connector connect flow first.',
-        );
-      }
-    }
-    if (label.startsWith('teleport')) {
-      if (/no logincommand configured/i.test(detail)) {
-        addActionForCheck(
-          actions,
-          connectorSetupHint(datasource.name, 'teleport'),
-          ACTION_PRIORITIES.connectorSetup,
-          orderRef,
-          check,
-          'Teleport is missing login wiring, so connector setup is required first.',
-        );
-      } else {
-        addActionForCheck(
-          actions,
-          `taproot doctor --datasource ${datasource.name} --connect`,
-          ACTION_PRIORITIES.connectorConnect,
-          orderRef,
-          check,
-          'Teleport reported a blocked session, so reconnect is the fastest next step.',
-        );
-      }
-    }
-    if (label.startsWith('kubectl-portforward')) {
-      if (/no connectcommand configured/i.test(detail) || /no statuscommand configured/i.test(detail)) {
-        addActionForCheck(
-          actions,
-          connectorSetupHint(datasource.name, 'kubectl-portforward'),
-          ACTION_PRIORITIES.connectorSetup,
-          orderRef,
-          check,
-          'kubectl port-forward wiring is incomplete, so setup is required before reconnecting.',
-        );
-      } else {
-        addActionForCheck(
-          actions,
-          `taproot doctor --datasource ${datasource.name} --connect`,
-          ACTION_PRIORITIES.connectorConnect,
-          orderRef,
-          check,
-          'kubectl port-forward reported a blocked state, so retry the connector connect flow first.',
+          strategy.reconnectReason,
         );
       }
     }
@@ -401,7 +391,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         if (datasource.env && datasource.service) {
           const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
           if (kb) {
-            const critical = criticalDatasourceKbConflicts(datasource as any, kb);
+            const critical = criticalDatasourceKbConflicts(datasource, kb);
             if (critical.length) {
               const checks: DoctorCheck[] = [
                 {
@@ -433,14 +423,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
               return;
             }
-            const conflicts = datasourceKbConflicts(datasource as any, kb);
+            const conflicts = datasourceKbConflicts(datasource, kb);
             if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
           }
         }
         const creds = await ctx.credentialStore.get(datasource.credentialRef);
         progress.update('running connector checks');
         const connectorChecks = await runDatasourceConnectors({
-          datasource: datasource as any,
+          datasource,
           credentialStore: ctx.credentialStore,
           pluginRegistry: ctx.pluginRegistry,
           mode: 'doctor',
@@ -450,7 +440,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           progress.update('running connector connect step');
           checks.push(
             ...(await runDatasourceConnectors({
-              datasource: datasource as any,
+              datasource,
               credentialStore: ctx.credentialStore,
               pluginRegistry: ctx.pluginRegistry,
               mode: 'connect',

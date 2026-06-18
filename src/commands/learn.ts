@@ -4,11 +4,13 @@ import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { bootstrapDatasource } from '../core/bootstrap.js';
+import { connectivity } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource, supportsGrpcSchema, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
+import { DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
-import { schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
+import { bareTableName, schemaObservationHasCurrentMetadata, type GrpcServiceSchemaEntry, type SchemaJoinEntry, type SchemaObservationEntry } from '../store/learning.js';
 
 async function resolveDatasource(ctx: AppContext, opts: { datasource?: string; env?: string; namespace?: string; service?: string }): Promise<DatasourceProfile | undefined> {
   if (opts.datasource) return ctx.datasourceStore.get(String(opts.datasource));
@@ -187,21 +189,33 @@ export interface EnsureSchemaResult {
   ensuredBy: 'cached-learning' | 'refreshed-introspection' | 'unresolved' | 'empty';
 }
 
-function normalizeRequestedTable(value: string): string {
-  return String(value || '').replace(/`/g, '').trim().split('.').pop() || '';
-}
-
 function filterRequestedTables(rows: SchemaObservationEntry[], tables?: string[]): SchemaObservationEntry[] {
-  const requested = new Set((tables || []).map(normalizeRequestedTable).filter(Boolean));
+  const requested = new Set((tables || []).map(bareTableName).filter(Boolean));
   if (!requested.size) return rows;
-  return rows.filter((row) => requested.has(normalizeRequestedTable(row.table)));
+  return rows.filter((row) => requested.has(bareTableName(row.table)));
 }
 
 function hasMissingRequestedTables(rows: SchemaObservationEntry[], tables?: string[]): boolean {
-  const requested = new Set((tables || []).map(normalizeRequestedTable).filter(Boolean));
+  const requested = new Set((tables || []).map(bareTableName).filter(Boolean));
   if (!requested.size) return false;
-  const present = new Set(rows.map((row) => normalizeRequestedTable(row.table)));
+  const present = new Set(rows.map((row) => bareTableName(row.table)));
   return [...requested].some((table) => !present.has(table));
+}
+
+function shouldRefreshSchema(input: {
+  datasource: DatasourceProfile | undefined;
+  currentRows: SchemaObservationEntry[];
+  requestedTables?: string[];
+  emptyReason: string | null;
+  forceRefresh: boolean;
+}): boolean {
+  if (!input.datasource || !supportsSchemaRefresh(input.datasource)) return false;
+  if (input.forceRefresh) return true;
+  if (input.emptyReason === 'schema_refresh_required') return true;
+  if (hasMissingRequestedTables(input.currentRows, input.requestedTables)) return true;
+  // Service-keyed cache: refresh once per service. Re-refresh only when no row has
+  // properly refreshed metadata yet (observed-only rows from ad-hoc queries don't force re-refresh).
+  return input.currentRows.length > 0 && !input.currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
 }
 
 export async function ensureSchemaSnapshot(
@@ -239,19 +253,13 @@ export async function ensureSchemaSnapshot(
   });
 
   const currentRows = filterRequestedTables(scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaTables(name) }), opts.tables);
-  const missingRequestedTables = hasMissingRequestedTables(currentRows, opts.tables);
-  // Service-keyed cache: full refresh runs at most once per service. Subsequent calls return the cached schema.
-  // Refresh triggers only when (a) no rows for this service, (b) requested tables are missing,
-  // or (c) cached rows lack current introspection metadata (only observed by ad-hoc queries, never refreshed).
-  // First-time introspection trigger: cache exists but no row has been properly refreshed yet.
-  // Subsequent observed-only rows (CTE aliases, qualified-name dupes) do not force re-refresh.
-  const hasAnyRefreshed = currentRows.some((row) => schemaObservationHasCurrentMetadata(row));
-  const incompleteMetadata = currentRows.length > 0 && !hasAnyRefreshed;
-  const forceRefresh = Boolean((opts as { refresh?: boolean }).refresh);
-  const shouldRefresh =
-    Boolean(datasource) &&
-    supportsSchemaRefresh(datasource) &&
-    (forceRefresh || state.emptyReason === 'schema_refresh_required' || missingRequestedTables || incompleteMetadata);
+  const shouldRefresh = shouldRefreshSchema({
+    datasource,
+    currentRows,
+    requestedTables: opts.tables,
+    emptyReason: state.emptyReason,
+    forceRefresh: Boolean(opts.refresh),
+  });
 
   if (shouldRefresh && datasource) {
     await refreshSchemaForDatasource(ctx, datasource, {
@@ -512,7 +520,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
-      if (datasource.kind === 'grpc') {
+      if (datasource.kind === DatasourceKind.Grpc) {
         const refreshed = await refreshGrpcSchemaForDatasource(ctx, datasource);
         const methodCount = refreshed.services.reduce((acc, s) => acc + s.methods.length, 0);
         if (ctx.jsonMode) {
@@ -549,13 +557,10 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         const failures = connectorChecks.filter((check) => check.status === 'fail');
         if (failures.length) {
           const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
-          const err = new Error(`CONNECTIVITY: ${detail}; ensure VPN/teleport/telepresence are up before retrying`);
-          (err as Error & { code?: string; details?: Record<string, unknown> }).code = 'CONNECTIVITY';
-          (err as Error & { code?: string; details?: Record<string, unknown> }).details = {
+          throw connectivity(`${detail}; ensure VPN/teleport/telepresence are up before retrying`, {
             failures,
             nextCommand: `taproot --json doctor --datasource ${datasource.name} --connect`,
-          };
-          throw err;
+          });
         }
       } catch (error) {
         const e = error as Error & { code?: string };
@@ -606,7 +611,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
-      if (datasource?.kind === 'grpc') {
+      if (datasource?.kind === DatasourceKind.Grpc) {
         const snapshot = readGrpcSchemaSnapshot(ctx, datasource, targeted, { ...opts, detailed: Boolean(opts.detailed) });
         if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
         else renderGrpcSnapshotTty(snapshot);
@@ -687,7 +692,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
       const preResolved = await resolveDatasource(ctx, opts);
-      if (preResolved?.kind === 'grpc') {
+      if (preResolved?.kind === DatasourceKind.Grpc) {
         const snapshot = await ensureGrpcSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
         if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
         else renderGrpcSnapshotTty(snapshot);

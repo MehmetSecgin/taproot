@@ -4,6 +4,7 @@ import { normalizeNamespace, normalizeService, runDatasourceConnectors } from '.
 import type { AppContext } from './app.js';
 import type { DatasourceProfile, DoctorCheckCode, RemediationAction } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 
 export type ReadinessState =
   | 'ready'
@@ -113,7 +114,7 @@ function kbCheck(ctx: AppContext): ReadinessCheck {
 async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
   try {
     const socketPath = defaultSocketPath(ctx.paths.stateRoot);
-    const res = await rpcCall({ method: 'daemon.status', socketPath, timeoutMs: 1000 });
+    const res = await rpcCall({ method: RpcMethod.DaemonStatus, socketPath, timeoutMs: 1000 });
     if (!res.ok) throw new Error(res.error?.message || 'daemon unavailable');
     return { check: 'daemon', status: 'ok', detail: `reachable via ${socketPath}` };
   } catch (error) {

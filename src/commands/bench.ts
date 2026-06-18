@@ -4,6 +4,7 @@ import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { printJson, printJsonPluck, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 
 interface BenchScenario {
   name?: string;
@@ -109,7 +110,7 @@ async function runScenario(scenario: BenchScenario, iterations: number, timeoutM
     try {
       const rpc = await rpcCall({
         timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, timeoutMs + 1000),
-        method: 'query.execute',
+        method: RpcMethod.QueryExecute,
         params: {
           datasource: scenario.datasource,
           env: scenario.env,

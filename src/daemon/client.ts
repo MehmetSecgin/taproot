@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { connectivity } from '../core/error-classification.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 
 export function defaultSocketPath(stateRoot?: string): string {
@@ -35,7 +36,7 @@ export async function rpcCall(input: {
       let received = false;
       const timer = setTimeout(() => {
         if (settled) return;
-        socket.destroy(new Error(`CONNECTIVITY: daemon request timeout (${timeoutMs}ms)`));
+        socket.destroy(connectivity(`daemon request timeout (${timeoutMs}ms)`));
       }, timeoutMs);
 
       const settle = (fn: () => void): void => {
@@ -51,7 +52,7 @@ export async function rpcCall(input: {
       socket.on('error', (error) => settle(() => reject(error)));
       socket.on('close', () => {
         if (received) return;
-        settle(() => reject(new Error('CONNECTIVITY: daemon socket closed before response')));
+        settle(() => reject(connectivity('daemon socket closed before response')));
       });
       socket.on('connect', () => {
         socket.write(payload);

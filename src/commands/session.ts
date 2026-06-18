@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
+import { RpcMethod } from '../daemon/types.js';
 
 export function registerSession(program: Command, getCtx: () => AppContext): void {
   const s = program.command('session').description('Session operations via taprootd');
@@ -14,7 +15,7 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
     .action(async (opts) => {
       const ctx = getCtx();
       const res = await rpcCall({
-        method: 'session.open',
+        method: RpcMethod.SessionOpen,
         params: {
           datasource: opts.datasource,
           env: opts.env,
@@ -35,7 +36,7 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
 
   s.command('ls').action(async () => {
     const ctx = getCtx();
-    const res = await rpcCall({ method: 'session.list' });
+    const res = await rpcCall({ method: RpcMethod.SessionList });
     if (!res.ok) throw new Error(res.error?.message || 'session.list failed');
     const rows = ((res.data?.sessions as Array<Record<string, unknown>>) || []).map((v) => ({
       sessionId: String(v.sessionId || ''),
@@ -58,7 +59,7 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
     .requiredOption('--session-id <id>')
     .action(async (opts) => {
       const ctx = getCtx();
-      const res = await rpcCall({ method: 'session.inspect', params: { sessionId: opts.sessionId } });
+      const res = await rpcCall({ method: RpcMethod.SessionInspect, params: { sessionId: opts.sessionId } });
       if (!res.ok) throw new Error(res.error?.message || 'session.inspect failed');
       if (ctx.jsonMode) {
         printJson({
@@ -74,7 +75,7 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
     .requiredOption('--session-id <id>')
     .action(async (opts) => {
       const ctx = getCtx();
-      const res = await rpcCall({ method: 'session.close', params: { sessionId: opts.sessionId } });
+      const res = await rpcCall({ method: RpcMethod.SessionClose, params: { sessionId: opts.sessionId } });
       if (!res.ok) throw new Error(res.error?.message || 'session.close failed');
       if (ctx.jsonMode) {
         printJson({
@@ -88,7 +89,7 @@ export function registerSession(program: Command, getCtx: () => AppContext): voi
 
   s.command('close-all').action(async () => {
     const ctx = getCtx();
-    const res = await rpcCall({ method: 'session.closeAll' });
+    const res = await rpcCall({ method: RpcMethod.SessionCloseAll });
     if (!res.ok) throw new Error(res.error?.message || 'session.closeAll failed');
     if (ctx.jsonMode) {
       printJson({

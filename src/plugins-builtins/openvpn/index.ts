@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
+import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 
 async function runAsync(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string; timedOut: boolean }> {
   return await new Promise((resolve) => {
@@ -53,8 +55,8 @@ const DEFAULT_CONNECT_COMMAND =
 const DEFAULT_DISCONNECT_COMMAND =
   '"/Applications/OpenVPN Connect.app/Contents/MacOS/OpenVPN Connect" --quit >/dev/null 2>&1 || true';
 
-const STATUS_TIMEOUT_MS = 1500;
-const COMMAND_TIMEOUT_MS = 3000;
+const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.plugin.openvpnStatusTimeoutMs;
+const COMMAND_TIMEOUT_MS = RUNTIME_CONSTANTS.plugin.openvpnCommandTimeoutMs;
 const POLL_INTERVAL_MS = 500;
 
 async function pollUntilConnected(statusCommand: string, deadlineAt: number): Promise<{ ok: boolean; detail: string }> {
@@ -76,7 +78,7 @@ export const openvpnPlugin: TapRootPlugin = {
     version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    accessMethods: ['native', 'qa-portforward', 'tsh'],
+    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward, AccessMethod.Tsh],
     priority: 80,
   },
 
