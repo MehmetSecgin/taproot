@@ -6,6 +6,7 @@ import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospe
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../../core/query-timeout.js';
 import { resolveCanonicalDatasource } from '../../core/resolve-datasource.js';
+import { resolveSessionTimeZone } from '../../core/session-timezone.js';
 import { str } from '../../core/strings.js';
 import { DatasourceKind, DoctorStatus } from '../../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../../types/core.js';
@@ -113,7 +114,13 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
   }
 
   phaseResolveMs = Date.now() - phaseStart;
-  const timeoutMs = parseTimeoutMs(req.params.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
+  const sessionTimeZone = resolveSessionTimeZone({
+    override: str(req.params.tz),
+    datasourceHint: datasource.resolverHints?.timeZone,
+    configDefault: ctx.runtimeConfigStore.queryTimeZone(),
+  });
+  const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
+  const timeoutMs = parseTimeoutMs(req.params.timeoutMs, timeoutDefault);
   const timeoutController = new AbortController();
   const timeoutTimer = setTimeout(() => {
     timeoutController.abort(queryTimeoutError(timeoutMs));
@@ -276,6 +283,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
               query,
               capability: capability as any,
               timeoutMs: remainingTimeoutMs(),
+              sessionTimeZone,
               pluginParams: buildPluginParams(req.params, datasource.kind),
             },
             execCreds,

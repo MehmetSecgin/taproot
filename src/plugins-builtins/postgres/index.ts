@@ -4,9 +4,15 @@ import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../.
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
+import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { nowIso } from '../../core/time.js';
 import { baseConnConfig } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
+
+function postgresTimeZone(sessionTimeZone: string | undefined): string {
+  const tz = str(sessionTimeZone).trim() || DEFAULT_SESSION_TIME_ZONE;
+  return tz === DEFAULT_SESSION_TIME_ZONE ? 'UTC' : tz;
+}
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs?: number) {
   return {
@@ -32,6 +38,7 @@ export const postgresPlugin: TapRootPlugin = {
     const client = new Client(connConfig(input.datasource, input.credentials));
     try {
       await client.connect();
+      await client.query("SELECT set_config('TimeZone', $1, false)", [postgresTimeZone(undefined)]);
       await client.query('SELECT 1 AS ok');
       return [{ check: 'postgres connect', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
     } catch (error) {
@@ -48,6 +55,7 @@ export const postgresPlugin: TapRootPlugin = {
     const client = new Client(connConfig(request.datasource, creds, request.timeoutMs));
     try {
       await client.connect();
+      await client.query("SELECT set_config('TimeZone', $1, false)", [postgresTimeZone(request.sessionTimeZone)]);
       const res = await client.query(
         request.timeoutMs ? ({ text: request.query, query_timeout: request.timeoutMs } as any) : request.query,
       );

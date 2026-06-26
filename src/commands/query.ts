@@ -46,9 +46,19 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--request-json <json>', 'gRPC plugin: request message body as JSON. Overrides --param-built payloads. Example: \'{"values":[1,2,3]}\'.')
     .option('--skip-proto-validate', 'gRPC plugin: bypass local proto schema validation of the request payload. Off by default; only use for deliberately malformed payloads (e.g. fuzzing).', false)
     .option(
-      '--timeout-ms <ms>',
-      `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
-      String(RUNTIME_CONSTANTS.query.defaultTimeoutMs),
+      '--timeout <ms>',
+      `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs}; overridable via defaults.query.timeoutMs in runtime config)`,
+    )
+    .option('--timeout-ms <ms>', 'deprecated alias for --timeout')
+    .option(
+      '--tz <offset|name>',
+      'session time zone for WHERE timestamp literals and rendered TIMESTAMP columns. Defaults to UTC (+00:00). Accepts an offset (e.g. +05:30) or IANA name (e.g. Europe/Berlin).',
+    )
+    .option(
+      '--json-extract <column:dotpath>',
+      'extract a value from a raw JSON column client-side after fetching, adding a derived "<column>.<dotpath>" column. Repeatable. Avoids engine-specific JSON SQL.',
+      (v, p: string[]) => (p || []).concat(v),
+      [],
     )
     .action(async (opts: QueryOpts) => {
       const ctx = getCtx();
@@ -57,7 +67,9 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       if (opts.sql && opts.query && opts.sql !== opts.query) {
         throw new Error('Invalid argument: pass either --query or --sql, not both with different values.');
       }
-      const timeoutMs = parseTimeoutMs(opts.timeoutMs, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
+      const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
+      const rawTimeout = opts.timeout ?? opts.timeoutMs;
+      const timeoutMs = parseTimeoutMs(rawTimeout, timeoutDefault);
       const aliases = ctx.runtimeConfigStore.serviceAliases();
       const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const alias = explicitProfile ? null : parseDatasourceAlias(opts.datasource, aliases);
@@ -75,7 +87,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const logVerbose = (msg: string): void => {
         if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
       };
-      const forceDirect = process.env.TAPROOT_FORCE_DIRECT === '1' || allowDiscovery || Boolean(opts.explain);
+      const forceDirect =
+        process.env.TAPROOT_FORCE_DIRECT === '1' ||
+        allowDiscovery ||
+        Boolean(opts.explain) ||
+        Boolean(opts.jsonExtract && opts.jsonExtract.length);
       if (opts.explain && !opts.query) {
         throw new Error('Invalid argument: --explain requires --query (raw SQL). Resolve --card/--template/--intent first, then re-run with --query and --explain.');
       }

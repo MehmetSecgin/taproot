@@ -16,6 +16,13 @@ describe('query timeout helpers', () => {
     expect(() => parseTimeoutMs('abc', 5000)).toThrow(/BAD_INPUT/);
   });
 
+  it('echoes the effective timeout and suggests narrowing the scan', () => {
+    const message = queryTimeoutError(15000).message;
+    expect(message).toContain('15000ms');
+    expect(message).toContain('--timeout');
+    expect(message).toMatch(/partition|predicate/i);
+  });
+
   it('fails fast when a query exceeds the timeout', async () => {
     await expect(
       withQueryTimeout({

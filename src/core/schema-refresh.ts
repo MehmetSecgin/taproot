@@ -4,6 +4,7 @@ import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
+import { DEFAULT_SESSION_TIME_ZONE } from './session-timezone.js';
 import { SCHEMA_METADATA_VERSION } from '../store/learning.js';
 import { loadProtobufRoot } from './proto-loader.js';
 import { describeProto } from './grpc-introspect.js';
@@ -162,6 +163,7 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
       datasource,
       query: sql,
       capability: 'executeRead',
+      sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
     },
     creds,
   );

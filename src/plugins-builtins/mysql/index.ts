@@ -4,6 +4,8 @@ import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../.
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
+import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
+import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
 import { baseConnConfig } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
@@ -13,6 +15,7 @@ function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string
     ...baseConnConfig(ds, creds, RUNTIME_CONSTANTS.defaultPorts.mysql),
     ssl: ds.connection.ssl ? {} : undefined,
     connectTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
+    timezone: 'Z',
   };
 }
 
@@ -29,6 +32,7 @@ export const mysqlPlugin: TapRootPlugin = {
   async doctor(input): Promise<DoctorCheck[]> {
     try {
       const conn = await mysql.createConnection(connConfig(input.datasource, input.credentials));
+      await conn.query('SET time_zone = ?', [DEFAULT_SESSION_TIME_ZONE]);
       await conn.query('SELECT 1 AS ok');
       await conn.end();
       return [{ check: 'mysql connect', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
@@ -43,6 +47,7 @@ export const mysqlPlugin: TapRootPlugin = {
     const start = Date.now();
     const conn = await mysql.createConnection(connConfig(request.datasource, creds));
     try {
+      await conn.query('SET time_zone = ?', [request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE]);
       const [rows, fields] = await conn.query(
         request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
       );
@@ -69,6 +74,8 @@ export const mysqlPlugin: TapRootPlugin = {
         (conn as any).destroy?.();
         throw queryTimeoutError(request.timeoutMs);
       }
+      const enriched = enrichSqlSyntaxError(message, request.query);
+      if (enriched !== message) throw new Error(enriched);
       throw error;
     } finally {
       await conn.end().catch(() => {

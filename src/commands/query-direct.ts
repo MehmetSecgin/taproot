@@ -7,7 +7,9 @@ import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/co
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from '../core/error-classification.js';
 import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, trimQueryJsonEnvelope } from '../core/output.js';
+import { applyJsonExtract, parseJsonExtractSpecs } from '../core/json-extract.js';
 import { withQueryTimeout } from '../core/query-timeout.js';
+import { resolveSessionTimeZone } from '../core/session-timezone.js';
 import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
 import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
@@ -108,6 +110,12 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
   let phaseExecuteMs = 0;
   const resolved = await resolveDirect(qenv);
   const { datasource, resolutionSource, service, warnings, phaseResolveMs } = resolved;
+  const sessionTimeZone = resolveSessionTimeZone({
+    override: opts.tz,
+    datasourceHint: datasource.resolverHints?.timeZone,
+    configDefault: ctx.runtimeConfigStore.queryTimeZone(),
+  });
+  const jsonExtractSpecs = parseJsonExtractSpecs(opts.jsonExtract);
 
   const params = parseParamPairs(opts.param || []);
   let selectedCard: QueryCard | undefined;
@@ -250,6 +258,7 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
               query: executedQuery,
               capability: capability as any,
               timeoutMs,
+              sessionTimeZone,
               pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
             },
             creds,
@@ -282,6 +291,7 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
               query: executedQuery,
               capability: capability as any,
               timeoutMs,
+              sessionTimeZone,
               pluginParams: Object.keys(pluginParams).length ? pluginParams : undefined,
             },
             creds,
@@ -342,14 +352,17 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
       : '';
     progress.succeed(`query complete (${result.result.rows.length} rows, ${result.timings.durationMs}ms)${phaseSummary}`);
 
+    const presented = jsonExtractSpecs.length
+      ? applyJsonExtract(result.result.columns || [], result.result.rows, jsonExtractSpecs)
+      : { columns: result.result.columns || [], rows: result.result.rows };
     if (ctx.jsonMode) {
-      const cols = result.result.columns || [];
+      const cols = presented.columns;
       const rowsObject = Boolean(opts.rowsObject);
       const data: Record<string, unknown> = {
         columns: cols,
         rows: rowsObject
-          ? result.result.rows
-          : result.result.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
+          ? presented.rows
+          : presented.rows.map((row) => cols.map((col) => (row as Record<string, unknown>)[col] ?? null)),
         datasource: datasource.name,
         plugin: result.plugin,
         classification: result.classification,
@@ -368,7 +381,7 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
       printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
     } else {
       console.log(`resolved via=${resolutionSource} env=${env || ''} service=${service || ''} engine=${datasource.kind} target=${str(datasource.connection.target)} database=${str(datasource.connection.database)}`);
-      console.log(renderTableSmart(result.result.rows.map((r) => rowFromArray(result.result.columns, r)), { full: Boolean(opts.full) }));
+      console.log(renderTableSmart(presented.rows.map((r) => rowFromArray(presented.columns, r)), { full: Boolean(opts.full) }));
       const directFooter = renderSchemaContextFooter(result.meta?.schemaContext);
       if (directFooter) console.log(directFooter);
       const renderedMemory = renderQueryMemoryTty(queryMemory);

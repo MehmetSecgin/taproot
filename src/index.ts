@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { buildContext, nextAction } from './core/app.js';
-import { printEnvelope } from './core/output.js';
+import { printEnvelope, printJsonStderr } from './core/output.js';
 import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerQuery } from './commands/query.js';
@@ -111,6 +111,10 @@ program.configureOutput({
   },
 });
 
+function hasPluckFlag(): boolean {
+  return process.argv.some((arg) => arg === '--pluck' || arg.startsWith('--pluck='));
+}
+
 function hasCredsTopologyMisuseHint(input: string): boolean {
   const m = input.toLowerCase();
   if (!/unknown option/.test(m)) return false;
@@ -131,12 +135,12 @@ function emitError(error: unknown, code: string): void {
       priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
         ? priorDetails
         : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
-    printEnvelope(
-      false,
-      undefined,
-      { code: classifiedCode, message, details },
-      (error as Error & { meta?: Record<string, unknown> })?.meta,
-    );
+    const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
+    if (hasPluckFlag()) {
+      printJsonStderr({ ok: false, error: { code: classifiedCode, message, details }, meta });
+      return;
+    }
+    printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
     return;
   }
   console.error(message);

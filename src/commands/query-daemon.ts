@@ -1,6 +1,6 @@
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { exitCodeForClass } from '../core/exit-codes.js';
-import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, respondErr, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
+import { printJsonPluck, printJsonStderr, renderSchemaContextFooter, renderTableSmart, respondErr, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
 import { renderQueryMemoryTty } from '../core/query-memory.js';
 import { str } from '../core/strings.js';
 import { rpcCall } from '../daemon/client.js';
@@ -31,6 +31,7 @@ export async function runDaemonQuery(env: QueryEnv): Promise<DaemonOutcome> {
         allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
         rowsObject: Boolean(opts.rowsObject),
         timeoutMs,
+        tz: opts.tz,
         param: opts.param || [],
         proto: opts.proto,
         protoRoot: opts.protoRoot,
@@ -71,7 +72,12 @@ export async function runDaemonQuery(env: QueryEnv): Promise<DaemonOutcome> {
     const code = rpc.error?.code || 'GENERIC';
     const message = rpc.error?.message || 'daemon query failed';
     if (ctx.jsonMode) {
-      respondErr(code, message, rpc.error?.details, { ...(rpc.meta || {}), requestId: rpc.requestId });
+      const meta = { ...(rpc.meta || {}), requestId: rpc.requestId };
+      if (opts.pluck) {
+        printJsonStderr({ ok: false, error: { code, message, details: rpc.error?.details }, meta });
+      } else {
+        respondErr(code, message, rpc.error?.details, meta);
+      }
       process.exitCode = exitCodeForClass(code);
       return 'handled';
     }

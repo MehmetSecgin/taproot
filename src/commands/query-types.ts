@@ -26,7 +26,10 @@ export interface QueryOpts {
   allowFlush?: boolean;
   requestJson?: string;
   skipProtoValidate?: boolean;
+  timeout?: string;
   timeoutMs?: string;
+  tz?: string;
+  jsonExtract?: string[];
 }
 
 export interface QueryEnv {

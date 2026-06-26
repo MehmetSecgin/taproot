@@ -4,6 +4,8 @@ import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
+import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
+import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { QueryResult, TapRootPlugin } from '../../types/core.js';
@@ -26,6 +28,11 @@ let globalCleanupRegistered = false;
 
 function proxyKey(sessionId: string, target: string, user: string, database: string): string {
   return `${sessionId}|${target}|${user}|${database}`;
+}
+
+function resolveDbUser(ds: { resolverHints?: Record<string, string> }, creds: Record<string, string>): string {
+  const hints = ds.resolverHints || {};
+  return str(creds.dbUser || creds.user || hints.dbUser || hints.user).trim();
 }
 
 function ensureGlobalCleanup(): void {
@@ -219,7 +226,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
 
   async doctor(input) {
     const target = input.datasource.connection.target;
-    const user = input.credentials.dbUser || input.credentials.user;
+    const user = resolveDbUser(input.datasource, input.credentials);
     const database = input.datasource.connection.database;
     if (!target || !user || !database) {
       const detail = 'missing target/dbUser/database in datasource+credentials';
@@ -250,18 +257,25 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const target = request.datasource.connection.target;
-    const user = creds.dbUser || creds.user;
+    const user = resolveDbUser(request.datasource, creds);
     const database = request.datasource.connection.database;
     const sessionId = str(creds.__sessionId).trim();
     if (!target || !user || !database) {
-      throw new Error('teleport-mysql requires target, dbUser/user, and database');
+      const missing = [!target && 'target', !user && 'dbUser/user', !database && 'database'].filter(Boolean).join(', ');
+      throw new Error(
+        `teleport-mysql is missing ${missing} for datasource '${request.datasource.name}'. ` +
+          `Set the db user with 'taproot creds set --ref ${request.datasource.credentialRef} --db-user <user>' ` +
+          `or repair routing with 'taproot datasource resolve --env ${str(request.datasource.env)} --service ${str(request.datasource.service)}'.`,
+      );
     }
 
     const warnings: string[] = [];
     const effectiveSessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
     const shouldCleanup = !sessionId;
+    let proxyReady = false;
     try {
       const proxy = await ensureProxy(effectiveSessionId, String(target), String(user), String(database));
+      proxyReady = true;
       const conn = await mysql.createConnection({
         host: '127.0.0.1',
         port: proxy.port,
@@ -270,6 +284,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         database: String(database),
       });
       try {
+        await conn.query('SET time_zone = ?', [request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE]);
         const [rows, fields] = await conn.query(
           request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
         );
@@ -292,6 +307,8 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           (conn as any).destroy?.();
           throw queryTimeoutError(request.timeoutMs);
         }
+        const enriched = enrichSqlSyntaxError(message, request.query);
+        if (enriched !== message) throw new Error(enriched);
         throw error;
       } finally {
         await conn.end().catch(() => {
@@ -299,7 +316,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         });
       }
     } catch (proxyError) {
-      if (str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {
+      if (proxyReady || str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {
         throw proxyError;
       }
       throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);

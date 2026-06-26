@@ -105,6 +105,10 @@ export interface RuntimeConfig {
     json?: boolean;
     noColor?: boolean;
     noAnimations?: boolean;
+    query?: {
+      timeoutMs?: number;
+      timeZone?: string;
+    };
     learning?: {
       enabled?: boolean;
       sampleRowsMax?: number;
@@ -140,6 +144,7 @@ export interface QueryRequest {
   query: string;
   capability: 'executeRead' | 'executeMutate';
   timeoutMs?: number;
+  sessionTimeZone: string;
   pluginParams?: Record<string, unknown>;
 }
 

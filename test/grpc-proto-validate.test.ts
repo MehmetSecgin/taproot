@@ -157,6 +157,7 @@ describe('grpcPlugin proto pre-flight validation', () => {
       query: 'taproot.test.ItemService/GetItem',
       capability: 'executeRead',
       timeoutMs: 5000,
+      sessionTimeZone: '+00:00',
       pluginParams: {
         protoRoot: opts.protoRoot,
         requestJson: opts.requestJson,

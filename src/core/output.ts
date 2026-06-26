@@ -58,6 +58,10 @@ export function printJson(data: unknown): void {
   process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 }
 
+export function printJsonStderr(data: unknown): void {
+  process.stderr.write(`${JSON.stringify(data, null, 2)}\n`);
+}
+
 export function pluckPath(obj: unknown, path: string): unknown {
   const trimmed = str(path).trim();
   if (!trimmed) return obj;

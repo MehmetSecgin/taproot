@@ -251,6 +251,40 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 
 ---
 
+## Query semantics
+
+### Time zones (UTC by default)
+
+For MySQL/TiDB/Postgres datasources TapRoot runs `SET time_zone = '+00:00'` (Postgres: `TimeZone = UTC`) on every connection. This means **`WHERE` timestamp literals are interpreted as UTC** and `TIMESTAMP`/`DATETIME` columns render as UTC (matching the default `--datetime-format iso`). Literal interpretation and display therefore agree on the same absolute instant:
+
+```bash
+# both the literals and the rendered rows are UTC
+taproot --json query --datasource prod-orders \
+  --query "SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-06-24 17:00:00' AND '2026-06-24 17:05:00'"
+```
+
+Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` or an IANA name like `Europe/Berlin`), or per-datasource via `resolverHints.timeZone`, or globally via `defaults.query.timeZone` in runtime config. Resolution order: `--tz` > datasource hint > config default > UTC.
+
+### Query timeout
+
+Queries abort after `--timeout <ms>` (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate). `--timeout-ms` is a deprecated alias.
+
+### Extracting JSON without engine-specific SQL
+
+Prefer selecting raw JSON columns and extracting client-side with `--json-extract <column>:<dotpath>` (repeatable). It parses the raw JSON cell after fetching and adds a derived `<column>.<dotpath>` column, avoiding hand-written engine JSON functions:
+
+```bash
+taproot --json query --datasource prod-orders \
+  --query "SELECT id, payload FROM orders LIMIT 5" \
+  --json-extract payload:order.status --json-extract payload:order.total
+```
+
+### Failures under `--pluck`
+
+When a query fails, `--pluck` does **not** emit a success-shaped value on stdout. The error envelope is written to stderr and the process exits non-zero, so a failure can never be mistaken for an empty result by a downstream `data.rows` consumer.
+
+---
+
 ## Environment variables
 
 | Variable | Purpose | Default |
@@ -263,6 +297,7 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |
 | `TAPROOT_QA_LOCAL_PORT` | Default local port for `qa-portforward` | `4406` |
 | `TAPROOT_DATETIME_FORMAT` | Render Date columns as `iso` / `js` / `epoch` | `iso` |
+| `TAPROOT_QUERY_TIMEOUT_MS` | Default query statement timeout (ms). Override per-query with `--timeout`, or globally via `defaults.query.timeoutMs` in runtime config. | `15000` |
 | `TAPROOT_LOG_LEVEL` | pino log level | `info` |
 | `TAPROOT_ALLOW_SCHEMA_INTROSPECTION` | Allow heavy introspection queries | unset (gated) |
 | `TAPROOT_ALLOW_PARTITION_SCAN` | Allow partition scans | unset (gated) |

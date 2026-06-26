@@ -27,7 +27,7 @@ export const RUNTIME_CONSTANTS = {
     requestTimeoutMs: 30 * 1000,
   },
   query: {
-    defaultTimeoutMs: intFromEnv('TAPROOT_QUERY_TIMEOUT_MS', 5 * 1000),
+    defaultTimeoutMs: intFromEnv('TAPROOT_QUERY_TIMEOUT_MS', 15 * 1000),
   },
   connector: {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),

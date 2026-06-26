@@ -57,4 +57,68 @@ describe('teleport mysql execution', () => {
     expect(out.stderr).not.toContain('tsh db exec');
     expect(out.stderr).not.toContain('fallback');
   });
+
+  it('resolves dbUser from datasource resolverHints when credentials lack one', () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-hint-'));
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'prod-orders',
+          kind: 'teleport-mysql',
+          env: 'prod',
+          service: 'orders',
+          tags: [],
+          connection: { target: 'orders-tidb', database: 'orders' },
+          credentialRef: 'prod:orders',
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: { dbUser: 'reader' },
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
+    const out = runCli(
+      ['query', '--datasource', 'prod-orders', '--query', 'SELECT 1 AS ok'],
+      { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: '' },
+    );
+    expect(out.stderr).toContain('teleport proxy path unavailable');
+    expect(out.stderr).not.toMatch(/missing .*dbUser/);
+  });
+
+  it('names a remedy when dbUser is missing everywhere', () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-nouser-'));
+    const configDir = path.join(stateRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'datasources.json'),
+      JSON.stringify([
+        {
+          name: 'prod-orders',
+          kind: 'teleport-mysql',
+          env: 'prod',
+          service: 'orders',
+          tags: [],
+          connection: { target: 'orders-tidb', database: 'orders' },
+          credentialRef: 'prod:orders',
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: {},
+          updatedAt: new Date().toISOString(),
+          confidence: 0.9,
+        },
+      ]),
+    );
+    fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
+    const out = runCli(
+      ['query', '--datasource', 'prod-orders', '--query', 'SELECT 1 AS ok'],
+      { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1' },
+    );
+    expect(out.status).not.toBe(0);
+    expect(out.stderr).toMatch(/creds set --ref prod:orders --db-user|datasource resolve/);
+  });
 });

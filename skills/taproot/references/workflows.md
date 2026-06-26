@@ -106,8 +106,8 @@ taproot --json query --env <env> --service <service> --allow-discovery --query "
 
 - Query timeout:
 ```bash
-# default is 5000ms; raise only when a slower query is intentional
-taproot --json query --datasource <name> --timeout-ms 5000 --query "SELECT 1 AS ok"
+# default is 15000ms; raise only when a slower query is intentional
+taproot --json query --datasource <name> --timeout 30000 --query "SELECT 1 AS ok"
 ```
 
 - Redis / Dragonfly read commands:

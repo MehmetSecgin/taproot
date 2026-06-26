@@ -172,6 +172,7 @@ function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
       resolverHints: {
         openvpnCredentialRef: 'vpn:work',
         teleportCredentialRef: tshRef,
+        ...(c.dbUser ? { dbUser: c.dbUser } : {}),
       },
       updatedAt: nowIso(),
       confidence: c.confidence,

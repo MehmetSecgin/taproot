@@ -1,7 +1,11 @@
 import { badInput, queryTimeoutErr } from './error-classification.js';
 
 export function queryTimeoutError(timeoutMs: number): Error {
-  return queryTimeoutErr(`query exceeded timeout (${timeoutMs}ms) and was aborted.`);
+  return queryTimeoutErr(
+    `query exceeded timeout (${timeoutMs}ms) and was aborted. ` +
+      `Raise the limit with --timeout <ms> (or defaults.query.timeoutMs in runtime config), ` +
+      `or narrow the scan by adding a partition/time predicate.`,
+  );
 }
 
 export function parseTimeoutMs(value: unknown, fallbackMs: number): number {

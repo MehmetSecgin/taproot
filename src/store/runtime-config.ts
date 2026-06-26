@@ -59,4 +59,14 @@ export class RuntimeConfigStore {
   serviceAliases(): Record<string, string> {
     return this.get().serviceAliases || {};
   }
+
+  queryTimeoutMs(): number | undefined {
+    const value = this.get().defaults?.query?.timeoutMs;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
+  }
+
+  queryTimeZone(): string | undefined {
+    const value = str(this.get().defaults?.query?.timeZone).trim();
+    return value || undefined;
+  }
 }
