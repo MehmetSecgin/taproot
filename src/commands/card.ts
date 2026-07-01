@@ -159,7 +159,6 @@ export function registerCard(program: Command, getCtx: () => AppContext): void {
         console.log(result.yaml);
       } else {
         console.log(`Saved card '${result.card.id}' -> ${result.path}`);
-        console.log(`Next: 'taproot idea cards sync' to push to your IDEA project.`);
       }
     });
 

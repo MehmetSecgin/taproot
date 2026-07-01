@@ -21,7 +21,6 @@ import { registerInit } from './commands/init.js';
 import { registerCard } from './commands/card.js';
 import { registerRun } from './commands/run.js';
 import { registerBench } from './commands/bench.js';
-import { registerIdea } from './commands/idea.js';
 import { registerDiscover } from './commands/discover.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
@@ -103,7 +102,6 @@ registerInit(program, context);
 registerCard(program, context);
 registerRun(program, context);
 registerBench(program, context);
-registerIdea(program, context);
 registerDiscover(program, context);
 registerGrpc(program, context);
 

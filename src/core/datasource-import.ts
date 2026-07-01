@@ -3,18 +3,6 @@ import { DatasourceProfileSchema } from '../store/schemas.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { nowIso } from './time.js';
 
-export interface IdeaDatasource {
-  name: string;
-  kind: string;
-  connection: { host?: string; port?: number; database?: string };
-}
-
-export interface ImportEntryResult {
-  name: string;
-  ok: boolean;
-  error?: string;
-}
-
 export function extractImportArray(parsed: unknown): unknown[] {
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
@@ -55,42 +43,4 @@ export function validateImportedProfile(raw: unknown, defaults: { credentialRef?
   const parsed = DatasourceProfileSchema.safeParse(normalized);
   if (!parsed.success) return { ok: false, error: firstZodError(parsed.error) };
   return { ok: true, profile: parsed.data as DatasourceProfile };
-}
-
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
-}
-
-function sanitizeName(name: string): string {
-  return name.trim().replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
-}
-
-function parseJdbcUrl(url: string): IdeaDatasource['connection'] & { kind: string } | null {
-  const match = url.match(/^jdbc:(mysql|postgresql|tidb):\/\/([^/:?]+)(?::(\d+))?(?:\/([^?]+))?/i);
-  if (!match) return null;
-  const engine = match[1].toLowerCase();
-  return {
-    kind: engine === 'postgresql' ? 'postgres' : 'mysql',
-    host: match[2] || undefined,
-    port: match[3] ? Number(match[3]) : undefined,
-    database: match[4] || undefined,
-  };
-}
-
-export function parseIdeaDataSources(xml: string): IdeaDatasource[] {
-  const out: IdeaDatasource[] = [];
-  const blockRe = /<data-source\b[^>]*\bname="([^"]+)"[\s\S]*?<jdbc-url>([^<]+)<\/jdbc-url>[\s\S]*?<\/data-source>/g;
-  let match: RegExpExecArray | null;
-  while ((match = blockRe.exec(xml)) !== null) {
-    const parsed = parseJdbcUrl(decodeXmlEntities(match[2]));
-    if (!parsed) continue;
-    const { kind, host, port, database } = parsed;
-    out.push({ name: sanitizeName(match[1]), kind, connection: { host, port, database } });
-  }
-  return out;
 }

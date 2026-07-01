@@ -5,7 +5,7 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasou
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson, printEnvelope, printEnvelopePluck } from '../core/output.js';
-import { extractImportArray, parseIdeaDataSources, validateImportedProfile } from '../core/datasource-import.js';
+import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
 import { DoctorStatus } from '../types/core.js';
 import type { Capability } from '../types/core.js';
 import { str } from '../core/strings.js';
@@ -270,23 +270,14 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     });
 
   ds.command('import')
-    .description('Bulk-add datasource profiles from a JSON file or an IntelliJ dataSources.xml')
+    .description('Bulk-add datasource profiles from a JSON file')
     .option('--file <path>', 'JSON array of profiles, or an object with a data/datasources array')
-    .option('--from-idea <path>', 'IntelliJ .idea/dataSources.xml to import connection profiles from')
     .option('--credential-ref <ref>', 'credentialRef applied to imported profiles that lack one')
     .option('--dry-run', 'validate and report without saving', false)
     .action((opts) => {
       const ctx = getCtx();
-      if (!opts.file && !opts.fromIdea) throw new Error('Specify --file <path> or --from-idea <path>.');
-      if (opts.file && opts.fromIdea) throw new Error('Specify only one of --file or --from-idea.');
-      if (opts.fromIdea && !opts.credentialRef) throw new Error('--from-idea requires --credential-ref to apply to imported profiles.');
-
-      let candidates: unknown[];
-      if (opts.file) {
-        candidates = extractImportArray(JSON.parse(fs.readFileSync(String(opts.file), 'utf8')));
-      } else {
-        candidates = parseIdeaDataSources(fs.readFileSync(String(opts.fromIdea), 'utf8'));
-      }
+      if (!opts.file) throw new Error('Specify --file <path>.');
+      const candidates = extractImportArray(JSON.parse(fs.readFileSync(String(opts.file), 'utf8')));
 
       const imported: string[] = [];
       const failed: Array<{ name: string; error: string }> = [];

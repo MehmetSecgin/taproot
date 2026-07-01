@@ -48,7 +48,7 @@ Legend:
 | `self-check` | P | L | `--agent` for machine-readable readiness states. Target-aware via `--datasource` / `--env`+`--service`. |
 | `doctor` | P | L+pluck | Pre-flight diagnostics. Structured `nextActionDetails` in plumbing mode. |
 | `query` | P | L | Primary execution path. Daemon-routed includes `meta.requestId`, `meta.runId`, `meta.sessionId`. |
-| `datasource list/show/add/remove/resolve/import/export` | P | L+pluck | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import` accepts `--file` or `--from-idea`; `export` round-trips with `import --file`. |
+| `datasource list/show/add/remove/resolve/import/export` | P | L+pluck | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import --file` bulk-adds profiles; `export` round-trips with it. |
 | `kb resolve-* / tables / related / list-services` | P | L+pluck | Knowledge-base resolvers; safe-by-default read paths. |
 | `learn status/schema/tables/joins/shapes/ensure-schema/refresh-schema` | P | L+pluck | Learning cache inspection and maintenance. |
 | `template list/validate/run/save` | P | L | `template run` resolves a saved template into a query payload. |

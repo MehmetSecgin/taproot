@@ -90,45 +90,4 @@ describe('datasource export / import', () => {
     expect(result.imported).toEqual(['svc-x']);
     expect(runCli(['--json', 'datasource', 'show', '--name', 'svc-x'], env).status).toBe(0);
   });
-
-  it('imports connection profiles from an IntelliJ dataSources.xml', () => {
-    // arrange
-    const { stateRoot, env } = setupState();
-    const xml = [
-      '<?xml version="1.0" encoding="UTF-8"?>',
-      '<project version="4">',
-      '  <component name="DataSourceManagerImpl" format="xml" multifile-model="true">',
-      '    <data-source source="LOCAL" name="qa.orders" group="qa" uuid="u1">',
-      '      <jdbc-url>jdbc:mysql://db-host.local:3306/ordersdb?useSSL=false</jdbc-url>',
-      '    </data-source>',
-      '  </component>',
-      '</project>',
-    ].join('\n');
-    const xmlFile = path.join(stateRoot, 'dataSources.xml');
-    fs.writeFileSync(xmlFile, xml);
-
-    // act
-    const imported = runCli(['--json', 'datasource', 'import', '--from-idea', xmlFile, '--credential-ref', 'db:qa'], env);
-
-    // assert
-    expect(imported.status).toBe(0);
-    expect(JSON.parse(imported.stdout).data.imported).toEqual(['qa-orders']);
-    const shown = JSON.parse(runCli(['--json', 'datasource', 'show', '--name', 'qa-orders'], env).stdout).data;
-    expect(shown.connection).toMatchObject({ host: 'db-host.local', port: 3306, database: 'ordersdb' });
-    expect(shown.credentialRef).toBe('db:qa');
-  });
-
-  it('--from-idea requires --credential-ref', () => {
-    // arrange
-    const { stateRoot, env } = setupState();
-    const xmlFile = path.join(stateRoot, 'empty.xml');
-    fs.writeFileSync(xmlFile, '<project/>');
-
-    // act
-    const out = runCli(['datasource', 'import', '--from-idea', xmlFile], env);
-
-    // assert
-    expect(out.status).not.toBe(0);
-    expect(out.stderr + out.stdout).toContain('--credential-ref');
-  });
 });
