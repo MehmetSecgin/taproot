@@ -67,6 +67,7 @@ function makeContext(input?: { datasources?: any[]; aliasMap?: Record<string, st
     paths: {
       stateRoot: root,
       configDir,
+      configSnapshotsDir: path.join(root, 'config-snapshots'),
       runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
       datasourceFile: path.join(configDir, 'datasources.json'),
       credentialFile: path.join(configDir, 'credentials.json.enc'),

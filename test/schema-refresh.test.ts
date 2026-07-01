@@ -58,6 +58,7 @@ function makeContext(): AppContext {
     paths: {
       stateRoot: learningDir,
       configDir: learningDir,
+      configSnapshotsDir: path.join(learningDir, 'config-snapshots'),
       runtimeConfigFile: path.join(learningDir, 'deterministic-config.json'),
       datasourceFile: path.join(learningDir, 'datasources.json'),
       credentialFile: path.join(learningDir, 'credentials.json.enc'),
