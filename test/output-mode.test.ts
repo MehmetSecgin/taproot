@@ -72,7 +72,7 @@ describe('output mode contract', () => {
     const out = runCli(['--json', 'datasource', 'show', '--name', 'qa-orders'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
-    expect(parsed.name).toBe('qa-orders');
+    expect(parsed.data.name).toBe('qa-orders');
   });
 
   it('shows template run result in human-readable mode by default', () => {

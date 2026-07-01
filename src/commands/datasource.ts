@@ -1,9 +1,11 @@
+import fs from 'node:fs';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
+import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { nowIso } from '../core/time.js';
-import { renderRecord, renderTable, printJson, printJsonPluck } from '../core/output.js';
+import { renderRecord, renderTable, printJson, printEnvelope, printEnvelopePluck } from '../core/output.js';
+import { extractImportArray, parseIdeaDataSources, validateImportedProfile } from '../core/datasource-import.js';
 import { DoctorStatus } from '../types/core.js';
 import type { Capability } from '../types/core.js';
 import { str } from '../core/strings.js';
@@ -64,7 +66,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           || String(a.service).localeCompare(String(b.service))
           || String(a.name).localeCompare(String(b.name)),
         );
-      if (ctx.jsonMode) printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      if (ctx.jsonMode) printEnvelopePluck(rows, opts.pluck ? String(opts.pluck) : undefined);
       else console.log(renderTable(rows));
     });
 
@@ -75,7 +77,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     const ctx = getCtx();
     const item = ctx.datasourceStore.get(opts.name);
     if (!item) throw new Error(`Datasource not found: ${opts.name}`);
-    if (ctx.jsonMode) printJsonPluck(item, opts.pluck ? String(opts.pluck) : undefined);
+    if (ctx.jsonMode) printEnvelopePluck(item, opts.pluck ? String(opts.pluck) : undefined);
     else {
       console.log(renderRecord({
         name: item.name,
@@ -102,7 +104,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     const ctx = getCtx();
     const ok = ctx.datasourceStore.remove(opts.name);
     if (!ok) throw new Error(`Datasource not found: ${opts.name}`);
-    if (ctx.jsonMode) printJson({ removed: true, name: opts.name });
+    if (ctx.jsonMode) printEnvelope(true, { removed: true, name: opts.name });
     else console.log(`Removed datasource ${opts.name}`);
   });
 
@@ -168,6 +170,18 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           throw new Error(`PROBE_UNSUPPORTED: plugin '${saved.kind}' does not implement doctor(); cannot probe.`);
         }
         try {
+          const connectorChecks = await runDatasourceConnectors({
+            datasource: saved,
+            credentialStore: ctx.credentialStore,
+            pluginRegistry: ctx.pluginRegistry,
+            mode: 'connect',
+          });
+          const connectorFailures = connectorChecks.filter((c) => c.status === DoctorStatus.Fail);
+          if (connectorFailures.length) {
+            if (!existed) ctx.datasourceStore.remove(saved.name);
+            const detail = connectorFailures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
+            throw new Error(`PROBE_FAILED: profile rolled back. ${detail}`);
+          }
           const creds = await ctx.credentialStore.get(saved.credentialRef);
           const checks = await plugin.doctor({ datasource: saved, credentials: creds });
           const failures = checks.filter((c) => c.status === DoctorStatus.Fail);
@@ -176,9 +190,10 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
             const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
             throw new Error(`PROBE_FAILED: profile rolled back. ${detail}`);
           }
-          if (ctx.jsonMode) printJson({ ...saved, probe: { ok: true, checks } });
+          const allChecks = [...connectorChecks, ...checks];
+          if (ctx.jsonMode) printEnvelope(true, { ...saved, probe: { ok: true, checks: allChecks } });
           else {
-            console.log(`Saved datasource ${saved.name} (probe ok: ${checks.map((c) => c.check).join(', ')})`);
+            console.log(`Saved datasource ${saved.name} (probe ok: ${allChecks.map((c) => c.check).join(', ')})`);
           }
           return;
         } catch (err) {
@@ -188,7 +203,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           throw new Error(`PROBE_FAILED: profile rolled back. ${message}`);
         }
       }
-      if (ctx.jsonMode) printJson(saved);
+      if (ctx.jsonMode) printEnvelope(true, saved);
       else console.log(`Saved datasource ${saved.name}`);
     });
 
@@ -202,7 +217,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const namespace = normalizeNamespace(opts.namespace);
       const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
       if (fromStore) {
-        if (ctx.jsonMode) printJson({ source: 'datasource-store', profile: fromStore });
+        if (ctx.jsonMode) printEnvelope(true, { source: 'datasource-store', profile: fromStore });
         else {
           console.log(`source: datasource-store`);
           console.log(renderRecord({
@@ -227,7 +242,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         confidence: 0.85,
       });
       if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
-      if (ctx.jsonMode) printJson({ source: 'kb', profile });
+      if (ctx.jsonMode) printEnvelope(true, { source: 'kb', profile });
       else {
         console.log(`source: kb`);
         console.log(renderRecord({
@@ -241,6 +256,55 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           database: profile.connection?.database || '',
           target: profile.connection?.target || '',
         }));
+      }
+    });
+
+  ds.command('export')
+    .description('Emit all datasource profiles as JSON (round-trips with `datasource import --file`)')
+    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope')
+    .action((opts) => {
+      const ctx = getCtx();
+      const all = ctx.datasourceStore.list();
+      if (ctx.jsonMode) printEnvelopePluck(all, opts.pluck ? String(opts.pluck) : undefined);
+      else printJson(all);
+    });
+
+  ds.command('import')
+    .description('Bulk-add datasource profiles from a JSON file or an IntelliJ dataSources.xml')
+    .option('--file <path>', 'JSON array of profiles, or an object with a data/datasources array')
+    .option('--from-idea <path>', 'IntelliJ .idea/dataSources.xml to import connection profiles from')
+    .option('--credential-ref <ref>', 'credentialRef applied to imported profiles that lack one')
+    .option('--dry-run', 'validate and report without saving', false)
+    .action((opts) => {
+      const ctx = getCtx();
+      if (!opts.file && !opts.fromIdea) throw new Error('Specify --file <path> or --from-idea <path>.');
+      if (opts.file && opts.fromIdea) throw new Error('Specify only one of --file or --from-idea.');
+      if (opts.fromIdea && !opts.credentialRef) throw new Error('--from-idea requires --credential-ref to apply to imported profiles.');
+
+      let candidates: unknown[];
+      if (opts.file) {
+        candidates = extractImportArray(JSON.parse(fs.readFileSync(String(opts.file), 'utf8')));
+      } else {
+        candidates = parseIdeaDataSources(fs.readFileSync(String(opts.fromIdea), 'utf8'));
+      }
+
+      const imported: string[] = [];
+      const failed: Array<{ name: string; error: string }> = [];
+      for (const raw of candidates) {
+        const result = validateImportedProfile(raw, { credentialRef: opts.credentialRef ? String(opts.credentialRef) : undefined });
+        if (!result.ok) {
+          failed.push({ name: str((raw as Record<string, unknown>)?.name) || '(unknown)', error: result.error });
+          continue;
+        }
+        if (!opts.dryRun) ctx.datasourceStore.save(result.profile);
+        imported.push(result.profile.name);
+      }
+
+      const payload = { total: candidates.length, imported, failed, dryRun: Boolean(opts.dryRun) };
+      if (ctx.jsonMode) printEnvelope(payload.failed.length === 0, payload);
+      else {
+        console.log(`${opts.dryRun ? 'validated' : 'imported'} ${imported.length}/${candidates.length} profile(s)${failed.length ? `, ${failed.length} failed` : ''}`);
+        for (const f of failed) console.log(`  FAIL ${f.name}: ${f.error}`);
       }
     });
 }

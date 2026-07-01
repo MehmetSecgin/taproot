@@ -128,6 +128,31 @@ async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
   }
 }
 
+const AUTH_REQUIRED_KINDS = new Set(['mysql', 'postgres', 'teleport-mysql', 'teleport-postgres']);
+
+async function credentialRefsCheck(ctx: AppContext): Promise<ReadinessCheck> {
+  const refToDatasources = new Map<string, string[]>();
+  for (const d of ctx.datasourceStore.list()) {
+    if (!AUTH_REQUIRED_KINDS.has(d.kind)) continue;
+    const ref = str(d.credentialRef).trim();
+    if (!ref) continue;
+    if (!refToDatasources.has(ref)) refToDatasources.set(ref, []);
+    refToDatasources.get(ref)!.push(d.name);
+  }
+  const dangling: string[] = [];
+  for (const [ref, names] of refToDatasources) {
+    const creds = await ctx.credentialStore.get(ref);
+    if (!Object.keys(creds).length) dangling.push(`${ref} (${names.length} datasource(s))`);
+  }
+  return {
+    check: 'credential_refs',
+    status: dangling.length ? DoctorStatus.Warn : DoctorStatus.Ok,
+    detail: dangling.length
+      ? `referenced but not set: ${dangling.join('; ')} — set with \`taproot creds set --ref <ref>\``
+      : 'all referenced credential refs resolve',
+  };
+}
+
 export function computeReadiness(checks: ReadinessCheck[]): ReadinessState {
   const byName = new Map(checks.map((check) => [check.check, check]));
   if ((byName.get('kb_dir')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_kb';
@@ -388,6 +413,7 @@ export async function collectReadinessSnapshot(
       status: fs.existsSync(ctx.paths.credentialFile) ? DoctorStatus.Ok : DoctorStatus.Fail,
       detail: ctx.paths.credentialFile,
     },
+    await credentialRefsCheck(ctx),
     await daemonCheck(ctx),
   ];
 
