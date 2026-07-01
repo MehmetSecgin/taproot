@@ -5,6 +5,7 @@ import path from 'node:path';
 export interface Paths {
   stateRoot: string;
   configDir: string;
+  configSnapshotsDir: string;
   runtimeConfigFile: string;
   datasourceFile: string;
   credentialFile: string;
@@ -37,6 +38,7 @@ function buildPaths(stateRoot: string, kbDir: string): Paths {
   return {
     stateRoot,
     configDir,
+    configSnapshotsDir: path.join(stateRoot, 'config-snapshots'),
     runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),

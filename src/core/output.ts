@@ -121,6 +121,10 @@ export function printJsonPluck(data: unknown, path?: string): void {
   printJson(pluckPath(data, path));
 }
 
+export function printEnvelopePluck(data: unknown, path?: string): void {
+  printJsonPluck({ ok: true, data }, path);
+}
+
 export function printEnvelope(
   ok: boolean,
   data: unknown,
