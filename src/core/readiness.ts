@@ -110,7 +110,11 @@ function kbCheck(ctx: AppContext): ReadinessCheck {
   if (kbDirExists) {
     return { check: 'kb_dir', status: DoctorStatus.Warn, detail: `${ctx.paths.kbDir} (services.json missing)` };
   }
-  return { check: 'kb_dir', status: DoctorStatus.Fail, detail: `${ctx.paths.kbDir} (directory missing)` };
+  return {
+    check: 'kb_dir',
+    status: DoctorStatus.Warn,
+    detail: `${ctx.paths.kbDir} (not set up; optional, only needed for KB-backed env/service routing)`,
+  };
 }
 
 async function daemonCheck(ctx: AppContext): Promise<ReadinessCheck> {
@@ -223,9 +227,9 @@ export function nextActionDetailsForReadiness(
     case 'missing_kb':
       add(
         actionForReadiness({
-          command: 'taproot --json init',
+          command: 'export TAPROOT_KB_DIR=<dir>',
           priority: READINESS_ACTION_PRIORITIES.kbSetup,
-          reason: 'TapRoot cannot find the KB, so set TAPROOT_KB_DIR (or --kb-dir) to your KB directory and re-run init.',
+          reason: 'No KB is configured. The KB is optional and only powers env/service routing, so skip this and run `taproot datasource add` if you address datasources by name.',
           checks: ['kb_dir'],
         }),
       );
@@ -405,13 +409,17 @@ export async function collectReadinessSnapshot(
     configCheck(ctx, Boolean(input?.createdConfig)),
     {
       check: 'datasources',
-      status: datasources.length > 0 ? DoctorStatus.Ok : DoctorStatus.Fail,
-      detail: `${datasources.length} datasource profile(s)`,
+      status: datasources.length > 0 ? DoctorStatus.Ok : DoctorStatus.Warn,
+      detail: datasources.length > 0
+        ? `${datasources.length} datasource profile(s)`
+        : 'none yet; add one with `taproot datasource add`',
     },
     {
       check: 'credentials',
-      status: fs.existsSync(ctx.paths.credentialFile) ? DoctorStatus.Ok : DoctorStatus.Fail,
-      detail: ctx.paths.credentialFile,
+      status: fs.existsSync(ctx.paths.credentialFile) ? DoctorStatus.Ok : DoctorStatus.Warn,
+      detail: fs.existsSync(ctx.paths.credentialFile)
+        ? ctx.paths.credentialFile
+        : `${ctx.paths.credentialFile} (created on first \`taproot creds set\`)`,
     },
     await credentialRefsCheck(ctx),
     await daemonCheck(ctx),

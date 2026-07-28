@@ -30,7 +30,7 @@ v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector a
 - `kubectl` — for `qa-portforward` connector
 - `tsh` (Teleport client) — for `teleport`/`teleport-mysql` datasources
 - `openvpn3` or `openvpn` — for `openvpn` connector
-- OS keychain (macOS Keychain / libsecret on Linux) — picked up automatically via the optional `keytar` dependency. If `keytar` fails to build, credentials fall back to an encrypted file in `~/.taproot/config/`.
+- OS keychain (macOS Keychain / libsecret on Linux) — picked up automatically via the optional `keytar` dependency. If `keytar` fails to build, credentials fall back to an encrypted file in `~/.taproot/config/`. On npm versions that gate install scripts, `npm ci` prints `allow-scripts` warnings and skips building `keytar`, so the fallback file is used. That is a supported setup; to use the OS keychain instead, run `npm approve-scripts keytar` and reinstall.
 
 ### 2. Install from source
 
@@ -45,7 +45,7 @@ npm link            # puts `taproot` and `taprootd` on your PATH
 Verify:
 
 ```bash
-taproot --version   # 0.6.0
+taproot --version   # prints the installed version
 ```
 
 > No npm registry release yet. `npm link` is the supported install path.
