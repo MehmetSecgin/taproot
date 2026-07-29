@@ -107,6 +107,116 @@ describe('init command', () => {
     expect(parsed.readiness).toBe('missing_kb');
   });
 
+  it('emits an ordered, runnable setup chain when nothing is configured', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+
+    // act
+    const out = runCli(['--json', 'init'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+
+    // assert
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.checks.every((check: any) => check.status !== 'fail')).toBe(true);
+    const commands: string[] = parsed.nextActionDetails.map((action: any) => action.command);
+    expect(commands[0]).toBe(
+      'taproot datasource add --name <name> --kind mysql --env <env> --service <service> --host <host> --port 3306 --database <db> --credential-ref <name>',
+    );
+    expect(commands.indexOf('taproot creds set --ref <ref> --user <user> --password <password>')).toBeGreaterThan(0);
+    expect(commands.indexOf('taproot doctor --datasource <name>')).toBeGreaterThan(
+      commands.indexOf('taproot creds set --ref <ref> --user <user> --password <password>'),
+    );
+    expect(commands.some((command) => command.includes('...'))).toBe(false);
+  });
+
+  it('drops the setup chain once a datasource exists', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+    const env = {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    };
+    runCli(['init'], env);
+    const added = runCli(
+      ['datasource', 'add', '--name', 'demo', '--kind', 'mysql', '--env', 'qa', '--service', 'orders', '--host', '127.0.0.1', '--port', '3306', '--database', 'orders', '--credential-ref', 'demo'],
+      env,
+    );
+    expect(added.status).toBe(0);
+
+    // act
+    const out = runCli(['--json', 'init'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+    const commands: string[] = JSON.parse(out.stdout).nextActionDetails.map((action: any) => action.command);
+    expect(commands.some((command) => command.startsWith('taproot datasource add'))).toBe(false);
+    expect(commands.some((command) => command.startsWith('taproot doctor --datasource <name>'))).toBe(false);
+  });
+
+  it('tailors the setup chain to grpc and omits the credential step', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+
+    // act
+    const out = runCli(['--json', 'init', '--kind', 'grpc'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+
+    // assert
+    expect(out.status).toBe(0);
+    const commands: string[] = JSON.parse(out.stdout).nextActionDetails.map((action: any) => action.command);
+    expect(commands[0]).toBe(
+      'taproot datasource add --name <name> --kind grpc --env <env> --service <service> --host <host> --port <port> --credential-ref <name> --hint protoRoot=<dir>',
+    );
+    expect(commands).toContain('taproot grpc list --datasource <name>');
+    expect(commands.some((command) => command.startsWith('taproot creds set'))).toBe(false);
+    expect(commands.indexOf('taproot doctor --datasource <name>')).toBeGreaterThan(
+      commands.indexOf('taproot grpc list --datasource <name>'),
+    );
+  });
+
+  it('does not ask for credentials when every datasource kind is auth-free', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+    const env = {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    };
+    runCli(['init'], env);
+    const added = runCli(
+      ['datasource', 'add', '--name', 'pilot', '--kind', 'grpc', '--env', 'qa', '--service', 'profile', '--host', '127.0.0.1', '--port', '6565', '--credential-ref', 'pilot'],
+      env,
+    );
+    expect(added.status).toBe(0);
+
+    // act
+    const out = runCli(['--json', 'init'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+    const parsed = JSON.parse(out.stdout);
+    const credentials = parsed.checks.find((check: any) => check.check === 'credentials');
+    expect(credentials.status).toBe('ok');
+    const commands: string[] = parsed.nextActionDetails.map((action: any) => action.command);
+    expect(commands.some((command) => command.startsWith('taproot creds set'))).toBe(false);
+  });
+
   it('warns when master key is missing', () => {
     const stateRoot = makeStateRoot();
     const memoryRoot = makeMemoryRoot();

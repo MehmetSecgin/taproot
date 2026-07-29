@@ -119,6 +119,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--port <port>')
     .option('--database <db>')
     .option('--target <target>')
+    .option('--ssl', 'connect over TLS (grpc: use TLS instead of plaintext h2c)', false)
     .option('--connector <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--connector-ref <name=ref>', 'repeatable connector credential refs', (v, p: string[]) => (p || []).concat(v), [])
     .option('--hint <key=value>', 'repeatable resolverHints key/value (e.g. protoRoot=/path, protoMessage=OrderProto)', (v, p: string[]) => (p || []).concat(v), [])
@@ -142,6 +143,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           port: opts.port ? Number(opts.port) : undefined,
           database: opts.database,
           target: opts.target,
+          ssl: Boolean(opts.ssl),
         },
         credentialRef: opts.credentialRef,
         connectors: opts.connector || [],

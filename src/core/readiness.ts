@@ -43,15 +43,41 @@ export interface ReadinessSnapshot {
 }
 
 const READINESS_ACTION_PRIORITIES = {
+  datasourceSetup: 5,
   kbSetup: 10,
   init: 20,
   datasourceRepair: 30,
   credsRepair: 40,
+  introspect: 42,
+  verify: 45,
   connectorSetup: 50,
   connectorConnect: 60,
   masterKey: 70,
   daemonStart: 80,
 } as const;
+
+const DATASOURCE_ADD_COMMAND =
+  'taproot datasource add --name <name> --kind mysql --env <env> --service <service> --host <host> --port 3306 --database <db> --credential-ref <name>';
+const CREDS_SET_COMMAND = 'taproot creds set --ref <ref> --user <user> --password <password>';
+const DOCTOR_VERIFY_COMMAND = 'taproot doctor --datasource <name>';
+const GRPC_LIST_COMMAND = 'taproot grpc list --datasource <name>';
+
+const SETUP_KIND_COMMANDS: Record<string, string> = {
+  mysql: DATASOURCE_ADD_COMMAND,
+  postgres:
+    'taproot datasource add --name <name> --kind postgres --env <env> --service <service> --host <host> --port 5432 --database <db> --credential-ref <name>',
+  redis:
+    'taproot datasource add --name <name> --kind redis --env <env> --service <service> --host <host> --port 6379 --credential-ref <name>',
+  grpc:
+    'taproot datasource add --name <name> --kind grpc --env <env> --service <service> --host <host> --port <port> --credential-ref <name> --hint protoRoot=<dir>',
+};
+
+const AUTH_FREE_SETUP_KINDS = new Set(['grpc']);
+
+function normalizeSetupKind(kind?: string): string {
+  const normalized = str(kind).trim().toLowerCase();
+  return SETUP_KIND_COMMANDS[normalized] ? normalized : 'mysql';
+}
 
 function dedupeAction(
   actions: Map<string, RemediationAction>,
@@ -157,6 +183,24 @@ async function credentialRefsCheck(ctx: AppContext): Promise<ReadinessCheck> {
   };
 }
 
+function credentialsCheck(ctx: AppContext): ReadinessCheck {
+  const file = ctx.paths.credentialFile;
+  if (fs.existsSync(file)) return { check: 'credentials', status: DoctorStatus.Ok, detail: file };
+  const datasources = ctx.datasourceStore.list();
+  if (datasources.length && !datasources.some((d) => AUTH_REQUIRED_KINDS.has(d.kind))) {
+    return {
+      check: 'credentials',
+      status: DoctorStatus.Ok,
+      detail: 'not required by the configured datasource kinds',
+    };
+  }
+  return {
+    check: 'credentials',
+    status: DoctorStatus.Warn,
+    detail: `${file} (created on first \`taproot creds set\`)`,
+  };
+}
+
 export function computeReadiness(checks: ReadinessCheck[]): ReadinessState {
   const byName = new Map(checks.map((check) => [check.check, check]));
   if ((byName.get('kb_dir')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_kb';
@@ -188,9 +232,10 @@ function connectorSetupCommand(datasource: DatasourceProfile, checks: ReadinessC
     return `taproot connector setup --datasource ${datasource.name} --connector kubectl-portforward --status-command '<command>' --connect-command '<command>'`;
   }
   const connector = str(label.match(/^connector:([^ ]+)/)?.[1]).trim();
+  const flags = "--status-command '<command>' --connect-command '<command>'";
   return connector
-    ? `taproot connector setup --datasource ${datasource.name} --connector ${connector} ...`
-    : `taproot connector setup --datasource ${datasource.name} --connector <name> ...`;
+    ? `taproot connector setup --datasource ${datasource.name} --connector ${connector} ${flags}`
+    : `taproot connector setup --datasource ${datasource.name} --connector <name> ${flags}`;
 }
 
 function isMissingConnectorConfigCheck(check: ReadinessCheck): boolean {
@@ -218,7 +263,7 @@ function targetReadiness(
 
 export function nextActionDetailsForReadiness(
   readiness: ReadinessState,
-  input?: { datasource?: DatasourceProfile; target?: ReadinessTargetInput; checks?: ReadinessCheck[] },
+  input?: { datasource?: DatasourceProfile; target?: ReadinessTargetInput; checks?: ReadinessCheck[]; setupKind?: string },
 ): RemediationAction[] {
   const actions = new Map<string, RemediationAction>();
   const relevantChecks = input?.checks || [];
@@ -258,9 +303,9 @@ export function nextActionDetailsForReadiness(
       }
       add(
         actionForReadiness({
-          command: 'taproot --json datasource add ...',
+          command: SETUP_KIND_COMMANDS[normalizeSetupKind(input?.setupKind)],
           priority: READINESS_ACTION_PRIORITIES.datasourceRepair,
-          reason: 'No datasource profile is available yet, so create one before querying.',
+          reason: 'No datasource profile is available yet, so create one before querying. Swap --kind for postgres/redis/grpc as needed, and add --connector <name> when the endpoint sits behind VPN, Teleport, or a port-forward.',
           checks: ['datasources'],
         }),
       );
@@ -279,7 +324,7 @@ export function nextActionDetailsForReadiness(
       }
       add(
         actionForReadiness({
-          command: 'taproot --json creds set --ref <ref> --user <user> --password <password>',
+          command: CREDS_SET_COMMAND,
           priority: READINESS_ACTION_PRIORITIES.credsRepair,
           reason: 'No credentials are stored yet, so add the missing credential ref first.',
           checks: ['credentials'],
@@ -302,7 +347,7 @@ export function nextActionDetailsForReadiness(
       }
       add(
         actionForReadiness({
-          command: 'taproot connector setup --datasource <name> --connector <name> ...',
+          command: "taproot connector setup --datasource <name> --connector <name> --status-command '<command>' --connect-command '<command>'",
           priority: READINESS_ACTION_PRIORITIES.connectorSetup,
           reason: 'A required connector is not fully configured yet.',
         }),
@@ -345,10 +390,55 @@ export function nextActionsForReadiness(
 
 function withSupplementalReadinessActions(
   actions: RemediationAction[],
-  input: { checks: ReadinessCheck[] },
+  input: { checks: ReadinessCheck[]; setupKind?: string },
 ): RemediationAction[] {
   const merged = new Map<string, RemediationAction>();
   for (const action of actions) dedupeAction(merged, action);
+  if (input.checks.find((check) => check.check === 'datasources')?.status !== DoctorStatus.Ok) {
+    const kind = normalizeSetupKind(input.setupKind);
+    dedupeAction(
+      merged,
+      actionForReadiness({
+        command: SETUP_KIND_COMMANDS[kind],
+        priority: READINESS_ACTION_PRIORITIES.datasourceSetup,
+        reason: kind === 'grpc'
+          ? 'No datasource exists yet, so this is the first setup step. protoRoot is a local directory of .proto sources, loaded recursively; add --connector <name> when the endpoint sits behind VPN, Teleport, or a port-forward.'
+          : 'No datasource exists yet, so this is the first setup step. Re-run init with --kind to get the template for another engine, and add --connector <name> when the endpoint sits behind VPN, Teleport, or a port-forward.',
+        checks: ['datasources'],
+      }),
+    );
+    if (!AUTH_FREE_SETUP_KINDS.has(kind)) {
+      dedupeAction(
+        merged,
+        actionForReadiness({
+          command: CREDS_SET_COMMAND,
+          priority: READINESS_ACTION_PRIORITIES.credsRepair,
+          reason: 'Store the credentials under the same ref you passed to --credential-ref.',
+          checks: ['credentials'],
+        }),
+      );
+    }
+    if (kind === 'grpc') {
+      dedupeAction(
+        merged,
+        actionForReadiness({
+          command: GRPC_LIST_COMMAND,
+          priority: READINESS_ACTION_PRIORITIES.introspect,
+          reason: 'Lists the services and methods found in the proto root. This runs offline, so it validates the proto setup before any network access.',
+          checks: ['datasources'],
+        }),
+      );
+    }
+    dedupeAction(
+      merged,
+      actionForReadiness({
+        command: DOCTOR_VERIFY_COMMAND,
+        priority: READINESS_ACTION_PRIORITIES.verify,
+        reason: 'Confirm the new datasource resolves and connects before running a query.',
+        checks: ['datasources'],
+      }),
+    );
+  }
   if (!process.env.TAPROOT_MASTER_KEY) {
     dedupeAction(
       merged,
@@ -392,7 +482,7 @@ async function resolveTargetDatasource(ctx: AppContext, target: ReadinessTargetI
 
 export async function collectReadinessSnapshot(
   ctx: AppContext,
-  input?: { createdConfig?: boolean; target?: ReadinessTargetInput },
+  input?: { createdConfig?: boolean; target?: ReadinessTargetInput; setupKind?: string },
 ): Promise<ReadinessSnapshot> {
   const pluginNames = ctx.pluginRegistry.list().map((plugin) => plugin.manifest.name);
   const datasources = ctx.datasourceStore.list();
@@ -414,13 +504,7 @@ export async function collectReadinessSnapshot(
         ? `${datasources.length} datasource profile(s)`
         : 'none yet; add one with `taproot datasource add`',
     },
-    {
-      check: 'credentials',
-      status: fs.existsSync(ctx.paths.credentialFile) ? DoctorStatus.Ok : DoctorStatus.Warn,
-      detail: fs.existsSync(ctx.paths.credentialFile)
-        ? ctx.paths.credentialFile
-        : `${ctx.paths.credentialFile} (created on first \`taproot creds set\`)`,
-    },
+    credentialsCheck(ctx),
     await credentialRefsCheck(ctx),
     await daemonCheck(ctx),
   ];
@@ -476,9 +560,9 @@ export async function collectReadinessSnapshot(
     : computeReadiness(checks);
   const nextActionDetails = withSupplementalReadinessActions(
     normalizedTarget
-      ? nextActionDetailsForReadiness(readiness, { datasource: targetDatasource, target: normalizedTarget, checks })
-      : nextActionDetailsForReadiness(readiness),
-    { checks },
+      ? nextActionDetailsForReadiness(readiness, { datasource: targetDatasource, target: normalizedTarget, checks, setupKind: input?.setupKind })
+      : nextActionDetailsForReadiness(readiness, { setupKind: input?.setupKind }),
+    { checks, setupKind: input?.setupKind },
   );
   const nextActions = nextActionDetails.map((action) => action.command);
 

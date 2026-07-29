@@ -58,6 +58,10 @@ taproot init
 
 Creates `~/.taproot/` (config, cache, runs, learning). Idempotent.
 
+On an unconfigured machine it also prints an ordered `next actions` list of runnable commands (add a datasource, store its credentials, verify with `doctor`). Each entry is a real command with every required flag, so you can fill in the placeholders and paste it. The list shrinks as you complete each step, and `taproot self-check` reprints it at any time.
+
+Pass `--kind mysql|postgres|redis|grpc` to tailor those steps to the engine you are setting up, for example `taproot init --kind grpc`.
+
 ### 4. Create a datasource, store credentials, query
 
 ```bash
@@ -184,6 +188,10 @@ taproot --json query --datasource qa-order-cache \
 # import can't be found, the loader names the missing file + the proto that
 # imports it so you know which repo to clone.
 ```
+
+`taproot init --kind grpc` prints this flow as runnable next actions, with no credential step: gRPC datasources need no stored credentials, so `--credential-ref` is just a label. Add `--ssl` if the endpoint speaks TLS rather than plaintext h2c.
+
+Everything under `grpc list` / `find` / `describe` reads the local proto root only, so you can explore an API and build a request skeleton before you have network access to the service. Only `doctor` and `query` need to reach it.
 
 ```bash
 taproot datasource add \

@@ -5,6 +5,22 @@
 - Use `environmentPolicies` to define which envs are deterministic, discovery-friendly, and which access methods/targets are preferred.
 - Use `serviceAliases` to normalize legacy service names to canonical TapRoot service names.
 
+## Brand-New Machine
+```bash
+# creates ~/.taproot/ and prints an ordered, runnable next-actions list.
+# On an initialized but unconfigured machine: all checks ok/warn, never fail, exit 0.
+# warn on kb_dir / datasources / credentials means "not configured yet", not broken.
+taproot init
+
+# tailor the setup steps to the engine being configured
+taproot init --kind grpc
+taproot init --kind mysql|postgres|redis
+
+# whole-install health. `doctor` alone is NOT a health check: it needs a target and
+# exits non-zero without --datasource or --env+--service.
+taproot --json self-check --agent
+```
+
 ## First Successful Query (Happy Path)
 ```bash
 taproot --json init
@@ -24,13 +40,14 @@ taproot --json self-check --agent --datasource <name>
 taproot --json self-check --agent --env <env> --service <service>
 ```
 
-- For `init --json` and `self-check --agent --json`, read both:
+- For `init --json` and `self-check --agent --json`, read the structured records. There is no `nextActions` string array on these payloads.
 ```bash
-# ordered compatibility list
-nextActions
-
-# structured records with command, priority, checks, codes, reasons
+# structured records with command, priority, checks, codes, reasons; sorted by ascending priority
 nextActionDetails
+nextActionDetails[0].command      # top action for init and doctor
+
+# self-check --agent only: a separate top-action hint
+nextCommand
 ```
 
 - KB-backed datasource create/repair:
@@ -81,13 +98,11 @@ taproot --json doctor --datasource <name> --connect
 taproot --json doctor --datasource <name> --connect --all --verbose-detail
 ```
 
-- If `doctor --json` fails, read both:
+- If `doctor --json` fails, read the structured records (`doctor` emits no `nextActions` array and no `nextCommand`):
 ```bash
-# ordered compatibility list
-nextActions
-
 # structured records with command, priority, checks, codes, reasons
 nextActionDetails
+nextActionDetails[0].command
 ```
 
 - Resolve from env/service:
@@ -161,10 +176,18 @@ taproot --json datasource add \
 # doctor opens channel against the first service in the proto (or --hint probeService=<fq> to override)
 taproot --json doctor --datasource qa-<svc>-grpc
 
-# discover what's callable before composing requests
+# discover what's callable before composing requests.
+# list / find / describe read the local proto root ONLY: no network, no VPN, no creds.
+# Run them before connectivity exists; only doctor and query open a channel.
 taproot --json grpc list --datasource qa-<svc>-grpc                  # services + methods only
+taproot --json grpc find --datasource qa-<svc>-grpc <text>            # search service/method/request/response
 taproot --json grpc describe --datasource qa-<svc>-grpc \
   --service <package.Service> --method <Method>                       # expands request + response messages
+# --service/--method accept a short name or unambiguous substring.
+
+# fastest path to a working call: request body + the exact query line to run
+taproot grpc describe --datasource qa-<svc>-grpc \
+  --service <Service> --method <Method> --skeleton
 # every grpc query also returns the called method's shape under
 # meta.schemaContext.services / .messages / .enums — read that after the call
 # instead of re-running describe.

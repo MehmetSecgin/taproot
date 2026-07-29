@@ -20,10 +20,12 @@ function printHumanInit(checks: Array<{ check: string; status: string; detail: s
 export function registerInit(program: Command, getCtx: () => AppContext): void {
   const init = program.command('init').description('Initialize local TapRoot runtime state for first use');
 
-  init.action(async () => {
+  init.option('--kind <kind>', 'tailor the setup steps to a datasource kind (mysql|postgres|redis|grpc)');
+
+  init.action(async (opts) => {
     const ctx = getCtx();
     const createdConfig = ensureStarterRuntime(ctx);
-    const snapshot = await collectReadinessSnapshot(ctx, { createdConfig });
+    const snapshot = await collectReadinessSnapshot(ctx, { createdConfig, setupKind: opts.kind });
     const trimmedChecks = snapshot.checks.map((check) => check.status === DoctorStatus.Ok
       ? { check: check.check, status: check.status }
       : check);
