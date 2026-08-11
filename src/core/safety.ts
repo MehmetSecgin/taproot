@@ -1,7 +1,9 @@
 import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
+import { RUNTIME_CONSTANTS } from './constants.js';
 import { missingPartitionPredicate, redundantIntrospection } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
+import type { SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
 
 const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
@@ -84,9 +86,85 @@ export function enforceSchemaIntrospectionPolicy(input: {
   );
 }
 
+const DATE_LITERAL_RE = /'(\d{4}-\d{2}-\d{2})(?:[ T][\d:.]+)?'/g;
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function dateLiteralsMs(text: string): number[] {
+  const out: number[] = [];
+  for (const match of text.matchAll(DATE_LITERAL_RE)) {
+    const time = Date.parse(`${match[1]}T00:00:00Z`);
+    if (Number.isFinite(time)) out.push(time);
+  }
+  return out;
+}
+
+function sortedDateLiteralsForColumn(sql: string, key: string): number[] {
+  const column = escapeRegex(key);
+  const predicate = new RegExp(
+    `\\b${column}\\b\\s*(?:between\\s+('[^']*')\\s+and\\s+('[^']*')|in\\s*\\(([^)]*)\\)|(?:<=|>=|<|>|=)\\s*('[^']*'))`,
+    'gi',
+  );
+  const out: number[] = [];
+  for (const match of str(sql).matchAll(predicate)) {
+    for (const operand of match.slice(1)) {
+      if (operand) out.push(...dateLiteralsMs(operand));
+    }
+  }
+  return out.sort((a, b) => a - b);
+}
+
+function hasBoundedPredicate(sql: string, key: string): boolean {
+  return new RegExp(`\\b${escapeRegex(key)}\\b\\s*(<=?|=|between\\b|in\\b)`, 'i').test(str(sql));
+}
+
+export function collectRangeWarnings(input: {
+  sql: string;
+  schemaContext: SchemaContext;
+  dialect: SqlDialect;
+  maxRangeDays?: number;
+}): string[] {
+  const warnings: string[] = [];
+  if (isSchemaMetadataQuery(input.sql)) return warnings;
+  const tables = input.schemaContext.tables || {};
+  if (!Object.keys(tables).length) return warnings;
+
+  const maxRangeDays = Math.max(1, Number(input.maxRangeDays || RUNTIME_CONSTANTS.query.maxRangeDays));
+  const predicateColumns = collectPredicateColumns(input.sql, input.dialect);
+
+  for (const [table, ctx] of Object.entries(tables)) {
+    const partition = ctx.partition;
+    if (!partition || !isHardPartitionKind(partition)) continue;
+    const tableColumns =
+      predicateColumns.byTable.get(table) || predicateColumns.byTable.get(table.split('.').pop() || table) || new Set<string>();
+
+    for (const key of partitionKeys(partition)) {
+      if (!tableColumns.has(key) && !predicateColumns.bare.has(key)) continue;
+      const literals = sortedDateLiteralsForColumn(input.sql, key);
+      if (!literals.length) {
+        warnings.push(`range_unverified:${table}.${key}`);
+        continue;
+      }
+      if (!hasBoundedPredicate(input.sql, key)) {
+        warnings.push(`unbounded_range:${table}.${key}`);
+        continue;
+      }
+      const spanDays = Math.round((literals[literals.length - 1] - literals[0]) / 86_400_000);
+      if (spanDays > maxRangeDays) {
+        warnings.push(`wide_range:${table}.${key}:actual=${spanDays}:max=${maxRangeDays}`);
+      }
+    }
+  }
+
+  return warnings;
+}
+
 export function enforcePartitionPredicate(input: {
   sql: string;
   schemaContext: SchemaContext;
+  dialect: SqlDialect;
   allowPartitionScan?: boolean;
 }): string[] {
   const warnings: string[] = [];
@@ -96,7 +174,7 @@ export function enforcePartitionPredicate(input: {
 
   const allowByEnv = process.env.TAPROOT_ALLOW_PARTITION_SCAN === '1';
   const allowPartitionScan = Boolean(input.allowPartitionScan || allowByEnv);
-  const predicateColumns = collectPredicateColumns(input.sql);
+  const predicateColumns = collectPredicateColumns(input.sql, input.dialect);
 
   for (const [table, ctx] of Object.entries(tables)) {
     const partition = ctx.partition;

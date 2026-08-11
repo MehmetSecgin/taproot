@@ -29,11 +29,9 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       console.log(renderRecord({ latest: status.latest || '' }));
       console.log(renderTable([
         { metric: 'resolution entries', value: status.files.resolution },
-        { metric: 'query library entries', value: status.files.queryLibrary },
-        { metric: 'query stats entries', value: status.files.queryStats },
         { metric: 'schema observation entries', value: status.files.schemaObservations },
         { metric: 'schema join entries', value: status.files.schemaJoins },
-        { metric: 'schema shape entries', value: status.files.schemaShapes },
+        { metric: 'schema catalog entries', value: status.files.schemaCatalog },
         { metric: 'grpc schema entries', value: status.files.grpcSchemas },
       ]));
     }
@@ -437,71 +435,6 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           };
           if (detailed) {
             out.datasource = r.datasource;
-            out.sightings = r.sightings;
-            out.confidence = r.confidence.toFixed(2);
-            out.source = (r.sources || []).join(',');
-            out.lastSeenAt = r.lastSeenAt;
-          }
-          return out;
-        })));
-      }
-    });
-
-  l.command('shapes')
-    .option('--datasource <name>')
-    .option('--env <env>')
-    .option('--namespace <namespace>')
-    .option('--service <service>')
-    .option('--limit <n>', 'max rows', '200')
-    .option('--detailed', 'include normalizedSql, sightings, confidence, source, and lastSeenAt', false)
-    .action(async (opts) => {
-      const ctx = getCtx();
-      const datasource = await resolveDatasource(ctx, opts);
-      const targeted = isTargetedRequest(opts);
-      const detailed = Boolean(opts.detailed);
-      const rows = scopedRows({ datasource, targeted, load: (name) => ctx.learningStore.schemaQueryShapes(name), keyKind: 'datasource' });
-      const limit = Math.max(1, Number(opts.limit || 200));
-      const sliced = rows
-        .sort((a, b) => String(b.lastSeenAt).localeCompare(String(a.lastSeenAt)))
-        .slice(0, limit);
-      const state = emptyState({
-        datasource,
-        rows: sliced,
-        kind: 'shapes',
-        unresolved: Boolean(targeted && !datasource),
-        suggestedNextCommand: unresolvedNextCommand(opts, ctx),
-      });
-      const projected = sliced.map((r) => {
-        const out: Record<string, unknown> = {
-          datasource: r.datasource,
-          operation: r.operation,
-          tables: r.tables,
-          joins: r.joins,
-        };
-        if (detailed) {
-          out.normalizedSql = r.normalizedSql;
-          out.sightings = r.sightings;
-          out.confidence = r.confidence;
-          out.source = r.sources;
-          out.lastSeenAt = r.lastSeenAt;
-        }
-        return out;
-      });
-      if (ctx.jsonMode) {
-        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
-      } else {
-        if (!sliced.length) {
-          printEmptyState('shapes', state);
-          return;
-        }
-        console.log(renderTable(sliced.map((r) => {
-          const out: Record<string, unknown> = {
-            datasource: r.datasource,
-            operation: r.operation,
-            tables: r.tables.join(','),
-            joins: r.joins.length,
-          };
-          if (detailed) {
             out.sightings = r.sightings;
             out.confidence = r.confidence.toFixed(2);
             out.source = (r.sources || []).join(',');

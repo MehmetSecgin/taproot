@@ -1,4 +1,5 @@
 import parserPkg from 'node-sql-parser';
+import { dialectFromKind, parserDatabaseOption, type SqlDialect } from './sql-dialect.js';
 
 export type ColumnRole = 'select' | 'filter' | 'group' | 'order';
 
@@ -34,18 +35,6 @@ const { Parser } = parserPkg as unknown as {
   Parser: new () => { astify: (sql: string, opt?: { database?: string }) => unknown };
 };
 const parser = new Parser();
-
-export type SqlDialect = 'mysql' | 'postgres';
-
-function dialectFromKind(kind: string | undefined): SqlDialect {
-  const value = (kind || '').toLowerCase();
-  if (value === 'postgres' || value === 'postgresql' || value === 'pg') return 'postgres';
-  return 'mysql';
-}
-
-function parserDatabaseOption(dialect: SqlDialect): string {
-  return dialect === 'postgres' ? 'PostgresQL' : 'MySQL';
-}
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');

@@ -13,7 +13,6 @@ function makeContext(input?: { datasources?: any[]; aliasMap?: Record<string, st
   const configDir = path.join(root, 'config');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'datasources.json'), JSON.stringify(input?.datasources || []));
-  fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ serviceAliases: input?.aliasMap || {} }));
 
   let executeCount = 0;
@@ -71,7 +70,6 @@ function makeContext(input?: { datasources?: any[]; aliasMap?: Record<string, st
       runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
       datasourceFile: path.join(configDir, 'datasources.json'),
       credentialFile: path.join(configDir, 'credentials.json.enc'),
-      templatesFile: path.join(configDir, 'templates.json'),
       cacheDir: path.join(root, 'cache'),
       runsDir: path.join(root, 'runs'),
       runsLedgerDir: path.join(root, 'learning', 'runs-ledger'),
@@ -79,8 +77,6 @@ function makeContext(input?: { datasources?: any[]; aliasMap?: Record<string, st
       kbDir: path.join(root, 'kb'),
     },
     datasourceStore: new DatasourceStore(path.join(configDir, 'datasources.json')),
-    templateStore: {} as any,
-    cardStore: {} as any,
     credentialStore: { get: async () => ({ user: 'reader', password: 'secret' }) } as any,
     kbStore: { resolveConnection: () => undefined } as any,
     learningStore: new LearningStore(path.join(root, 'learning')),
@@ -144,19 +140,7 @@ describe('learn ensure-schema', () => {
     const { ctx, getExecuteCount } = makeContext({ datasources: [datasource()] });
     ctx.learningStore.saveSuccess({
       datasource: datasource() as any,
-      queryIntent: 'orders',
       sql: 'SELECT id FROM orders WHERE status = 1',
-      result: {
-        runId: 'run-1',
-        datasource: 'qa-orders',
-        plugin: 'mysql',
-        capability: 'executeRead',
-        query: { native: 'SELECT 1' },
-        result: { columns: ['id'], rows: [{ id: 1 }] },
-        timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
-        warnings: [],
-        classification: 'success',
-      },
     });
 
     const out = await ensureSchemaSnapshot(ctx, { datasource: 'qa-orders', tables: ['orders'] });

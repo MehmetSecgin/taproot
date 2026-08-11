@@ -11,8 +11,10 @@ It must:
 ## Files
 All files are local under `~/.taproot/learning/`:
 - `resolution-cache.json`
-- `query-library.json`
-- `query-stats.json`
+- `schema-catalog.json`
+- `schema-observations.json`
+- `schema-joins.json`
+- `grpc-schemas.json`
 
 Legacy file:
 - `records.json` is migration-only input and should not be appended to.
@@ -38,38 +40,59 @@ Behavior:
 - On success, refresh `lastVerifiedAt`, increment `successCount`, increase confidence.
 - On failure, increment `failureCount`, decrease confidence.
 
-### query-library
-Key: `service + intentKey + sqlTemplate`
+### schema-catalog
+Key: `datasource name`
 
 Fields:
-- `id` (stable hash-like key from the deterministic tuple)
-- `service`
-- `intentKey` (normalized intent text; fallback `auto` when absent)
-- `sqlTemplate` (normalized SQL with placeholders)
-- `source` (`learned` or `kb`)
-- `lastVerifiedAt`
-- `successCount`
+- `key` (the datasource name)
+- `env`, `service`, `database`
+- `fetchedAt`
+- `tableCount`
 
 Behavior:
-- SQL values are normalized to placeholders (`:num`, `:str`, `:bool`).
-- Same query shape across different parameter values must map to one template.
-- Upsert, do not append duplicates.
+- One row per datasource, written after a full `information_schema` catalog pass.
+- Readers look the row up by datasource name to decide whether a cached catalog exists.
+- The query path reads it to decide whether the catalog is still fresh. Default TTL is 24 h (`TAPROOT_CATALOG_TTL_HOURS`).
+- A missing or stale row triggers exactly one unfiltered introspection on the next query. A failed fetch never fails the query.
 
-### query-stats
-Key: `datasource + templateId`
+### schema-observations
+Key: `service + table`
 
 Fields:
-- `datasource`
-- `templateId`
-- `lastRunAt`
-- `lastStatus` (`success`/`error`)
-- `lastErrorClass` (optional)
-- `successCount`, `failureCount`
-- `latencyMsP50`
+- `datasource`, `env`, `service`, `kind`, `database`, `target`, `table`
+- `aliases`
+- `columns` (per-column `selectedCount`, `filterCount`, `groupCount`, `orderCount`)
+- `primaryKey`, `indexes`, `partition`
+- `firstSeenAt`, `lastSeenAt`, `sightings`, `confidence`, `sources`
 
 Behavior:
-- Used for ranking and quick health signal.
-- No secrets and no raw result payload required.
+- Filled from observed queries and from `information_schema` refreshes.
+- Upsert one row per key; refreshed metadata wins over observed inference.
+
+### schema-joins
+Key: `service + leftTable + rightTable + normalized condition`
+
+Fields:
+- `datasource`, `env`, `service`, `kind`, `database`
+- `leftTable`, `rightTable`, `directionHint`
+- `conditionRaw`, `conditionNormalized`
+- `firstSeenAt`, `lastSeenAt`, `sightings`, `confidence`, `sources`
+
+Behavior:
+- Intra-service join edges only; cross-service edges live in KB `relations.json`.
+
+### grpc-schemas
+Key: `service` (falling back to the datasource name)
+
+Fields:
+- `key`, `datasource`, `env`, `service`, `kind`
+- `protoRoot`
+- `services`, `messages`, `enums`
+- `firstSeenAt`, `lastSeenAt`, `sources`
+
+Behavior:
+- One row per gRPC service, written after a proto introspection pass.
+- Serves `learn grpc-schema` from cache so a missing proto root does not break inspection.
 
 ## Precedence Rules
 Query path must resolve deterministically:
@@ -80,14 +103,12 @@ Query path must resolve deterministically:
 
 KB source-of-truth clarification is documented in `references/kb/README.md`.
 
-Template resolution:
-1. Explicit `--query` / `--template`.
-2. Learning `query-library` exact `service + intentKey`.
-3. KB templates.
+Query resolution:
+1. Explicit `--query` / `--sql`. There is no other source.
 
 ## Retention
 - `compact`: idempotent dedupe/upsert rewrite.
-- `prune --ttl-hours N`: remove stale entries by `lastVerifiedAt`/`lastRunAt`.
+- `prune --ttl-hours N`: remove stale entries by `lastVerifiedAt`/`lastSeenAt`/`fetchedAt`.
 - `clear`: clear all learning files.
 
 ## Redaction and Safety

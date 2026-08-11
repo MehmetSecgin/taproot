@@ -1,8 +1,8 @@
-import { classifyError, environmentPolicy, fillTemplate, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../../core/app.js';
+import { classifyError, environmentPolicy, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from '../../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../../core/safety.js';
+import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../../core/safety.js';
 import { deterministicRequired, discoveryUnavailable, misconfiguredDatasource } from '../../core/error-classification.js';
 import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../../core/query-timeout.js';
 import { resolveCanonicalDatasource } from '../../core/resolve-datasource.js';
@@ -11,10 +11,9 @@ import { str } from '../../core/strings.js';
 import { DatasourceKind, DoctorStatus } from '../../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../../types/core.js';
 import type { BuiltinPluginParams } from '../../types/plugin-params.js';
-import type { QueryCard } from '../../types/cards.js';
-import { ensureSchemaSnapshot } from '../../commands/learn.js';
-import { supportsSchemaRefresh } from '../../core/schema-refresh.js';
+import { ensureDatasourceCatalog } from '../../core/schema-refresh.js';
 import { buildSchemaContext, collectReferencedTables } from '../../core/schema-context.js';
+import { dialectFromKind } from '../../core/sql-dialect.js';
 import { liveColumnsFromSchemaContext } from '../../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../../core/runs-ledger.js';
 import { buildQueryMemory, resolveReason } from '../../core/query-memory.js';
@@ -27,10 +26,6 @@ function parseQueryParams(params: Record<string, unknown>): Record<string, strin
     return Object.fromEntries(Object.entries(params.params as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
   }
   return {};
-}
-
-function cardParamNames(card: QueryCard): string[] {
-  return (card.params || []).map((param) => param.name).filter(Boolean);
 }
 
 function buildPluginParams(
@@ -162,49 +157,18 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
       () => sessions.heartbeatLease(session.sessionId, leaseId),
       RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
     );
-    let query = str(req.params.query).trim();
-    const params = parseQueryParams(req.params);
-    let selectedCard: QueryCard | undefined;
-    if (req.params.card) {
-      selectedCard = ctx.cardStore.get(String(req.params.card));
-      if (!selectedCard) throw new Error(`Query card not found: ${String(req.params.card)}`);
-      const allowedParams = cardParamNames(selectedCard);
-      if (allowedParams.length) {
-        const unknownParams = Object.keys(params).filter((key) => !allowedParams.includes(key));
-        if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for card ${selectedCard.id}: ${unknownParams.join(', ')}`);
-      }
-      if (!query) query = fillTemplate(selectedCard.sql, params);
-    }
-    if (!query && req.params.template) {
-      const tpl = ctx.templateStore.get(String(req.params.template));
-      if (!tpl) throw new Error(`Template not found: ${String(req.params.template)}`);
-      query = fillTemplate(tpl.nativeQueryTemplate, params);
-    }
-    const effectiveIntent = str(req.params.intent || selectedCard?.intent);
-    if (!query && effectiveIntent) {
-      const intent = effectiveIntent;
-      const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', intent);
-      const tpl =
-        (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
-        ctx.kbStore.resolveQuery(service || datasource.service || '', intent) ||
-        ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent });
-      if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
-    }
-    if (!query) throw new Error('No query resolved. Provide --query/--sql, --template, or --intent.');
+    const query = str(req.params.query).trim();
+    const effectiveIntent = str(req.params.intent);
+    if (!query) throw new Error('No query resolved. Provide --query/--sql.');
     const allowMutate = Boolean(req.params.allowMutate);
-    const referencedTables = collectReferencedTables(query);
-    if (supportsSchemaRefresh(datasource as DatasourceProfile) && referencedTables.length) {
-      try {
-        await ensureSchemaSnapshot(ctx, {
-          datasource: datasource.name,
-          tables: referencedTables,
-          metadataTimeoutMs: 3000,
-        });
-      } catch {
-        // Query execution must not depend on metadata refresh succeeding.
-      }
-    }
-    const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
+    const dialect = dialectFromKind(datasource.kind);
+    const referencedTables = collectReferencedTables(query, dialect);
+    await ensureDatasourceCatalog(ctx, datasource as DatasourceProfile);
+    const schemaContext = buildSchemaContext(
+      query,
+      { service: datasource.service, datasource: datasource.name, dialect },
+      ctx.learningStore,
+    );
     const relationEdges = ctx.kbStore.relationsForTables(
       str(datasource.service),
       referencedTables,
@@ -221,8 +185,6 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
       reason,
       sql: query,
       tables: referencedTables,
-      cardStore: ctx.cardStore,
-      selectedCard,
     });
     base.meta.schemaContext = schemaContext;
     base.meta.queryMemory = queryMemory;
@@ -254,9 +216,11 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
         ...enforcePartitionPredicate({
           sql: query,
           schemaContext,
+          dialect,
           allowPartitionScan: Boolean(req.params.allowPartitionScan),
         }),
       );
+      warnings.push(...collectRangeWarnings({ sql: query, schemaContext, dialect }));
       const connectStart = Date.now();
       const connectorChecks = await runDatasourceConnectors({
         datasource: datasource as DatasourceProfile,
@@ -329,7 +293,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
       );
       writeRunSummary(artifacts.runDir, result);
       appendEvent(artifacts.runDir, `daemon query succeeded requestId=${req.requestId}`);
-      ctx.learningStore.saveSuccess({ datasource: datasource as DatasourceProfile, queryIntent: effectiveIntent, sql: query, result });
+      ctx.learningStore.saveSuccess({ datasource: datasource as DatasourceProfile, sql: query });
       const rowsObject = Boolean(req.params.rowsObject);
       const cols = result.result.columns || [];
       const projectedRows = rowsObject
@@ -351,12 +315,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
       const message = (error as Error).message;
       const code = classifyError(message);
       appendEvent(artifacts.runDir, `daemon query failed code=${code} message=${message}`);
-      ctx.learningStore.saveFailure({
-        datasource: datasource as DatasourceProfile,
-        queryIntent: effectiveIntent,
-        sql: query,
-        errorClass: code,
-      });
+      ctx.learningStore.saveFailure(datasource as DatasourceProfile);
       appendRunsLedgerEntry({
         ledgerDir: ctx.paths.runsLedgerDir,
         runId: artifacts.runId,

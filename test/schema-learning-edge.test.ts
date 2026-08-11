@@ -105,22 +105,18 @@ describe('schema learning edge cases', () => {
     expect(shape.normalizedSql).not.toContain('42');
   });
 
-  it('dedup: same shape increments sightings, different shape creates new entry', () => {
+  it('dedup: repeated table sightings increment, a new table creates a new entry', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-learning-edge-'));
     const store = new LearningStore(dir);
     const datasource = mkDatasource();
 
-    const sqlA = 'SELECT * FROM orders WHERE id = 1';
-    const sqlB = 'SELECT * FROM orders WHERE id = 2';
-    const sqlC = 'SELECT * FROM orders WHERE status = "open"';
+    store.saveSuccess({ datasource, sql: 'SELECT * FROM orders WHERE id = 1' });
+    store.saveSuccess({ datasource, sql: 'SELECT * FROM orders WHERE id = 2' });
+    store.saveSuccess({ datasource, sql: 'SELECT * FROM customers WHERE status = "open"' });
 
-    store.saveSuccess({ datasource, queryIntent: 'a', sql: sqlA, result: mkResult(sqlA) });
-    store.saveSuccess({ datasource, queryIntent: 'a', sql: sqlB, result: mkResult(sqlB) });
-    store.saveSuccess({ datasource, queryIntent: 'b', sql: sqlC, result: mkResult(sqlC) });
-
-    const shapes = store.schemaQueryShapes('qa-orders');
-    expect(shapes).toHaveLength(2);
-    expect(shapes.map((row) => row.sightings).sort((a, b) => a - b)).toEqual([1, 2]);
+    const tables = store.schemaTables('orders');
+    expect(tables.map((row) => row.table).sort()).toEqual(['customers', 'orders']);
+    expect(tables.map((row) => row.sightings).sort((a, b) => a - b)).toEqual([1, 2]);
   });
 
   it('confidence stays within 0.35–1.0 range', () => {
@@ -130,16 +126,16 @@ describe('schema learning edge cases', () => {
     const sql = 'SELECT * FROM orders WHERE id = 1';
 
     for (let i = 0; i < 30; i += 1) {
-      store.saveSuccess({ datasource, queryIntent: 'orders', sql, result: mkResult(sql) });
+      store.saveSuccess({ datasource, sql });
     }
     for (let i = 0; i < 30; i += 1) {
-      store.saveFailure({ datasource, queryIntent: 'orders', sql, errorClass: 'CONNECTIVITY' });
+      store.saveFailure(datasource);
     }
 
-    const shape = store.schemaQueryShapes('qa-orders')[0];
+    const observation = store.schemaTables('orders')[0];
     const resolution = store.resolveConnection('qa', 'orders');
-    expect(shape.confidence).toBeGreaterThanOrEqual(0.35);
-    expect(shape.confidence).toBeLessThanOrEqual(1);
+    expect(observation.confidence).toBeGreaterThanOrEqual(0.35);
+    expect(observation.confidence).toBeLessThanOrEqual(1);
     expect((resolution?.confidence || 0)).toBeGreaterThanOrEqual(0.1);
     expect((resolution?.confidence || 0)).toBeLessThanOrEqual(1);
   });

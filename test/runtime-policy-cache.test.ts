@@ -52,35 +52,42 @@ function setupState() {
   };
 }
 
-describe('runtime policy and explicit cache commands', () => {
-  it('supports explicit target and query cache commands', () => {
+describe('runtime policy and KB state', () => {
+  it('reports learning store counts without the removed manual cache stores', () => {
     const { env } = setupState();
-    const saveTarget = runCli(
-      ['--json', 'cache', 'save-target', '--env', 'careful', '--service', 'orders', '--intent', 'latest rows', '--engine', 'tidb', '--target', 'tidb-careful-orders', '--database', 'orders'],
-      env,
-    );
-    expect(saveTarget.status).toBe(0);
-    expect(JSON.parse(saveTarget.stdout).target).toBe('tidb-careful-orders');
+    const out = runCli(['--json', 'cache', 'show'], env);
+    expect(out.status).toBe(0);
+    expect(Object.keys(JSON.parse(out.stdout).learning.files).sort()).toEqual([
+      'grpcSchemas',
+      'resolution',
+      'schemaCatalog',
+      'schemaJoins',
+      'schemaObservations',
+    ]);
+  });
 
-    const lookupTarget = runCli(
-      ['--json', 'cache', 'lookup-target', '--env', 'careful', '--service', 'orders', '--intent', 'latest rows'],
-      env,
-    );
-    expect(lookupTarget.status).toBe(0);
-    expect(JSON.parse(lookupTarget.stdout).database).toBe('orders');
+  it('reports the same learning stores from learn status', () => {
+    const { env } = setupState();
+    const out = runCli(['--json', 'learn', 'status'], env);
+    expect(out.status).toBe(0);
+    expect(Object.keys(JSON.parse(out.stdout).files).sort()).toEqual([
+      'grpcSchemas',
+      'resolution',
+      'schemaCatalog',
+      'schemaJoins',
+      'schemaObservations',
+    ]);
+  });
 
-    const saveQuery = runCli(
-      ['--json', 'cache', 'save-query', '--service', 'orders', '--intent', 'latest rows', '--sql-template', 'SELECT * FROM orders WHERE id = :id'],
-      env,
-    );
-    expect(saveQuery.status).toBe(0);
-
-    const resolveQuery = runCli(
-      ['--json', 'cache', 'resolve-query', '--service', 'orders', '--intent', 'latest rows'],
-      env,
-    );
-    expect(resolveQuery.status).toBe(0);
-    expect(JSON.parse(resolveQuery.stdout).sqlTemplate).toContain(':id');
+  it('renders a value for every learn status metric', () => {
+    const { env } = setupState();
+    const out = runCli(['learn', 'status'], env);
+    expect(out.status).toBe(0);
+    const rows = out.stdout.split('\n').filter((line) => line.includes('entries'));
+    expect(rows.length).toBe(5);
+    for (const row of rows) {
+      expect(row).toMatch(/entries\s*│\s*\d+/);
+    }
   });
 
   it('lists KB services', () => {

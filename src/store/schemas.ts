@@ -28,22 +28,7 @@ export const DatasourceProfileSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export const QueryTemplateSchema = z.object({
-  id: z.string().min(1),
-  datasourceKind: z.string().optional(),
-  datasourceName: z.string().optional(),
-  intent: z.string().min(1),
-  aliases: z.array(z.string()).default([]),
-  nativeQueryTemplate: z.string().min(1),
-  params: z.array(z.string()).default([]),
-  resultShape: z.enum(['table', 'json', 'summary']).default('table'),
-  tags: z.array(z.string()).default([]),
-  status: z.enum(['active', 'inactive']).default('active'),
-  verifiedAt: z.string().optional(),
-});
-
 export const DatasourceProfileListSchema = z.array(DatasourceProfileSchema);
-export const QueryTemplateListSchema = z.array(QueryTemplateSchema);
 
 export const EnvironmentPolicySchema = z.object({
   deterministicRequired: z.boolean().default(false),
@@ -72,13 +57,10 @@ export const RuntimeConfigSchema = z.object({
     ledger: z.object({
       redactionTier: z.enum(['raw', 'redact', 'strict']).optional(),
     }).optional(),
-    cardRoots: z.array(z.string()).optional(),
   }).optional(),
-  cardRoots: z.array(z.string()).optional(),
   environmentPolicies: z.record(z.string(), EnvironmentPolicySchema.partial()).optional(),
   serviceAliases: z.record(z.string(), z.string()).optional(),
 });
 
 export type DatasourceProfileInput = z.infer<typeof DatasourceProfileSchema>;
-export type QueryTemplateInput = z.infer<typeof QueryTemplateSchema>;
 export type RuntimeConfigInput = z.infer<typeof RuntimeConfigSchema>;

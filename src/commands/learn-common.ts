@@ -59,7 +59,7 @@ export function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted:
 export function emptyState(input: {
   datasource?: DatasourceProfile;
   rows: unknown[];
-  kind: 'tables' | 'joins' | 'shapes';
+  kind: 'tables' | 'joins';
   unresolved?: boolean;
   suggestedNextCommand?: string | null;
 }): { emptyReason: string | null; suggestedNextCommand: string | null } {
@@ -75,7 +75,7 @@ export function emptyState(input: {
   };
 }
 
-export function printEmptyState(kind: 'tables' | 'joins' | 'shapes', state: { emptyReason: string | null; suggestedNextCommand: string | null }): void {
+export function printEmptyState(kind: 'tables' | 'joins', state: { emptyReason: string | null; suggestedNextCommand: string | null }): void {
   if (!state.emptyReason) return;
   console.log(`No learned schema ${kind} found (${state.emptyReason}).`);
   if (state.suggestedNextCommand) console.log(`next: ${state.suggestedNextCommand}`);

@@ -48,7 +48,7 @@ describe('schema context', () => {
     const store = makeStore();
     const out = buildSchemaContext(
       'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
-      { service: 'orders' },
+      { service: 'orders', dialect: 'mysql' },
       store,
     );
 
@@ -72,20 +72,9 @@ describe('schema context', () => {
         confidence: 1,
       } as any,
       sql: 'SHOW CREATE TABLE orders.orders',
-      result: {
-        runId: 'run-1',
-        datasource: 'qa-orders',
-        plugin: 'mysql',
-        capability: 'executeRead',
-        query: { native: 'SHOW CREATE TABLE orders.orders' },
-        result: { columns: ['Table'], rows: [{ Table: 'orders' }] },
-        timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
-        warnings: [],
-        classification: 'success',
-      },
     });
 
-    const out = buildSchemaContext('SELECT id FROM orders', { service: 'orders' }, store);
+    const out = buildSchemaContext('SELECT id FROM orders', { service: 'orders', dialect: 'mysql' }, store);
 
     expect(out.tables.orders.columns).toContain('order_date');
     expect(out.tables.orders.partition?.key).toBe('order_date');
@@ -95,19 +84,44 @@ describe('schema context', () => {
     const refs = collectReferencedTables(`
       WITH recent AS (SELECT id FROM orders WHERE order_date = '2026-05-02')
       SELECT * FROM recent WHERE id IN (SELECT customer_id FROM customers)
-    `);
+    `, 'mysql');
 
     expect(refs.sort()).toEqual(['customers', 'orders']);
   });
 
   it('resolves aliases for predicate columns', () => {
-    const refs = collectPredicateColumns('SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"');
+    const refs = collectPredicateColumns(
+      'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
+      'mysql',
+    );
     expect(refs.byTable.get('orders')?.has('order_date')).toBe(true);
     expect(refs.byTable.get('customers')?.has('id')).toBe(true);
   });
 
+  it('resolves aliases for postgres predicate columns', () => {
+    const refs = collectPredicateColumns(
+      "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = '2026-05-02'",
+      'postgres',
+    );
+
+    expect(refs.byTable.get('orders')?.has('order_date')).toBe(true);
+    expect(refs.byTable.get('customers')?.has('id')).toBe(true);
+  });
+
+  it('resolves referenced tables for postgres-only syntax', () => {
+    const store = makeStore();
+
+    const out = buildSchemaContext(
+      "SELECT id FROM orders WHERE customer_note ILIKE '%rush%'",
+      { service: 'orders', dialect: 'postgres' },
+      store,
+    );
+
+    expect(Object.keys(out.tables)).toEqual(['orders']);
+  });
+
   it('returns empty context for unparseable SQL', () => {
     const store = makeStore();
-    expect(buildSchemaContext('SELECT FROM WHERE', { service: 'orders' }, store)).toEqual({ tables: {} });
+    expect(buildSchemaContext('SELECT FROM WHERE', { service: 'orders', dialect: 'mysql' }, store)).toEqual({ tables: {} });
   });
 });

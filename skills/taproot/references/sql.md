@@ -1,13 +1,17 @@
-# SQL: schema, partitions, relations, templates
+# SQL: schema, partitions, relations
 
-## Schema comes from the learning cache, never from DDL queries
-For MySQL/TiDB/Postgres, always read the **service-keyed learning cache**. Do not issue raw introspection SQL.
+## Schema arrives with the query, never from DDL queries
+The first query against a SQL datasource caches its **whole table catalog** in one `information_schema` pass, then reuses it for 24 h (`TAPROOT_CATALOG_TTL_HOURS`). You do not run a schema step first. Every response carries:
+- `meta.schemaContext.tables` for the tables the query referenced (columns, primaryKey, indexes, partition).
+- `meta.schemaContext.catalog` as `{tables: N, fetchedAt}`, the proof that all N tables of that datasource are cached.
+
+Read those. Do not issue raw introspection SQL. The commands below inspect the same cache directly when you want a table list without running a query.
 - List tables: `taproot --json learn tables --service <svc>` (or `--datasource <name>`). Add `--match <substr>` to filter.
 - One table's columns/indexes/partition: `taproot --json learn ensure-schema --service <svc> | jq '.tables[] | select(.table=="<t>")'`, or `taproot --json learn schema --datasource <name>`.
-- Joins and observed query shapes: `taproot --json learn joins --service <svc>`, `learn shapes --datasource <name>`.
+- Joins: `taproot --json learn joins --service <svc>`.
 - Re-introspect after a migration: `taproot --json learn refresh-schema --service <svc>`. One refresh covers every env and namespace of that service, because the cache is keyed per `<service>|<table>`. Re-running per env is wasted work. `refresh-schema` pre-flights connectors and fails with `CONNECTIVITY: ...; nextCommand: taproot --json doctor --datasource <n> --connect` when VPN, telepresence, or teleport are down; bring those up before retrying.
 - Force re-introspection in place: `taproot --json learn ensure-schema --datasource <name> --refresh`. Useful when a migration added columns the cache misses, or to check drift between envs.
-- `learn ensure-schema`, `schema`, `tables`, `joins`, and `shapes` default to a **compact projection** (table, columns, primaryKey, indexes, partition). Pass `--detailed` only when you actually need columnStats, sightings, confidence, source, or lastSeenAt. Compact output is roughly 67% smaller, so prefer it.
+- `learn ensure-schema`, `schema`, `tables`, and `joins` default to a **compact projection** (table, columns, primaryKey, indexes, partition). Pass `--detailed` only when you actually need columnStats, sightings, confidence, source, or lastSeenAt. Compact output is roughly 67% smaller, so prefer it.
 - `taproot --json learn status` and `taproot --json learn replay --run-id <id>` inspect learning and run state.
 
 Do **not** issue `SHOW CREATE TABLE`, `SHOW (FULL )?COLUMNS FROM`, `SHOW INDEX(ES)? FROM`, `DESCRIBE`, or `DESC`. TapRoot blocks these with `REDUNDANT_INTROSPECTION` once a service has schema cached. `--allow-schema-introspection` (or `TAPROOT_ALLOW_SCHEMA_INTROSPECTION=1`) overrides the gate, and only when the user explicitly needs raw DDL or you suspect drift the cache missed.
@@ -17,7 +21,8 @@ Avoid `information_schema.tables`/`columns`/`statistics` for basic discovery, si
 Schema discovery is last-resort work. If the user named the table, or TapRoot already has the query shape, skip discovery entirely.
 
 ## Partitions and EXPLAIN
-- `taproot query --datasource <name> --explain --query "<sql>"` wraps a query in `EXPLAIN` without executing it. Use it before heavy joins or partition-touching queries to confirm partition pruning (look for `partition:p_<name>`), index usage, and join order. `--explain` requires `--query`, so resolve a card, template, or intent to SQL first.
+- `taproot query --datasource <name> --explain --query "<sql>"` wraps a query in `EXPLAIN` without executing it. Use it before heavy joins or partition-touching queries to confirm partition pruning (look for `partition:p_<name>`), index usage, and join order. `--explain` requires `--query`.
+- Range width is checked on every query against a RANGE/LIST partitioned table. `unbounded_range:<table>.<key>` means the key has a lower bound and no upper bound; `wide_range:<table>.<key>:actual=N:max=M` means the span exceeds `TAPROOT_MAX_RANGE_DAYS` (90 by default); `range_unverified` means the predicate used no date literal. These are warnings in `data.warnings`, not errors. Tighten the bound unless the wide scan is deliberate.
 - Keep partition and indexed keys as **bare columns** in `WHERE` and `JOIN` predicates. Wrapping the column in a function (`TO_DAYS(ts)`, `DATE(ts)`, `CAST(ts AS ...)`) defeats pruning and index use, forcing `partition:all`, a full scan, even when the literal looks scoped. Filter with a raw-column range instead (`ts >= '2026-06-24 00:00:00' AND ts < '2026-06-25 00:00:00'`) and confirm with `--explain` that the plan names specific partitions. Connections run in UTC, so write those bounds as UTC instants.
 
 ## Cross-service relations
@@ -30,10 +35,8 @@ Services share entity keys (a `*_id` owned by one service, referenced by others)
 - Intra-service joins stay with `learn joins`. `relations` is specifically the cross-service map.
 - **Drift.** Curated relations are static and do not auto-update when a migration renames or drops a column. Three guards: (1) at query time the edge for the queried service is checked against live columns, and a missing near-side column injects with `stale: true` plus `staleReason`, so the intended link still shows but needs reverifying; (2) `taproot --json kb relations validate [--service <svc>] [--stale-only]` audits every endpoint against the learned cache, reporting each side `ok`, `missing_column`, `missing_table`, or `unknown_service` (a service not yet introspected is unverifiable, not stale); (3) `learn refresh-schema` runs that audit for the refreshed service and warns about stale edges. Fix a stale edge by editing `relations.json` or correcting the seed and re-importing. TapRoot never auto-deletes curated edges.
 
-## Cards, templates, cache
-- Cards first: `taproot --json card list --datasource <name>`, `card show <id>`, `card validate <path>`. Cards may carry soft requirements in `meta.queryMemory.warnings`; fix the SQL or card usage unless the warning is knowingly irrelevant.
-- Templates: `template list`, `template validate --id <id>` to check parameter coverage, `template run --id <id> --param key=value` to render without executing, `template save --id <id> --intent "<intent>" --query "<sql>"` to create one.
-- Saved selections: `cache lookup-target --env <env> --service <service> --intent "<intent>"` and `cache resolve-query --service <service> --intent "<intent>"` inspect what already exists. `cache save-target` and `cache save-query` only when the user explicitly wants to pin a reusable target or shape.
+## Cache
+- `cache show` reports learned entry counts per store, `cache prune --ttl-hours <n>` drops stale rows.
 
 ## Resolution and routing
 - If the datasource is already known, use it directly. Do not start with `doctor` for routine reads.

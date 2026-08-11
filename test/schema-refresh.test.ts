@@ -62,7 +62,6 @@ function makeContext(): AppContext {
       runtimeConfigFile: path.join(learningDir, 'deterministic-config.json'),
       datasourceFile: path.join(learningDir, 'datasources.json'),
       credentialFile: path.join(learningDir, 'credentials.json.enc'),
-      templatesFile: path.join(learningDir, 'templates.json'),
       cacheDir: path.join(learningDir, 'cache'),
       runsDir: path.join(learningDir, 'runs'),
       runsLedgerDir: path.join(learningDir, 'runs-ledger'),
@@ -70,8 +69,6 @@ function makeContext(): AppContext {
       kbDir: path.join(learningDir, 'kb'),
     },
     datasourceStore: {} as any,
-    templateStore: {} as any,
-    cardStore: {} as any,
     credentialStore: { get: async () => ({ user: 'reader', password: 'secret' }) } as any,
     kbStore: {} as any,
     learningStore: new LearningStore(learningDir),
@@ -114,9 +111,6 @@ describe('schema refresh', () => {
 
     const joins = ctx.learningStore.schemaJoins('orders');
     expect(joins[0].sources).toContain('refreshed-metadata');
-
-    const shapes = ctx.learningStore.schemaQueryShapes('qa-orders');
-    expect(shapes[0].operation).toBe('metadata-refresh');
   });
 
   it('extracts indexes and partitions from structured information_schema metadata', async () => {

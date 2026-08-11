@@ -28,6 +28,9 @@ export const RUNTIME_CONSTANTS = {
   },
   query: {
     defaultTimeoutMs: intFromEnv('TAPROOT_QUERY_TIMEOUT_MS', 15 * 1000),
+    maxRangeDays: intFromEnv('TAPROOT_MAX_RANGE_DAYS', 90),
+    catalogTtlHours: intFromEnv('TAPROOT_CATALOG_TTL_HOURS', 24),
+    catalogTimeoutMs: intFromEnv('TAPROOT_CATALOG_TIMEOUT_MS', 20 * 1000),
   },
   connector: {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),

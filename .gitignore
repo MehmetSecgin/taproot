@@ -8,3 +8,4 @@ run-output/
 # Local investigation artifacts — never commit (may contain internal data)
 HANDOFF-*.md
 *.seed.json
+.claude/settings.local.json

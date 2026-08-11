@@ -62,15 +62,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     else console.log(renderRecord(row));
   });
 
-  kb.command('resolve-query').requiredOption('--service <service>').requiredOption('--intent <intent>').action((opts) => {
-    const ctx = getCtx();
-    const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveQuery(service, opts.intent);
-    if (!out) throw new Error('No KB query template match.');
-    if (ctx.jsonMode) printJson(out);
-    else console.log(renderRecord(out));
-  });
-
   kb.command('tables')
     .requiredOption('--service <service>')
     .option('--env <env>')

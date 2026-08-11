@@ -36,37 +36,3 @@ export function schemaObservationHasCurrentMetadata(row: SchemaObservationEntry)
     (row.sources.includes('refreshed-metadata') || row.sources.includes('manual'))
   );
 }
-
-export function normalizeIntent(value?: string): string {
-  return str(value)
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-}
-
-export function normalizeSqlTemplate(sql: string): string {
-  let out = sql.trim().replace(/\s+/g, ' ').toLowerCase();
-  out = out.replace(/'(?:''|[^'])*'/g, ':str');
-  out = out.replace(/\b\d+\.\d+\b/g, ':num');
-  out = out.replace(/\b\d+\b/g, ':num');
-  out = out.replace(/\b(true|false)\b/g, ':bool');
-  out = out.replace(/\s+/g, ' ').trim();
-  return out;
-}
-
-export function stableId(value: string): string {
-  let h = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
-  }
-  return `q_${(h >>> 0).toString(16)}`;
-}
-
-export function median(values: number[]): number {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2) return sorted[mid];
-  return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-}

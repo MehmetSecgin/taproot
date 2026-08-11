@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { randomUUID } from 'node:crypto';
 import { stdin as input, stdout as output } from 'node:process';
-import { classifyError, fillTemplate, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
+import { classifyError, normalizeService, parseParamPairs, runDatasourceConnectors } from '../core/app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from '../core/artifacts.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
@@ -11,18 +11,17 @@ import { applyJsonExtract, parseJsonExtractSpecs } from '../core/json-extract.js
 import { withQueryTimeout } from '../core/query-timeout.js';
 import { resolveSessionTimeZone } from '../core/session-timezone.js';
 import { resolveDatasourceWithFallbacks } from '../core/resolve-datasource.js';
-import { enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
+import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from '../core/safety.js';
 import { buildSchemaContext, collectReferencedTables } from '../core/schema-context.js';
+import { dialectFromKind } from '../core/sql-dialect.js';
 import { liveColumnsFromSchemaContext } from '../core/relations.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from '../core/runs-ledger.js';
 import { buildQueryMemory, renderQueryMemoryTty, resolveReason } from '../core/query-memory.js';
-import { supportsSchemaRefresh } from '../core/schema-refresh.js';
+import { ensureDatasourceCatalog, supportsSchemaRefresh } from '../core/schema-refresh.js';
 import { str } from '../core/strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { BuiltinPluginParams } from '../types/plugin-params.js';
 import type { DatasourceProfile } from '../types/core.js';
-import type { QueryCard } from '../types/cards.js';
-import { ensureSchemaSnapshot } from './learn.js';
 import { environmentPolicy } from '../core/app.js';
 import type { QueryEnv } from './query-types.js';
 
@@ -30,10 +29,6 @@ function rowFromArray(columns: string[], row: Record<string, unknown>): Record<s
   const out: Record<string, unknown> = {};
   for (const c of columns) out[c] = row[c];
   return out;
-}
-
-function cardParamNames(card: QueryCard): string[] {
-  return (card.params || []).map((param) => param.name).filter(Boolean);
 }
 
 function misconfiguredDatasourceError(datasourceName: string, env: string, service: string, conflicts: string[]): Error {
@@ -118,52 +113,24 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
   const jsonExtractSpecs = parseJsonExtractSpecs(opts.jsonExtract);
 
   const params = parseParamPairs(opts.param || []);
-  let selectedCard: QueryCard | undefined;
-  let query = (opts.query || '').trim();
-  if (opts.card) {
-    selectedCard = ctx.cardStore.get(opts.card);
-    if (!selectedCard) throw new Error(`Query card not found: ${opts.card}`);
-    const allowedParams = cardParamNames(selectedCard);
-    if (allowedParams.length) {
-      const unknownParams = Object.keys(params).filter((key) => !allowedParams.includes(key));
-      if (unknownParams.length) throw new Error(`Invalid argument: Unknown --param for card ${selectedCard.id}: ${unknownParams.join(', ')}`);
-    }
-    if (!query) query = fillTemplate(selectedCard.sql, params);
-  }
-  if (!query && opts.template) {
-    const tpl = ctx.templateStore.get(opts.template);
-    if (!tpl) throw new Error(`Template not found: ${opts.template}`);
-    query = fillTemplate(tpl.nativeQueryTemplate, params);
-  }
-  const effectiveIntent = opts.intent || selectedCard?.intent || '';
-  if (!query && effectiveIntent) {
-    const learned = ctx.learningStore.resolveQueryTemplate(service || datasource.service || '', effectiveIntent);
-    const tpl =
-      (learned ? { nativeQueryTemplate: learned.sqlTemplate } : null) ||
-      ctx.kbStore.resolveQuery(service || datasource.service || '', effectiveIntent) ||
-      ctx.templateStore.resolveByIntent({ datasourceName: datasource.name, datasourceKind: datasource.kind, intent: effectiveIntent });
-    if (tpl) query = fillTemplate(String((tpl as any).nativeQueryTemplate), params);
-  }
-  if (!query) throw new Error('No query resolved. Provide --query/--sql, --template, or --intent.');
+  const effectiveIntent = opts.intent || '';
+  const query = (opts.query || '').trim();
+  if (!query) throw new Error('No query resolved. Provide --query/--sql.');
   progress.update('query resolved');
 
-  const referencedTables = collectReferencedTables(query);
-  if (supportsSchemaRefresh(datasource) && referencedTables.length) {
-    const priorSnapshotRows = ctx.learningStore.schemaTables(datasource.service).length;
-    if (priorSnapshotRows === 0 && !ctx.jsonMode) {
-      process.stderr.write(`[taproot] first query against service ${datasource.service} — running one-time schema learn for ${referencedTables.join(', ')}\n`);
-    }
-    try {
-      await ensureSchemaSnapshot(ctx, {
-        datasource: datasource.name,
-        tables: referencedTables,
-        metadataTimeoutMs: 3000,
-      });
-    } catch (err) {
-      logVerbose(`schema prime skipped: ${(err as Error).message}`);
-    }
+  const dialect = dialectFromKind(datasource.kind);
+  const referencedTables = collectReferencedTables(query, dialect);
+  if (supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name) && !ctx.jsonMode) {
+    process.stderr.write(`[taproot] first query against ${datasource.name}, caching its full schema catalog once\n`);
   }
-  const schemaContext = buildSchemaContext(query, { service: datasource.service }, ctx.learningStore);
+  const catalog = await ensureDatasourceCatalog(ctx, datasource);
+  if (catalog.outcome === 'failed') logVerbose(`schema catalog skipped: ${catalog.error}`);
+  else if (catalog.outcome === 'fetched') logVerbose(`schema catalog cached: ${catalog.tableCount} tables`);
+  const schemaContext = buildSchemaContext(
+    query,
+    { service: datasource.service, datasource: datasource.name, dialect },
+    ctx.learningStore,
+  );
   const relationEdges = ctx.kbStore.relationsForTables(
     str(datasource.service),
     referencedTables,
@@ -180,8 +147,6 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
     reason,
     sql: query,
     tables: referencedTables,
-    cardStore: ctx.cardStore,
-    selectedCard,
   });
   const capability = opts.allowMutate ? 'executeMutate' : 'executeRead';
   const plugin = ctx.pluginRegistry.get(datasource.kind);
@@ -212,9 +177,11 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
       ...enforcePartitionPredicate({
         sql: query,
         schemaContext,
+        dialect,
         allowPartitionScan: Boolean(opts.allowPartitionScan),
       }),
     );
+    warnings.push(...collectRangeWarnings({ sql: query, schemaContext, dialect }));
     const executedQuery = opts.explain ? `EXPLAIN ${query}` : query;
     progress.update('checking connectors');
     const connectStart = Date.now();
@@ -346,7 +313,7 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
     writeRunSummary(artifacts.runDir, result);
     appendEvent(artifacts.runDir, 'query succeeded');
 
-    ctx.learningStore.saveSuccess({ datasource, queryIntent: effectiveIntent, sql: query, result });
+    ctx.learningStore.saveSuccess({ datasource, sql: query });
     const phaseSummary = ctx.verbose
       ? ` [resolve ${phaseResolveMs}ms · connect ${phaseConnectMs}ms · execute ${phaseExecuteMs}ms]`
       : '';
@@ -392,12 +359,7 @@ export async function runDirectQuery(qenv: QueryEnv): Promise<void> {
     const code = classifyError(message);
     appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);
     progress.fail(`query failed (${code})`);
-    ctx.learningStore.saveFailure({
-      datasource,
-      queryIntent: effectiveIntent,
-      sql: query,
-      errorClass: code,
-    });
+    ctx.learningStore.saveFailure(datasource);
     appendRunsLedgerEntry({
       ledgerDir: ctx.paths.runsLedgerDir,
       runId: artifacts.runId,

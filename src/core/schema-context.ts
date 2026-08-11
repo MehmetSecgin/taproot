@@ -1,6 +1,7 @@
 import parserPkg from 'node-sql-parser';
-import type { SchemaContext, TableContext } from '../types/core.js';
+import type { SchemaCatalogSummary, SchemaContext, TableContext } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type LearningStore, type SchemaObservationEntry } from '../store/learning.js';
+import { parserDatabaseOption, type SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
 
 const { Parser } = parserPkg as unknown as {
@@ -22,6 +23,15 @@ function bareName(value: string): string {
   return normalizeName(value).split('.').pop() || '';
 }
 
+function columnName(node: unknown): string {
+  if (typeof node === 'string') return normalizeName(node);
+  if (!node || typeof node !== 'object') return '';
+  const expr = (node as Record<string, unknown>).expr;
+  if (!expr || typeof expr !== 'object') return '';
+  const value = (expr as Record<string, unknown>).value;
+  return typeof value === 'string' ? normalizeName(value) : '';
+}
+
 function safeTableName(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
   const obj = node as Record<string, unknown>;
@@ -37,9 +47,9 @@ function safeAlias(node: unknown): string {
   return typeof value === 'string' ? normalizeName(value) : '';
 }
 
-function parseAst(sql: string): unknown | null {
+function parseAst(sql: string, dialect: SqlDialect): unknown | null {
   try {
-    return parser.astify(sql, { database: 'mysql' });
+    return parser.astify(sql, { database: parserDatabaseOption(dialect) });
   } catch {
     return null;
   }
@@ -95,8 +105,8 @@ function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set
   }
 }
 
-export function collectReferencedTables(sql: string): string[] {
-  const ast = parseAst(sql);
+export function collectReferencedTables(sql: string, dialect: SqlDialect): string[] {
+  const ast = parseAst(sql, dialect);
   if (!ast) return [];
   const cteNames = new Set<string>();
   const tables = new Set<string>();
@@ -110,7 +120,7 @@ function collectColumnRefs(expr: unknown, aliasToTable: Map<string, string>, out
   if (!expr || typeof expr !== 'object') return;
   const obj = expr as Record<string, unknown>;
   if (obj.type === 'column_ref') {
-    const column = typeof obj.column === 'string' ? normalizeName(obj.column) : '';
+    const column = columnName(obj.column);
     const tableRaw = typeof obj.table === 'string' ? normalizeName(obj.table) : '';
     if (!column) return;
     if (!tableRaw) {
@@ -148,9 +158,9 @@ function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string
   }
 }
 
-export function collectPredicateColumns(sql: string): PredicateColumnRefs {
+export function collectPredicateColumns(sql: string, dialect: SqlDialect): PredicateColumnRefs {
   const out: PredicateColumnRefs = { byTable: new Map(), bare: new Set() };
-  const ast = parseAst(sql);
+  const ast = parseAst(sql, dialect);
   if (!ast) return out;
   const cteNames = new Set<string>();
   const aliasToTable = new Map<string, string>();
@@ -170,10 +180,21 @@ function matchesTable(row: SchemaObservationEntry, table: string): boolean {
   return bareName(row.table).toLowerCase() === bareName(table).toLowerCase();
 }
 
-export function buildSchemaContext(sql: string, target: string | { service?: string }, store: LearningStore): SchemaContext {
-  const referenced = collectReferencedTables(sql);
-  if (!referenced.length) return { tables: {} };
-  const service = typeof target === 'string' ? target : str(target?.service);
+function catalogSummary(store: LearningStore, datasourceName: string): SchemaCatalogSummary | undefined {
+  const entry = datasourceName ? store.schemaCatalog(datasourceName) : undefined;
+  if (!entry) return undefined;
+  return { tables: entry.tableCount, fetchedAt: entry.fetchedAt };
+}
+
+export function buildSchemaContext(
+  sql: string,
+  target: { service?: string; datasource?: string; dialect: SqlDialect },
+  store: LearningStore,
+): SchemaContext {
+  const referenced = collectReferencedTables(sql, target.dialect);
+  const catalog = catalogSummary(store, str(target.datasource));
+  if (!referenced.length) return catalog ? { tables: {}, catalog } : { tables: {} };
+  const service = str(target.service);
   const rows = store.schemaTables(service || undefined);
   const out: Record<string, TableContext> = {};
   for (const table of referenced) {
@@ -202,5 +223,5 @@ export function buildSchemaContext(sql: string, target: string | { service?: str
       partition: row.partition,
     };
   }
-  return { tables: out };
+  return catalog ? { tables: out, catalog } : { tables: out };
 }

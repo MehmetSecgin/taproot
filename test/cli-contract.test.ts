@@ -29,8 +29,6 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('doctor');
     expect(out.stdout).toContain('query');
     expect(out.stdout).toContain('datasource');
-    expect(out.stdout).toContain('template');
-    expect(out.stdout).toContain('card');
     expect(out.stdout).toContain('kb');
     expect(out.stdout).toContain('daemon');
     expect(out.stdout).toContain('session');
@@ -65,7 +63,7 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('ensure-schema');
   });
 
-  it('provides dynamic datasource/template completion entries', () => {
+  it('provides dynamic datasource completion entries', () => {
     const stateRoot = path.join(os.tmpdir(), `taproot-complete-${Date.now()}`);
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
@@ -86,36 +84,12 @@ describe('cli contract', () => {
         },
       ]),
     );
-    fs.writeFileSync(
-      path.join(configDir, 'templates.json'),
-      JSON.stringify([
-        {
-          id: 'orders.latest',
-          datasourceKind: 'mysql',
-          intent: 'latest orders',
-          aliases: [],
-          nativeQueryTemplate: 'SELECT 1 AS ok',
-          params: [],
-          resultShape: 'table',
-          tags: [],
-          status: 'active',
-          verifiedAt: new Date().toISOString(),
-        },
-      ]),
-    );
     const outDs = runCli(['__complete', 'query', '--datasource', 'qa'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
     });
     expect(outDs.status).toBe(0);
     expect(outDs.stdout).toContain('qa-orders');
-
-    const outTpl = runCli(['__complete', 'query', '--template', 'orders'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-    });
-    expect(outTpl.status).toBe(0);
-    expect(outTpl.stdout).toContain('orders.latest');
   });
 
   it('self-check json includes checks', () => {

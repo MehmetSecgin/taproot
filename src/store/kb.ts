@@ -4,13 +4,6 @@ import { normalizeRelations, relationsForTables } from '../core/relations.js';
 import type { KbRelation, SchemaRelationEdge } from '../types/core.js';
 import { str } from '../core/strings.js';
 
-function normalizeText(value: string): string {
-  return str(value)
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-}
-
 export class KbStore {
   constructor(private readonly kbDir: string) {}
 
@@ -20,10 +13,6 @@ export class KbStore {
 
   services(): any[] {
     return readJsonFile<any[]>(this.file('services.json'), []);
-  }
-
-  templates(): any[] {
-    return readJsonFile<any[]>(this.file('query-templates.json'), []);
   }
 
   relations(): any[] {
@@ -80,25 +69,4 @@ export class KbStore {
     return active.sort((a: any, b: any) => str(b.verified_at_utc).localeCompare(str(a.verified_at_utc)))[0];
   }
 
-  resolveQuery(service: string, intent: string): Record<string, unknown> | null {
-    const normalized = normalizeText(intent);
-    const cands = this.templates().filter((t) => str(t.service).toLowerCase() === service.toLowerCase() && String(t.status || 'active') === 'active');
-    if (!cands.length) return null;
-    const ranked = cands
-      .map((t) => ({
-        t,
-        exact: Number(normalizeText(str(t.intent)) === normalized),
-        aliasExact: Number((Array.isArray(t.aliases) ? t.aliases : []).some((a: string) => normalizeText(String(a)) === normalized)),
-        contains: Number(
-          normalizeText(str(t.intent)).includes(normalized) ||
-            normalized.includes(normalizeText(str(t.intent))) ||
-            (Array.isArray(t.aliases) ? t.aliases : []).some(
-              (a: string) => normalizeText(String(a)).includes(normalized) || normalized.includes(normalizeText(String(a))),
-            ),
-        ),
-      }))
-      .sort((a, b) => b.exact - a.exact || b.aliasExact - a.aliasExact || b.contains - a.contains || str(a.t.id).localeCompare(str(b.t.id)));
-    if (!ranked[0].exact && !ranked[0].aliasExact && !ranked[0].contains) return null;
-    return ranked[0].t;
-  }
 }

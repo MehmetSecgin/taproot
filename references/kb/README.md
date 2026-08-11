@@ -27,7 +27,6 @@ Intent strings are agent-facing API.
 
 Rules:
 - Keep intents stable and specific.
-- Prefer one canonical intent per template.
 - Use `aliases` for natural-language variations.
 - Avoid duplicate intents with equivalent SQL shape.
 - Resolver normalization for `intent` and `aliases`: trim + lowercase + collapse inner whitespace.

@@ -15,7 +15,6 @@ function runCli(args: string[], env: Record<string, string> = {}) {
 
 function setupState(input?: {
   runtimeConfig?: Record<string, unknown>;
-  templates?: Array<Record<string, unknown>>;
   datasources?: Array<Record<string, unknown>>;
   kbServices?: Array<Record<string, unknown>>;
 }) {
@@ -43,7 +42,6 @@ function setupState(input?: {
       ],
     ),
   );
-  fs.writeFileSync(path.join(configDir, 'templates.json'), JSON.stringify(input?.templates || []));
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(input?.runtimeConfig || {}));
   const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-query-resolution-memory-'));
   const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
@@ -201,27 +199,11 @@ describe('query resolution', () => {
     });
   });
 
-  it('intent resolves from template store', () => {
-    const { env } = setupState({
-      templates: [
-        {
-          id: 'orders.by-id',
-          datasourceName: 'qa-orders',
-          datasourceKind: 'mysql',
-          intent: 'latest orders',
-          aliases: [],
-          nativeQueryTemplate: 'SELECT * FROM orders WHERE id = :order_id',
-          params: ['order_id'],
-          resultShape: 'table',
-          tags: [],
-          status: 'active',
-          verifiedAt: new Date().toISOString(),
-        },
-      ],
-    });
+  it('intent alone does not resolve a query', () => {
+    const { env } = setupState();
     const out = runCli(['query', '--datasource', 'qa-orders', '--intent', 'latest orders'], env);
     expect(out.status).toBe(1);
-    expect(out.stderr).toContain('Missing --param for :order_id');
+    expect(out.stderr).toContain('No query resolved. Provide --query/--sql.');
   });
 
   it('service alias resolves transparently in query', () => {

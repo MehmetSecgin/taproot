@@ -29,9 +29,8 @@ For each capability:
 - Secret values are redacted in output and excluded from learning/artifacts.
 
 ## Learning model
-- Deterministic local caches only (`resolution-cache`, `query-library`, `query-stats`).
+- Deterministic local caches only (`resolution-cache`, `schema-catalog`, `schema-observations`, `schema-joins`, `grpc-schemas`).
 - Upsert by stable keys; avoid append-only duplicates.
-- Normalize SQL to placeholder templates (`:num`, `:str`, `:bool`) for cross-param reuse.
 
 ## Config boundaries
 - Datasource profiles own connection topology (`host`, `port`, `database`, `target`).

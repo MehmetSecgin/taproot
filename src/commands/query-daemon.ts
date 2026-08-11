@@ -22,8 +22,6 @@ export async function runDaemonQuery(env: QueryEnv): Promise<DaemonOutcome> {
         namespace: opts.namespace,
         intent: opts.intent,
         reason: opts.reason,
-        card: opts.card,
-        template: opts.template,
         query: opts.query,
         allowDiscovery,
         allowMutate: Boolean(opts.allowMutate),

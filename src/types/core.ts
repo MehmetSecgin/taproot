@@ -41,12 +41,6 @@ export const EnsuredBy = {
 } as const;
 export type EnsuredBy = (typeof EnsuredBy)[keyof typeof EnsuredBy];
 
-export const TemplateStatus = {
-  Active: 'active',
-  Inactive: 'inactive',
-} as const;
-export type TemplateStatus = (typeof TemplateStatus)[keyof typeof TemplateStatus];
-
 export const KbRelationSource = {
   Curated: 'curated',
   Derived: 'derived',
@@ -118,25 +112,9 @@ export interface RuntimeConfig {
     ledger?: {
       redactionTier?: LedgerRedactionTier;
     };
-    cardRoots?: string[];
   };
-  cardRoots?: string[];
   environmentPolicies?: Record<string, Partial<EnvironmentPolicy>>;
   serviceAliases?: Record<string, string>;
-}
-
-export interface QueryTemplate {
-  id: string;
-  datasourceKind?: string;
-  datasourceName?: string;
-  intent: string;
-  aliases?: string[];
-  nativeQueryTemplate: string;
-  params: string[];
-  resultShape: 'table' | 'json' | 'summary';
-  tags: string[];
-  status: TemplateStatus;
-  verifiedAt?: string;
 }
 
 export interface QueryRequest {
@@ -282,8 +260,14 @@ export interface RelationValidation {
   stale: boolean;
 }
 
+export interface SchemaCatalogSummary {
+  tables: number;
+  fetchedAt: string;
+}
+
 export interface SchemaContext {
   tables: Record<string, TableContext>;
+  catalog?: SchemaCatalogSummary;
   services?: Record<string, RpcServiceShape>;
   messages?: Record<string, RpcMessageShape>;
   enums?: Record<string, RpcEnumShape>;
@@ -307,17 +291,8 @@ export interface QueryMemoryPastRun {
   rowCount?: number;
 }
 
-export interface QueryMemoryMatchedCard {
-  id: string;
-  purpose?: string;
-  lastUsedAt?: string;
-  lastOutcome?: string;
-}
-
 export interface QueryMemory {
-  matchedCards?: QueryMemoryMatchedCard[];
   similarPastRuns?: QueryMemoryPastRun[];
-  warnings?: string[];
   hints?: string[];
 }
 

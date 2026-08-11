@@ -6,7 +6,7 @@ v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector a
 
 ## Principles
 - Datasource-centric UX.
-- Plugin-native query syntax + intent/template layer.
+- Plugin-native query syntax with explicit SQL only.
 - Operator mode with explicit mutation gates.
 - Agent-safe secrets and minimal output exposure.
 - Self-learning/documenting local runtime.
@@ -124,7 +124,7 @@ Redis plugin notes:
 - Output shape: single column `value`, one row per reply line (multi-bulk replies → multiple rows).
 - Protobuf decoding (Redis only): pass `--proto <MessageName> --proto-root <dir>` to decode binary replies with `protobufjs`. `--proto-root` is loaded recursively; all `.proto` files inside are registered and imports resolve by basename. Decoded rows carry the message object as `value`; text replies (`SCAN` keys, `(nil)`, integers, `INFO` blocks) pass through unchanged. Printable-ASCII fallback prevents `SCAN`/`KEYS` from being misdecoded. Per-datasource defaults via `resolverHints.protoRoot` / `resolverHints.protoMessage` (set with `--hint key=value` on `datasource add`).
 - Without `--proto`, binary payloads pass through raw — `redis-cli` is not asked to decode them.
-- No schema cache, no card promotion, no partition checks — Redis bypasses the MySQL/Postgres learning paths.
+- No schema cache, no partition checks — Redis bypasses the MySQL/Postgres learning paths.
 - Discovery (`taproot discover`) does **not** yet propose Redis datasources; register them with `datasource add`.
 - TLS: pass `--ssl true` on the datasource to add `--tls` to `redis-cli`.
 
@@ -328,7 +328,6 @@ Expected layout:
 ```
 $TAPROOT_KB_DIR/
   services.json       # required; service → connection metadata
-  query-templates.json
   relations.json
 ```
 
@@ -402,13 +401,12 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot discover <kb|kubectl|teleport> --env <env> [--namespace <ns>] [--service <s>] [--host-pattern service-name|tiproxy] [--shared-credential-ref] [--no-vpn] [--apply] [--force]`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
-- `taproot query --datasource <name> [--query | --template | --intent] [--param k=v] [--allow-discovery]`
+- `taproot query --datasource <name> --query <sql> [--param k=v] [--intent <label>] [--allow-discovery]`
 - `taproot datasource <list|show|add|remove|resolve>`
 - `taproot connector <setup|status>`
-- `taproot template <list|save|validate|run>`
-- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|resolve-query|tables|related|list-services>`
+- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|tables|related|list-services>`
 - `taproot cache <show|prune|clear>`
-- `taproot learn <status|compact|replay|refresh-schema|schema|ensure-schema|tables|joins|shapes|relations>` — `refresh-schema`/`schema`/`ensure-schema` also handle `grpc` datasources (proto descriptor cached per service)
+- `taproot learn <status|compact|replay|refresh-schema|schema|ensure-schema|tables|joins|relations>` — `refresh-schema`/`schema`/`ensure-schema` also handle `grpc` datasources (proto descriptor cached per service)
 - `taproot creds <set|show|unset>`
 - `taproot daemon <start|status|stop|restart>`
 - `taproot session <open|ls|inspect|close|close-all>`
@@ -500,7 +498,6 @@ Structure:
     deterministic-config.json
     datasources.json
     credentials.json.enc       # encrypted-file fallback when no keychain
-    templates.json
   cache/
   runs/
   learning/
@@ -517,7 +514,7 @@ Structure:
 - `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.
 - `taproot self-check --agent` is the preferred machine-readable readiness contract, especially with `--datasource` or `--env` + `--service`.
 - Secrets are never printed and are redacted from JSON output envelopes.
-- Learning uses deterministic local caches (`resolution-cache`, `query-library`, `query-stats`) and excludes secret values.
+- Learning uses deterministic local caches (`resolution-cache`, `schema-observations`, `schema-joins`, `grpc-schemas`) and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
 - `taprootd`/`session` commands are available for Phase 1 runtime scaffolding.

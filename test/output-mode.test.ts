@@ -36,24 +36,6 @@ function setupStateRoot() {
       },
     ]),
   );
-  fs.writeFileSync(
-    path.join(configDir, 'templates.json'),
-    JSON.stringify([
-      {
-        id: 'orders.by-id',
-        datasourceName: 'qa-orders',
-        datasourceKind: 'mysql',
-        intent: 'order by id',
-        aliases: [],
-        nativeQueryTemplate: 'SELECT * FROM orders WHERE id = :order_id',
-        params: ['order_id'],
-        resultShape: 'table',
-        tags: [],
-        status: 'active',
-        verifiedAt: new Date().toISOString(),
-      },
-    ]),
-  );
   return stateRoot;
 }
 
@@ -73,15 +55,6 @@ describe('output mode contract', () => {
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.data.name).toBe('qa-orders');
-  });
-
-  it('shows template run result in human-readable mode by default', () => {
-    const stateRoot = setupStateRoot();
-    const out = runCli(['template', 'run', '--id', 'orders.by-id', '--param', 'order_id=42'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
-    expect(out.status).toBe(0);
-    expect(out.stdout).toContain('template: orders.by-id');
-    expect(out.stdout).toContain('id = 42');
-    expect(out.stdout.trim().startsWith('{')).toBe(false);
   });
 
   it('shows cache and learn in human-readable mode by default', () => {

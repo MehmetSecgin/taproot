@@ -2,12 +2,10 @@ import path from 'node:path';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { ensurePaths, resolveFallbackPaths, resolvePaths } from './paths.js';
 import { DatasourceStore } from '../store/datasources.js';
-import { TemplateStore } from '../store/templates.js';
 import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { LearningStore } from '../store/learning.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
-import { CardStore } from '../store/cards.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
 import { DoctorStatus } from '../types/core.js';
@@ -18,12 +16,10 @@ export { classifyError } from './error-classification.js';
 export interface AppContext {
   paths: ReturnType<typeof resolvePaths>;
   datasourceStore: DatasourceStore;
-  templateStore: TemplateStore;
   credentialStore: CredentialStore;
   kbStore: KbStore;
   learningStore: LearningStore;
   runtimeConfigStore: RuntimeConfigStore;
-  cardStore: CardStore;
   pluginRegistry: PluginRegistry;
   jsonMode: boolean;
   noColor: boolean;
@@ -51,12 +47,10 @@ export function buildContext(opts: {
   return {
     paths,
     datasourceStore: new DatasourceStore(paths.datasourceFile),
-    templateStore: new TemplateStore(paths.templatesFile),
     credentialStore: new CredentialStore(paths.credentialFile),
     kbStore: new KbStore(paths.kbDir),
     learningStore: new LearningStore(paths.learningDir),
     runtimeConfigStore,
-    cardStore: new CardStore({ stateRoot: paths.stateRoot, runtimeConfigStore }),
     pluginRegistry,
     jsonMode: Boolean(opts.jsonMode),
     noColor: Boolean(opts.noColor),
@@ -79,15 +73,6 @@ export function normalizeNamespace(value?: string): string {
 
 export function environmentPolicy(ctx: Pick<AppContext, 'runtimeConfigStore'>, env?: string): EnvironmentPolicy {
   return ctx.runtimeConfigStore.environmentPolicy(env);
-}
-
-export function fillTemplate(template: string, params: Record<string, string>): string {
-  return template.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, (_, key: string) => {
-    if (!(key in params)) throw new Error(`Missing --param for :${key}`);
-    const value = params[key];
-    if (/^[-+]?\d+(\.\d+)?$/.test(value)) return value;
-    return `'${value.replace(/'/g, "''")}'`;
-  });
 }
 
 export function parseParamPairs(values: string[]): Record<string, string> {

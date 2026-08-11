@@ -2,6 +2,7 @@ import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, RpcEnumShape, RpcMessageShape, RpcServiceShape, SchemaIndex, SchemaPartition, SchemaProvenance } from '../types/core.js';
+import { RUNTIME_CONSTANTS } from './constants.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from './session-timezone.js';
@@ -429,6 +430,41 @@ export async function refreshSchemaForDatasource(
 
 export function supportsSchemaRefresh(datasource?: DatasourceProfile): boolean {
   return Boolean(datasource && isSqlDatasource(datasource.kind));
+}
+
+export type CatalogEnsureOutcome = 'unsupported' | 'cached' | 'fetched' | 'failed';
+
+export interface CatalogEnsureResult {
+  outcome: CatalogEnsureOutcome;
+  tableCount: number;
+  fetchedAt?: string;
+  error?: string;
+}
+
+export async function ensureDatasourceCatalog(
+  ctx: AppContext,
+  datasource: DatasourceProfile,
+): Promise<CatalogEnsureResult> {
+  if (!supportsSchemaRefresh(datasource)) return { outcome: 'unsupported', tableCount: 0 };
+
+  const cached = ctx.learningStore.schemaCatalog(datasource.name);
+  if (cached) {
+    const fetched = Date.parse(cached.fetchedAt);
+    const ttlMs = RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
+    if (Number.isFinite(fetched) && Date.now() - fetched < ttlMs) {
+      return { outcome: 'cached', tableCount: cached.tableCount, fetchedAt: cached.fetchedAt };
+    }
+  }
+
+  try {
+    const refreshed = await refreshSchemaForDatasource(ctx, datasource, {
+      metadataTimeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs,
+    });
+    const entry = ctx.learningStore.saveSchemaCatalog({ datasource, tableCount: refreshed.tables.length });
+    return { outcome: 'fetched', tableCount: entry.tableCount, fetchedAt: entry.fetchedAt };
+  } catch (error) {
+    return { outcome: 'failed', tableCount: cached?.tableCount || 0, error: (error as Error).message };
+  }
 }
 
 export interface GrpcSchemaRefreshResult {

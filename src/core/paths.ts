@@ -9,7 +9,6 @@ export interface Paths {
   runtimeConfigFile: string;
   datasourceFile: string;
   credentialFile: string;
-  templatesFile: string;
   cacheDir: string;
   runsDir: string;
   runsLedgerDir: string;
@@ -42,7 +41,6 @@ function buildPaths(stateRoot: string, kbDir: string): Paths {
     runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),
-    templatesFile: path.join(configDir, 'templates.json'),
     cacheDir: path.join(stateRoot, 'cache'),
     runsDir: path.join(stateRoot, 'runs'),
     runsLedgerDir: path.join(stateRoot, 'learning', 'runs-ledger'),

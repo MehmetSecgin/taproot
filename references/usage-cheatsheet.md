@@ -16,13 +16,11 @@
 ## Doctor + Query
 - `taproot doctor --datasource production-sample`
 - `taproot query --datasource production-sample --query "SELECT 1 AS ok"`
-- `taproot query --datasource production-sample --template sample.latest_by_customer --param customer_id=42 --param limit=20`
 
 ## KB
 - `taproot kb resolve-connection --service sample --env production`
 - `taproot kb resolve-credentials --service sample --env production`
 - `taproot kb resolve-database-name --service sample --env production`
-- `taproot kb resolve-query --service sample --intent "latest records by customer"`
 
 ## Learning + Cache
 - `taproot learn status`

@@ -61,12 +61,11 @@ describe('schema learning store', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-learning-'));
     const store = new LearningStore(dir);
     const datasource = mkDatasource();
-    const result = mkResult();
     const sql =
       'SELECT o.id, c.customer_id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 1 ORDER BY o.id DESC';
 
-    store.saveSuccess({ datasource, queryIntent: 'orders join', sql, result });
-    store.saveSuccess({ datasource, queryIntent: 'orders join', sql, result });
+    store.saveSuccess({ datasource, sql });
+    store.saveSuccess({ datasource, sql });
 
     const tables = store.schemaTables('orders');
     expect(tables.length).toBe(2);
@@ -75,23 +74,21 @@ describe('schema learning store', () => {
     const joins = store.schemaJoins('orders');
     expect(joins.length).toBe(1);
     expect(joins[0].sightings).toBe(2);
-
-    const shapes = store.schemaQueryShapes('qa-orders');
-    expect(shapes.length).toBe(1);
-    expect(shapes[0].sightings).toBe(2);
   });
 
-  it('scrubs literal secrets from learned shape text', () => {
+  it('scrubs literal secrets from every learned file', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-learning-'));
     const store = new LearningStore(dir);
     const datasource = mkDatasource();
-    const result = mkResult();
     const sql = "SELECT id FROM users WHERE api_key = 'supersecret-token-123' AND user_id = 998877";
 
-    store.saveSuccess({ datasource, queryIntent: 'secret check', sql, result });
+    store.saveSuccess({ datasource, sql });
 
-    const shapesRaw = fs.readFileSync(path.join(dir, 'schema-query-shapes.json'), 'utf8');
-    expect(shapesRaw).not.toContain('supersecret-token-123');
-    expect(shapesRaw).not.toContain('998877');
+    const learned = fs
+      .readdirSync(dir)
+      .map((name) => fs.readFileSync(path.join(dir, name), 'utf8'))
+      .join('\n');
+    expect(learned).not.toContain('supersecret-token-123');
+    expect(learned).not.toContain('998877');
   });
 });

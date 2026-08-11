@@ -8,8 +8,6 @@ export interface QueryOpts {
   service?: string;
   intent?: string;
   reason?: string;
-  card?: string;
-  template?: string;
   query?: string;
   sql?: string;
   param?: string[];

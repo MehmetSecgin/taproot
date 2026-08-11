@@ -123,7 +123,6 @@ describe('learn empty states', () => {
       ]),
     );
     fs.writeFileSync(path.join(learningDir, 'schema-joins.json'), '[]');
-    fs.writeFileSync(path.join(learningDir, 'schema-query-shapes.json'), '[]');
 
     const out = runCli(['--json', 'learn', 'schema', '--env', 'develop', '--service', 'order-processor'], {
       TAPROOT_STATE_ROOT: stateRoot,

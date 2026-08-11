@@ -27,8 +27,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--intent <intent>')
     .option('--reason <reason>')
-    .option('--card <id>')
-    .option('--template <id>')
     .option('--query <native>')
     .option('--sql <native>', 'alias for --query (raw native query/SQL)')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])

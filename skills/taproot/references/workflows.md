@@ -72,14 +72,8 @@ taproot --json connector status --datasource <name> --connector teleport --all -
 ## Common Commands
 - Preferred order for routine query tasks:
 ```bash
-# 1) known datasource + known intent
-taproot --json query --datasource <name> --intent "<intent>" --param key=value
-
-# 2) known datasource + saved template
-taproot --json query --datasource <name> --template <id> --param key=value
-
-# 3) explicit SQL only when no reusable intent/template exists
-taproot --json query --datasource <name> --query "<sql>"
+# known datasource + explicit SQL. --intent is a ledger label, not a query source.
+taproot --json query --datasource <name> --query "<sql>" --intent "<intent>"
 ```
 
 - Avoid this by default:
@@ -239,30 +233,10 @@ taproot --json query --datasource <name> --query "SHOW CREATE TABLE <table>"
 taproot --json query --datasource <name> --query "SHOW FULL COLUMNS FROM <table>"
 ```
 
-- Query by intent:
+- Cache maintenance:
 ```bash
-taproot --json query --datasource <name> --intent "latest rows" --param id=42
-taproot --json cache resolve-query --service <service> --intent "latest rows"
-```
-
-- Query by saved template:
-```bash
-taproot --json query --datasource <name> --template <id> --param id=42
-taproot --json template run --id <id> --param id=42
-```
-
-- Template management:
-```bash
-taproot --json template list
-taproot --json template validate --id <id>
-taproot --json template save --id <id> --intent "latest rows" --query "SELECT * FROM sample WHERE id = :id"
-```
-
-- Explicit cache operations:
-```bash
-taproot --json cache lookup-target --env <env> --service <service> --intent "latest rows"
-taproot --json cache save-target --env <env> --service <service> --intent "latest rows" --engine tidb --target <target> --database <database>
-taproot --json cache save-query --service <service> --intent "latest rows" --sql-template "SELECT * FROM sample WHERE id = :id"
+taproot --json cache show
+taproot --json cache prune --ttl-hours 168
 ```
 
 - Session-backed repeated access:
@@ -279,7 +253,6 @@ taproot --json learn replay --run-id <id>
 taproot --json learn refresh-schema --datasource <name>
 taproot --json learn tables --datasource <name> --limit 50
 taproot --json learn joins --datasource <name> --limit 50
-taproot --json learn shapes --datasource <name> --limit 50
 ```
 
 - Repo safety and shell completion:
@@ -309,7 +282,6 @@ taproot completion fish
 - Prefer canonical service names in saved artifacts; aliases from `serviceAliases` are for input normalization, not storage.
 - If TapRoot is blocked, report the gap instead of falling back to direct `mysql`, `psql`, or `tsh` commands unless the user explicitly asks for that fallback.
 - Prefer existing datasource/query knowledge over rediscovery. If the user already gave the datasource or query shape, use it.
-- Prefer `query --intent` and `query --template` before writing raw SQL.
 - Use `doctor` for diagnosis, not as a mandatory pre-query ritual.
 - For MySQL/TiDB introspection, prefer `SHOW TABLES` and `SHOW CREATE TABLE` before reaching for `information_schema`.
 - Never use `LIKE`-based table discovery. Enumerate tables first and inspect exact names.

@@ -13,8 +13,6 @@ interface BenchScenario {
   service?: string;
   namespace?: string;
   query?: string;
-  template?: string;
-  card?: string;
   intent?: string;
   param?: string[];
   iterations?: number;
@@ -117,8 +115,6 @@ async function runScenario(scenario: BenchScenario, iterations: number, timeoutM
           service: scenario.service,
           namespace: scenario.namespace,
           query: scenario.query,
-          template: scenario.template,
-          card: scenario.card,
           intent: scenario.intent,
           allowMutate: Boolean(scenario.allowMutate),
           timeoutMs,
@@ -162,8 +158,7 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
     .description('Benchmark query latency with phase timing breakdown (resolve/connect/execute)')
     .option('--datasource <name>', 'datasource to benchmark (alternative: --scenario <file>)')
     .option('--query <native>', 'query to run each iteration')
-    .option('--template <id>', 'saved template id (alternative to --query)')
-    .option('--intent <intent>', 'resolved query intent (alternative to --query)')
+    .option('--intent <intent>', 'intent label recorded in the runs ledger')
     .option('--env <env>')
     .option('--service <service>')
     .option('--namespace <namespace>')
@@ -191,8 +186,8 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
         if (!opts.datasource && !(opts.env && opts.service)) {
           throw new Error('Invalid argument: --datasource or --env+--service required (or use --scenario <file>).');
         }
-        if (!opts.query && !opts.template && !opts.intent) {
-          throw new Error('Invalid argument: one of --query/--template/--intent required.');
+        if (!opts.query) {
+          throw new Error('Invalid argument: --query required.');
         }
         scenarios = [
           {
@@ -202,7 +197,6 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
             service: opts.service,
             namespace: opts.namespace,
             query: opts.query,
-            template: opts.template,
             intent: opts.intent,
             param: opts.param,
             iterations: cliIterations,

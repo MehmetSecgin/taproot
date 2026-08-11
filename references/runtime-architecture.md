@@ -46,7 +46,6 @@ Implication:
 - Persistent stores:
   - datasources: `src/store/datasources.ts`
   - credentials: `src/store/credentials.ts`
-  - templates: `src/store/templates.ts`
   - KB adapters: `src/store/kb.ts`
   - learning: `src/store/learning.ts`
 - Run artifacts: `src/core/artifacts.ts`
@@ -54,7 +53,7 @@ Implication:
 ### 3.3 Query Lifecycle (Current)
 `taproot query ...`:
 1. Resolve datasource from explicit profile, env/service, learning cache, or KB bootstrap.
-2. Resolve query from `--query`, `--template`, or intent resolver.
+2. Resolve query from `--query`.
 3. Enforce mutation policy (`src/core/safety.ts`).
 4. Execute connector `connect` hooks.
 5. Execute datasource plugin query.
@@ -68,12 +67,13 @@ Default root: `~/.taproot`
 Subpaths:
 - `config/datasources.json`
 - `config/credentials.json.enc`
-- `config/templates.json`
 - `cache/`
 - `runs/<run-id>/`
 - `learning/resolution-cache.json`
-- `learning/query-library.json`
-- `learning/query-stats.json`
+- `learning/schema-catalog.json`
+- `learning/schema-observations.json`
+- `learning/schema-joins.json`
+- `learning/grpc-schemas.json`
 
 ### 3.5 Credential Storage
 - Preferred: OS keychain (`keytar`).
@@ -94,18 +94,16 @@ Current builtins:
 ### 3.7 Learning Topology (Current)
 Learning is deterministic and upsert-based:
 - Resolution cache key: `env|service`
-- Query library key: `service|intentKey|sqlTemplate`
-- Query stats key: `datasource|templateId`
-
-Normalization:
-- SQL literals collapsed to placeholders (`:num`, `:str`, `:bool`).
-- Intent normalized to lowercase, single-space.
+- Schema catalog key: `datasource`
+- Schema observation key: `service|table`
+- Schema join key: `service|leftTable|rightTable|normalizedCondition`
 
 Behavior:
-- Success updates resolution + library + stats.
-- Failure updates failure counters/confidence in learning stats.
+- A query with no fresh catalog row triggers one unfiltered `information_schema` pass, then stamps the catalog.
+- Success updates resolution plus schema observations and joins from the executed SQL.
+- Failure updates resolution failure counters and confidence.
 - `learn compact` deduplicates by stable keys.
-- `cache prune` TTL-prunes learning files.
+- `cache prune` TTL-prunes learning files and run artifact directories.
 
 ### 3.8 Current Performance Shape
 Dominant latency today (for transport-backed queries):
@@ -251,7 +249,7 @@ Layer 1 (process memory, short TTL):
 - recent datasource resolution
 
 Layer 2 (persistent deterministic):
-- learning files (`resolution-cache`, `query-library`, `query-stats`)
+- learning files (`resolution-cache`, `schema-catalog`, `schema-observations`, `schema-joins`, `grpc-schemas`)
 
 Rule:
 - memory cache is optimization only.

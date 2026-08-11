@@ -21,7 +21,7 @@
 - Table render (no `--json`) emits `[schemaContext: N tables cached, M relations - pass --json for full detail]` for SQL kinds, or `[schemaContext: N services, M messages - ...]` for grpc. Treat it as cache-state signal: if N covers what you need, do not call `learn ensure-schema` or `grpc describe` again this session.
 
 ## Pluck
-- `--pluck <dot.path>` returns only that subtree of the envelope and cuts token cost sharply. Array indexing works (`data.rows[0]`). Available on `query`, `learn ensure-schema|schema|tables|joins|shapes|relations`, `datasource list|show`, `kb tables|list-services|related`, `doctor`, and `run show`. Pluck runs in-process, so prefer it over `--json ... | jq` for anything it can reach.
+- `--pluck <dot.path>` returns only that subtree of the envelope and cuts token cost sharply. Array indexing works (`data.rows[0]`). Available on `query`, `learn ensure-schema|schema|tables|joins|relations`, `datasource list|show`, `kb tables|list-services|related`, `doctor`, and `run show`. Pluck runs in-process, so prefer it over `--json ... | jq` for anything it can reach.
 - On a **failed** query `--pluck` does not emit a success-shaped value on stdout: the error envelope `{ok:false,error,...}` goes to **stderr** and the process exits non-zero. When capturing a plucked value, always gate on exit code. Empty stdout plus non-zero exit means failure, not zero rows.
 - Paths differ per command:
   - `query ... --pluck data.rows` (rows only), `--pluck data.columns`, `--pluck meta.schemaContext.tables.<t>.indexes`, `--pluck error.details.nextAction`.
@@ -40,6 +40,6 @@ Results over 32 KB are persisted to a tool-results file with table formatting pr
 
 ## Benchmarking
 - `taproot --json bench --datasource <name> --query "<sql>" --iterations <n>` for a single scenario. Reports p50/p95/avg per phase and aggregate totals.
-- `taproot --json bench --scenario <file>` for reproducible sweeps. File shape: `{ "iterations": <default>, "scenarios": [{ "name", "datasource"|"env"+"service", "query"|"template"|"intent", "iterations"? }, ...] }`.
+- `taproot --json bench --scenario <file>` for reproducible sweeps. File shape: `{ "iterations": <default>, "scenarios": [{ "name", "datasource"|"env"+"service", "query", "iterations"? }, ...] }`.
 - Bench routes through the daemon, so start it first with `taproot --json daemon start`.
 - Non-zero exit when any iteration fails, with errors aggregated per error code in `data.scenarios[].errors`.

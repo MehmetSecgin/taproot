@@ -50,15 +50,13 @@ Legend:
 | `query` | P | L | Primary execution path. Daemon-routed includes `meta.requestId`, `meta.runId`, `meta.sessionId`. |
 | `datasource list/show/add/remove/resolve/import/export` | P | L+pluck | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import --file` bulk-adds profiles; `export` round-trips with it. |
 | `kb resolve-* / tables / related / list-services` | P | L+pluck | Knowledge-base resolvers; safe-by-default read paths. |
-| `learn status/schema/tables/joins/shapes/ensure-schema/refresh-schema` | P | L+pluck | Learning cache inspection and maintenance. |
-| `template list/validate/run/save` | P | L | `template run` resolves a saved template into a query payload. |
-| `cache show/lookup-target/save-target/resolve-query/save-query/prune/clear` | P | L | Cache maintenance. |
+| `learn status/schema/tables/joins/ensure-schema/refresh-schema` | P | L+pluck | Learning cache inspection and maintenance. |
+| `cache show/prune/clear` | P | L | Cache maintenance. |
 | `creds set/show/list/unset/migrate-to-fallback` | P | — | Interactive by design; credential material never returned in plumbing JSON. |
 | `connector status/setup` | P | L | `status` plumbing-safe. `setup` may prompt in porcelain. |
 | `daemon start/status/stop/restart` | P | L | Daemon lifecycle. Plumbing always includes `meta.requestId`. |
 | `session open/ls/inspect/close/close-all` | P | L | Session lifecycle through `taprootd`. |
 | `run show/list` | P | L | Inspect persisted run artifacts. |
-| `card list/show/validate` | P | L | Curated query cards. |
 | `sanitize check-repo` | P | L | Secret/sensitive leak scan. |
 | `onboard` | P | — | Interactive porcelain only. |
 | `completion <shell>` | P | — | Emits shell-completion script to stdout. |

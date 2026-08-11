@@ -84,27 +84,6 @@ function setupKbState() {
     ]),
   );
   fs.writeFileSync(
-    path.join(kbDir, 'query-templates.json'),
-    JSON.stringify([
-      {
-        id: 'contains-orders',
-        service: 'orders',
-        intent: 'orders',
-        aliases: [],
-        nativeQueryTemplate: 'SELECT * FROM orders LIMIT 10',
-        status: 'active',
-      },
-      {
-        id: 'latest-orders',
-        service: 'orders',
-        intent: 'latest orders',
-        aliases: ['recent orders'],
-        nativeQueryTemplate: 'SELECT * FROM orders ORDER BY created_at DESC LIMIT 10',
-        status: 'active',
-      },
-    ]),
-  );
-  fs.writeFileSync(
     path.join(kbDir, 'table-catalog.json'),
     JSON.stringify([
       { service: 'orders', env: 'qa', database: 'orders', tables: ['orders', 'order_items'] },
@@ -157,20 +136,6 @@ describe('kb resolution', () => {
     const out = runCli(['--json', 'kb', 'resolve-database-name', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).database).toBe('orders');
-  });
-
-  it('kb resolve-query matches by intent', () => {
-    const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-query', '--service', 'orders', '--intent', 'latest orders'], env);
-    expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).id).toBe('latest-orders');
-  });
-
-  it('kb resolve-query ranks exact > contains', () => {
-    const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-query', '--service', 'orders', '--intent', 'latest orders'], env);
-    expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).nativeQueryTemplate).toContain('ORDER BY created_at DESC');
   });
 
   it('kb tables lists table catalog', () => {

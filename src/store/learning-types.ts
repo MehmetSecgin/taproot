@@ -17,40 +17,13 @@ export interface ResolutionEntry {
   confidence: number;
 }
 
-export interface QueryLibraryEntry {
-  id: string;
-  key: string;
-  service: string;
-  intentKey: string;
-  sqlTemplate: string;
-  source: 'learned' | 'kb' | 'manual';
-  lastVerifiedAt: string;
-  successCount: number;
-}
-
-export interface TargetSelectionEntry {
+export interface SchemaCatalogEntry {
   key: string;
   env: string;
-  namespace?: string;
   service: string;
-  intentKey: string;
-  engine: string;
-  target: string;
   database: string;
-  updatedAt: string;
-  source: 'learned' | 'kb' | 'manual';
-}
-
-export interface QueryStatEntry {
-  key: string;
-  datasource: string;
-  templateId: string;
-  lastRunAt: string;
-  lastStatus: 'success' | 'error';
-  lastErrorClass?: string;
-  successCount: number;
-  failureCount: number;
-  latencyMsP50: number;
+  fetchedAt: string;
+  tableCount: number;
 }
 
 export interface SchemaTableColumnStat {
@@ -103,22 +76,15 @@ export interface SchemaJoinEntry {
   sources: SchemaProvenance[];
 }
 
-export interface SchemaQueryShapeEntry {
-  key: string;
-  datasource: string;
-  env: string;
-  service: string;
-  kind: string;
-  database: string;
-  operation: string;
-  normalizedSql: string;
-  tables: string[];
-  joins: string[];
-  firstSeenAt: string;
-  lastSeenAt: string;
-  sightings: number;
-  confidence: number;
-  sources: SchemaProvenance[];
+export interface LearningStatus {
+  files: {
+    resolution: number;
+    schemaObservations: number;
+    schemaJoins: number;
+    schemaCatalog: number;
+    grpcSchemas: number;
+  };
+  latest?: string;
 }
 
 export interface GrpcServiceSchemaEntry {

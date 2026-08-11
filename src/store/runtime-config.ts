@@ -49,13 +49,6 @@ export class RuntimeConfigStore {
     return 'redact';
   }
 
-  cardRoots(): string[] {
-    const config = this.get();
-    return [...(config.defaults?.cardRoots || []), ...(config.cardRoots || [])]
-      .map((item) => str(item).trim())
-      .filter(Boolean);
-  }
-
   serviceAliases(): Record<string, string> {
     return this.get().serviceAliases || {};
   }

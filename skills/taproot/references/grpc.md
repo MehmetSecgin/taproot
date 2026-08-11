@@ -1,6 +1,6 @@
 # gRPC
 
-Treat `kind: grpc` datasources as RPC endpoints, not databases. v1 supports **unary calls only** (server, client, and bidi streaming are deferred). Card promotion and persistent learning for unary calls are deferred too.
+Treat `kind: grpc` datasources as RPC endpoints, not databases. v1 supports **unary calls only** (server, client, and bidi streaming are deferred). Persistent learning for unary calls is deferred too.
 
 ## Introspection is offline
 `grpc list`, `grpc find`, and `grpc describe` read the local proto root only. They need no network, no VPN, no running server, and no credentials. Use them to explore an API and build a request before connectivity exists. Only `doctor` and `query` open a channel.

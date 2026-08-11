@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../core/app.js';
-import { normalizeNamespace, normalizeService } from '../core/app.js';
+import { pruneRunArtifacts } from '../core/artifacts.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 export function registerCache(program: Command, getCtx: () => AppContext): void {
@@ -17,86 +17,24 @@ export function registerCache(program: Command, getCtx: () => AppContext): void 
       console.log(renderRecord({ cacheDir: ctx.paths.cacheDir, fileCount: files.length, latestLearnedAt: learning.latest || '' }));
       console.log(renderTable([
         { metric: 'resolution entries', value: learning.files.resolution },
-        { metric: 'query library entries', value: learning.files.queryLibrary },
-        { metric: 'query stats entries', value: learning.files.queryStats },
-        { metric: 'target selection entries', value: learning.files.targetSelections },
+        { metric: 'schema observation entries', value: learning.files.schemaObservations },
+        { metric: 'schema join entries', value: learning.files.schemaJoins },
+        { metric: 'schema catalog entries', value: learning.files.schemaCatalog },
+        { metric: 'grpc schema entries', value: learning.files.grpcSchemas },
       ]));
     }
   });
 
-  c.command('lookup-target')
-    .requiredOption('--env <env>')
-    .option('--namespace <namespace>')
-    .requiredOption('--service <service>')
-    .requiredOption('--intent <intent>')
-    .action((opts) => {
-      const ctx = getCtx();
-      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const out = ctx.learningStore.resolveTargetSelection(String(opts.env), service, String(opts.intent), normalizeNamespace(opts.namespace) || undefined);
-      if (!out) throw new Error('No target selection match.');
-      if (ctx.jsonMode) printJson(out);
-      else console.log(renderRecord(out as unknown as Record<string, unknown>));
-    });
-
-  c.command('save-target')
-    .requiredOption('--env <env>')
-    .option('--namespace <namespace>')
-    .requiredOption('--service <service>')
-    .requiredOption('--intent <intent>')
-    .requiredOption('--engine <engine>')
-    .requiredOption('--target <target>')
-    .requiredOption('--database <database>')
-    .action((opts) => {
-      const ctx = getCtx();
-      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const out = ctx.learningStore.saveTargetSelection({
-        env: String(opts.env),
-        namespace: normalizeNamespace(opts.namespace) || undefined,
-        service,
-        intent: String(opts.intent),
-        engine: String(opts.engine),
-        target: String(opts.target),
-        database: String(opts.database),
-        source: 'manual',
-      });
-      if (ctx.jsonMode) printJson(out);
-      else console.log(renderRecord(out as unknown as Record<string, unknown>));
-    });
-
-  c.command('resolve-query')
-    .requiredOption('--service <service>')
-    .requiredOption('--intent <intent>')
-    .action((opts) => {
-      const ctx = getCtx();
-      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const out = ctx.learningStore.resolveQueryTemplate(service, String(opts.intent));
-      if (!out) throw new Error('No query template match.');
-      if (ctx.jsonMode) printJson(out);
-      else console.log(renderRecord(out as unknown as Record<string, unknown>));
-    });
-
-  c.command('save-query')
-    .requiredOption('--service <service>')
-    .requiredOption('--intent <intent>')
-    .requiredOption('--sql-template <sql>')
-    .action((opts) => {
-      const ctx = getCtx();
-      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const out = ctx.learningStore.saveQueryTemplate({
-        service,
-        intent: String(opts.intent),
-        sqlTemplate: String(opts.sqlTemplate),
-        source: 'manual',
-      });
-      if (ctx.jsonMode) printJson(out);
-      else console.log(renderRecord(out as unknown as Record<string, unknown>));
-    });
-
   c.command('prune').option('--ttl-hours <n>', 'default 168', '168').action((opts) => {
     const ctx = getCtx();
-    const res = ctx.learningStore.prune(Number(opts.ttlHours));
-    if (ctx.jsonMode) printJson(res);
-    else console.log(`pruned: before=${res.before} after=${res.after}`);
+    const ttlHours = Number(opts.ttlHours);
+    const learning = ctx.learningStore.prune(ttlHours);
+    const runs = pruneRunArtifacts(ctx.paths.runsDir, Date.now() - ttlHours * 3600 * 1000);
+    if (ctx.jsonMode) printJson({ learning, runs });
+    else {
+      console.log(`pruned learning: before=${learning.before} after=${learning.after}`);
+      console.log(`pruned run artifacts: before=${runs.before} after=${runs.after}`);
+    }
   });
 
   c.command('clear').option('--kind <kind>', 'all|learning', 'all').action((opts) => {

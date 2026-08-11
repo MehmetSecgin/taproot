@@ -1,8 +1,5 @@
 import type { QueryMemory, QueryMemoryPastRun } from '../types/core.js';
-import type { QueryCard } from '../types/cards.js';
-import type { CardStore } from '../store/cards.js';
 import { normalizeSqlForLedger, queryFingerprint, readRunsLedgerEntries, type RunsLedgerEntry } from './runs-ledger.js';
-import { collectPredicateColumns } from './schema-context.js';
 import { str } from './strings.js';
 
 export interface BuildQueryMemoryInput {
@@ -14,8 +11,6 @@ export interface BuildQueryMemoryInput {
   reason?: string;
   sql: string;
   tables?: string[];
-  cardStore?: CardStore;
-  selectedCard?: QueryCard;
 }
 
 export function resolveReason(value?: string): string {
@@ -65,37 +60,6 @@ function recurringFailureHints(rows: RunsLedgerEntry[], tables: string[]): strin
     .map((group) => group.lesson || `Repeated ${group.errorClass} failures on ${group.tables.join(', ') || 'this query shape'}.`);
 }
 
-function bareColumn(value: string): string {
-  return str(value).trim().toLowerCase().split('.').pop() || '';
-}
-
-function cardRequirementWarnings(card: QueryCard, sql: string): string[] {
-  const warnings: string[] = [];
-  const requires = card.requires || {};
-  const predicates = collectPredicateColumns(sql);
-  for (const filter of requires.must_filter || []) {
-    const required = bareColumn(filter);
-    if (!required) continue;
-    const table = str(filter).includes('.') ? String(filter).split('.').slice(0, -1).join('.') : '';
-    const tableCols = table ? predicates.byTable.get(table) || predicates.byTable.get(table.split('.').pop() || table) : undefined;
-    const present = predicates.bare.has(required) || [...predicates.byTable.values()].some((cols) => cols.has(required)) || Boolean(tableCols?.has(required));
-    if (!present) warnings.push(`card_requires_must_filter:${card.id}:${filter}`);
-  }
-  if (requires.max_range_days) {
-    const dates = [...str(sql).matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)]
-      .map((match) => new Date(`${match[1]}T00:00:00Z`).getTime())
-      .filter((time) => Number.isFinite(time))
-      .sort((a, b) => a - b);
-    if (dates.length >= 2) {
-      const days = Math.round((dates.at(-1)! - dates[0]) / 86400000);
-      if (days > requires.max_range_days) warnings.push(`card_requires_max_range_days:${card.id}:${requires.max_range_days}:actual=${days}`);
-    } else {
-      warnings.push(`card_requires_max_range_days_unverified:${card.id}:${requires.max_range_days}`);
-    }
-  }
-  return warnings;
-}
-
 export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   const tables = Array.from(new Set((input.tables || []).map((item) => item.trim()).filter(Boolean))).sort();
   const normalizedSql = normalizeSqlForLedger(input.sql);
@@ -110,19 +74,6 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
     .slice(0, 3)
     .map((row) => toPastRun(row, input.datasource));
 
-  const cardMatches = input.cardStore
-    ? input.cardStore.match({ datasource: input.datasource, env: input.env, service: input.service, intent: input.intent, tables }).slice(0, 3)
-    : [];
-  const cards = input.selectedCard
-    ? [{ card: input.selectedCard, score: Number.MAX_SAFE_INTEGER, reasons: ['selected'] }, ...cardMatches.filter((match) => match.card.id !== input.selectedCard?.id)]
-    : cardMatches;
-  const matchedCards = cards.slice(0, 3).map((match) => ({
-    id: match.card.id,
-    purpose: match.card.purpose,
-  }));
-
-  const warnings: string[] = [];
-  for (const match of cards.slice(0, 3)) warnings.push(...cardRequirementWarnings(match.card, input.sql));
   const hints: string[] = [];
   if (!str(input.reason).trim()) {
     // Only nag when the same caller has run multiple queries in the recent ledger without a reason.
@@ -137,15 +88,15 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   const sameFingerprintSuccesses = rows.filter((row) => row.fingerprint === fingerprint && row.outcomeCode === 'ok');
   const distinctSessions = new Set(sameFingerprintSuccesses.map((row) => row.sessionId || row.runId));
   if (distinctSessions.size >= 5) {
-    hints.push('promote_candidate: this query shape has succeeded in at least 5 distinct sessions; consider promoting it to a curated query card');
+    hints.push(
+      `recurring_shape: this query has succeeded in ${distinctSessions.size} distinct sessions; reuse the run with "taproot --json run show --run-id <id>" instead of rewriting it`,
+    );
   }
   hints.push(...recurringFailureHints(rows, tables));
 
   const dedupedHints = Array.from(new Set(hints));
   const out: QueryMemory = {};
-  if (matchedCards.length) out.matchedCards = matchedCards;
   if (similarPastRuns.length) out.similarPastRuns = similarPastRuns;
-  if (warnings.length) out.warnings = warnings;
   if (dedupedHints.length) out.hints = dedupedHints;
   return out;
 }
@@ -153,13 +104,8 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
 export function renderQueryMemoryTty(memory?: QueryMemory): string {
   if (!memory) return '';
   const lines: string[] = [];
-  const matchedCards = memory.matchedCards || [];
   const similarPastRuns = memory.similarPastRuns || [];
-  const warnings = memory.warnings || [];
   const hints = memory.hints || [];
-  if (matchedCards.length) {
-    lines.push(`matched cards: ${matchedCards.map((card) => card.id).join(', ')}`);
-  }
   if (similarPastRuns.length) {
     lines.push(
       `similar runs: ${similarPastRuns
@@ -168,7 +114,6 @@ export function renderQueryMemoryTty(memory?: QueryMemory): string {
         .join(' | ')}`,
     );
   }
-  if (warnings.length) lines.push(`warnings: ${warnings.join(' | ')}`);
   if (hints.length) lines.push(`hints: ${hints.join(' | ')}`);
   return lines.length ? `queryMemory:\n${lines.map((line) => `  ${line}`).join('\n')}` : '';
 }
