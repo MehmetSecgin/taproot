@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
 import { CredentialStore } from '../src/store/credentials.js';
+import { fakePlugin } from './helpers/fake-plugin.js';
 
 const previousEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -105,7 +106,7 @@ describe('daemon deterministic resolution', () => {
       JSON.stringify([
         {
           name: 'qa-slow',
-          kind: 'mysql',
+          kind: 'fake',
           env: 'qa',
           service: 'slow',
           tags: [],
@@ -120,7 +121,11 @@ describe('daemon deterministic resolution', () => {
     const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));
     await creds.set('qa:slow', { user: 'reader', password: 'secret' });
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-    const daemon = await startDaemon({ stateRoot, socketPath });
+    const daemon = await startDaemon({
+      stateRoot,
+      socketPath,
+      configurePlugins: (registry) => registry.register(fakePlugin({ holdMs: 100 })),
+    });
     try {
       const res = await rpcCall({
         socketPath,
@@ -129,7 +134,6 @@ describe('daemon deterministic resolution', () => {
           datasource: 'qa-slow',
           query: 'SELECT 1 AS ok',
           timeoutMs: 25,
-          _testHoldMs: 100,
         },
         timeoutMs: 5_000,
       });

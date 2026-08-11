@@ -1,21 +1,15 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { environmentPolicy, normalizeNamespace, normalizeService } from '../core/app.js';
+import { environmentPolicy } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { deriveQueryTarget } from '../core/execute-query.js';
+import type { QueryExecutionRequest } from '../core/execute-query.js';
 import { createProgress } from '../core/progress.js';
 import { parseTimeoutMs } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { str } from '../core/strings.js';
 import { runDaemonQuery } from './query-daemon.js';
 import { runDirectQuery } from './query-direct.js';
-import type { QueryEnv, QueryOpts } from './query-types.js';
-
-function parseDatasourceAlias(value: string | undefined, aliases: Record<string, string>): { env: string; service: string } | null {
-  const raw = str(value).trim().toLowerCase();
-  const m = raw.match(/^([a-z0-9]+)-([a-z0-9-]+)$/);
-  if (!m) return null;
-  return { env: m[1], service: normalizeService(m[2], aliases) };
-}
+import type { QueryOpts } from './query-types.js';
 
 export function registerQuery(program: Command, getCtx: () => AppContext): void {
   program
@@ -68,11 +62,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
       const rawTimeout = opts.timeout ?? opts.timeoutMs;
       const timeoutMs = parseTimeoutMs(rawTimeout, timeoutDefault);
-      const aliases = ctx.runtimeConfigStore.serviceAliases();
-      const explicitProfile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-      const alias = explicitProfile ? null : parseDatasourceAlias(opts.datasource, aliases);
-      const env = str(opts.env || explicitProfile?.env || alias?.env).trim();
-      const namespace = normalizeNamespace(str(opts.namespace || explicitProfile?.namespace));
+      const target = deriveQueryTarget(ctx, opts);
+      const env = target.env;
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
       const progress = createProgress({
@@ -82,9 +73,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         verbose: ctx.verbose,
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
-      const logVerbose = (msg: string): void => {
-        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
-      };
       const forceDirect =
         process.env.TAPROOT_FORCE_DIRECT === '1' ||
         allowDiscovery ||
@@ -93,17 +81,30 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       if (opts.explain && !opts.query) {
         throw new Error('Invalid argument: --explain requires --query (raw SQL). Resolve --card/--template/--intent first, then re-run with --query and --explain.');
       }
-      const qenv: QueryEnv = {
-        ctx,
-        opts,
-        progress,
-        logVerbose,
+      const request: QueryExecutionRequest = {
+        datasource: opts.datasource,
+        optsEnv: opts.env,
         env,
-        namespace,
-        timeoutMs,
+        namespace: target.namespace,
+        service: target.service,
+        intent: opts.intent,
+        reason: opts.reason,
+        query: opts.query || '',
+        params: opts.param || [],
         allowDiscovery,
-        explicitProfile,
-        alias,
+        allowMutate: Boolean(opts.allowMutate),
+        allowPartitionScan: Boolean(opts.allowPartitionScan),
+        allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
+        explain: Boolean(opts.explain),
+        rowsObject: Boolean(opts.rowsObject),
+        jsonExtract: opts.jsonExtract || [],
+        proto: opts.proto,
+        protoRoot: opts.protoRoot,
+        allowFlush: Boolean(opts.allowFlush),
+        requestJson: opts.requestJson,
+        skipProtoValidate: Boolean(opts.skipProtoValidate),
+        timeoutMs,
+        tz: opts.tz,
       };
       try {
         if (allowDiscovery && !ctx.jsonMode) {
@@ -111,10 +112,10 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         }
         progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
         if (!forceDirect) {
-          const outcome = await runDaemonQuery(qenv);
+          const outcome = await runDaemonQuery({ request, ctx, opts, progress });
           if (outcome === 'handled') return;
         }
-        await runDirectQuery(qenv);
+        await runDirectQuery({ request, ctx, opts, progress });
       } finally {
         progress.stop();
       }

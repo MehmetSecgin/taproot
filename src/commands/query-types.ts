@@ -1,5 +1,3 @@
-import type { AppContext } from '../core/app.js';
-import type { ProgressReporter } from '../core/progress.js';
 
 export interface QueryOpts {
   datasource?: string;
@@ -30,15 +28,3 @@ export interface QueryOpts {
   jsonExtract?: string[];
 }
 
-export interface QueryEnv {
-  ctx: AppContext;
-  opts: QueryOpts;
-  progress: ProgressReporter;
-  logVerbose: (msg: string) => void;
-  env: string;
-  namespace: string;
-  timeoutMs: number;
-  allowDiscovery: boolean;
-  explicitProfile: ReturnType<AppContext['datasourceStore']['get']>;
-  alias: { env: string; service: string } | null;
-}

@@ -6,6 +6,7 @@ import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
 import { CredentialStore } from '../src/store/credentials.js';
+import { fakePlugin } from './helpers/fake-plugin.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 
 const previousEnv = {
@@ -18,7 +19,7 @@ function makeStateRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-daemon-'));
 }
 
-async function setupDaemon(datasourceCount = 1) {
+async function setupDaemon(datasourceCount = 1, holdMs = 0) {
   const stateRoot = makeStateRoot();
   process.env.TAPROOT_STATE_ROOT = stateRoot;
   process.env.TAPROOT_MASTER_KEY = 'test-master-key';
@@ -30,7 +31,7 @@ async function setupDaemon(datasourceCount = 1) {
   for (let i = 0; i < datasourceCount; i += 1) {
     dsStore.save({
       name: `qa-fake-${i}`,
-      kind: 'mysql',
+      kind: 'fake',
       env: 'qa',
       service: `fake-${i}`,
       tags: [],
@@ -45,7 +46,11 @@ async function setupDaemon(datasourceCount = 1) {
   await creds.set('qa:fake', { user: 'x', password: 'x' });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-  const daemon = await startDaemon({ stateRoot, socketPath });
+  const daemon = await startDaemon({
+    stateRoot,
+    socketPath,
+    configurePlugins: (registry) => registry.register(fakePlugin({ holdMs })),
+  });
   return { daemon, socketPath };
 }
 
@@ -59,7 +64,7 @@ describe('daemon rpc limits', () => {
   it('returns OVERLOADED when queue limit is exceeded', async () => {
     const total =
       RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + RUNTIME_CONSTANTS.daemon.maxQueuedQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total);
+    const { daemon, socketPath } = await setupDaemon(total, 900);
     try {
       const calls = Array.from({ length: total }, (_, i) =>
         rpcCall({
@@ -68,7 +73,6 @@ describe('daemon rpc limits', () => {
           params: {
             datasource: `qa-fake-${i}`,
             query: 'SELECT 1 AS ok',
-            _testHoldMs: 900,
           },
           timeoutMs: 15_000,
         }),
@@ -83,7 +87,7 @@ describe('daemon rpc limits', () => {
   }, 15_000);
 
   it('returns SESSION_BUSY when per-session lease cap is exceeded', async () => {
-    const { daemon, socketPath } = await setupDaemon(1);
+    const { daemon, socketPath } = await setupDaemon(1, 500);
     try {
       const total = RUNTIME_CONSTANTS.session.maxConcurrentLeases + 1;
       const calls = Array.from({ length: total }, () =>
@@ -93,7 +97,6 @@ describe('daemon rpc limits', () => {
           params: {
             datasource: 'qa-fake-0',
             query: 'SELECT 1 AS ok',
-            _testHoldMs: 500,
           },
           timeoutMs: 10_000,
         }),
@@ -124,7 +127,7 @@ describe('daemon rpc limits', () => {
 
   it('counts queue wait time against timeoutMs', async () => {
     const total = RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total);
+    const { daemon, socketPath } = await setupDaemon(total, 900);
     try {
       const blockers = Array.from({ length: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries }, (_, i) =>
         rpcCall({
@@ -133,7 +136,6 @@ describe('daemon rpc limits', () => {
           params: {
             datasource: `qa-fake-${i}`,
             query: 'SELECT 1 AS ok',
-            _testHoldMs: 1_000,
             timeoutMs: 5_000,
           },
           timeoutMs: 10_000,

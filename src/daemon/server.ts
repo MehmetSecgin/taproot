@@ -7,6 +7,7 @@ import { buildContext, classifyError, nextAction } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import type { RpcRequest, RpcResponse } from './types.js';
+import type { PluginRegistry } from '../plugins/registry.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
@@ -15,6 +16,7 @@ import { HANDLERS, type HandlerDeps } from './handlers/index.js';
 export interface DaemonOptions {
   stateRoot?: string;
   socketPath?: string;
+  configurePlugins?: (registry: PluginRegistry) => void;
 }
 
 function defaultRunDir(stateRoot?: string): string {
@@ -53,6 +55,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   const sessions = new SessionRegistry(runDir);
   const queryLimiter = new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries);
   const ctx = buildContext({ jsonMode: true });
+  opts.configurePlugins?.(ctx.pluginRegistry);
   const startedAt = Date.now();
 
   const deps: HandlerDeps = { ctx, sessions, queryLimiter, socketPath, startedAt };

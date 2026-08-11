@@ -1,5 +1,7 @@
 # Architecture Decisions
 
+This file is the v1 record. Decisions from ADR-0001 onward live in `docs/adr/`.
+
 ## Reuse-first policy
 For each capability:
 1. Reuse stable OSS library / existing CLI
