@@ -6,6 +6,7 @@ run-output/
 *.log
 
 # Local investigation artifacts — never commit (may contain internal data)
+.scratch/
 HANDOFF-*.md
 *.seed.json
 .claude/settings.local.json
