@@ -73,6 +73,7 @@ const SETUP_KIND_COMMANDS: Record<string, string> = {
 };
 
 const AUTH_FREE_SETUP_KINDS = new Set(['grpc']);
+const AUTH_OPTIONAL_KINDS = new Set(['redis']);
 
 function normalizeSetupKind(kind?: string): string {
   const normalized = str(kind).trim().toLowerCase();
@@ -188,10 +189,13 @@ function credentialsCheck(ctx: AppContext): ReadinessCheck {
   if (fs.existsSync(file)) return { check: 'credentials', status: DoctorStatus.Ok, detail: file };
   const datasources = ctx.datasourceStore.list();
   if (datasources.length && !datasources.some((d) => AUTH_REQUIRED_KINDS.has(d.kind))) {
+    const optionalKinds = [...new Set(datasources.filter((d) => AUTH_OPTIONAL_KINDS.has(d.kind)).map((d) => d.kind))];
     return {
       check: 'credentials',
       status: DoctorStatus.Ok,
-      detail: 'not required by the configured datasource kinds',
+      detail: optionalKinds.length
+        ? `optional for the configured datasource kinds (${optionalKinds.join(', ')}); set credentials only when the server has AUTH enabled`
+        : 'not required by the configured datasource kinds',
     };
   }
   return {
@@ -413,7 +417,9 @@ function withSupplementalReadinessActions(
         actionForReadiness({
           command: CREDS_SET_COMMAND,
           priority: READINESS_ACTION_PRIORITIES.credsRepair,
-          reason: 'Store the credentials under the same ref you passed to --credential-ref.',
+          reason: AUTH_OPTIONAL_KINDS.has(kind)
+            ? `Auth is optional for ${kind}: run this only when the server has AUTH enabled, storing the values under the same ref you passed to --credential-ref. Leave the ref unpopulated otherwise.`
+            : 'Store the credentials under the same ref you passed to --credential-ref.',
           checks: ['credentials'],
         }),
       );

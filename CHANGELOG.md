@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 0.20.0 are recorded in the git history only.
 
+## [0.23.0]
+
+### Changed
+
+- `redis` credentials are reported as optional rather than required. The setup chain still offers a
+  `creds set` step, now marked conditional on the server having AUTH enabled, and `credentialsCheck`
+  says the same thing instead of flatly reporting credentials as not required.
+
+### Fixed
+
+- `doctor` no longer writes `datasources.json` or seeds credentials. A diagnostic that resolves
+  `--env/--service` to no stored profile now reports the missing profile and points at
+  `init datasource` or `datasource add`, exiting 7.
+
 ## [0.22.0]
 
 ### Fixed

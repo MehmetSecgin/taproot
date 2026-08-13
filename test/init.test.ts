@@ -188,6 +188,59 @@ describe('init command', () => {
     );
   });
 
+  it('marks the credential step optional in the redis setup chain', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+
+    // act
+    const out = runCli(['--json', 'init', '--kind', 'redis'], {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    });
+
+    // assert
+    expect(out.status).toBe(0);
+    const details = JSON.parse(out.stdout).nextActionDetails;
+    const commands: string[] = details.map((action: any) => action.command);
+    expect(commands[0]).toBe(
+      'taproot datasource add --name <name> --kind redis --env <env> --service <service> --host <host> --port 6379 --credential-ref <name>',
+    );
+    const credsAction = details.find((action: any) => String(action.command).startsWith('taproot creds set'));
+    expect(credsAction).toBeDefined();
+    expect(credsAction.reasons.join(' ')).toMatch(/optional/i);
+  });
+
+  it('reports credentials as optional when only redis datasources are configured', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const memoryRoot = makeMemoryRoot();
+    setupKb(memoryRoot);
+    const env = {
+      TAPROOT_STATE_ROOT: stateRoot,
+      TAPROOT_MASTER_KEY: 'test-key',
+      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+    };
+    runCli(['init'], env);
+    const added = runCli(
+      ['datasource', 'add', '--name', 'cache', '--kind', 'redis', '--env', 'qa', '--service', 'cache', '--host', '127.0.0.1', '--port', '6379', '--credential-ref', 'qa:redis:cache'],
+      env,
+    );
+    expect(added.status).toBe(0);
+
+    // act
+    const out = runCli(['init'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+    const credentialsLine = out.stdout.split('\n').find((line) => line.includes(' credentials:'));
+    expect(credentialsLine).toMatch(/^OK credentials:/);
+    expect(credentialsLine).toMatch(/optional/i);
+    expect(credentialsLine).toContain('redis');
+  });
+
   it('does not ask for credentials when every datasource kind is auth-free', () => {
     // arrange
     const stateRoot = makeStateRoot();

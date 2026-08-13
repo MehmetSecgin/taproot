@@ -1,9 +1,8 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
-import { bootstrapDatasource } from '../core/bootstrap.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
-import { exitCodeForClass } from '../core/exit-codes.js';
+import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
 import { renderTable, printJson, printJsonPluck } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
@@ -337,6 +336,60 @@ function misconfiguredDatasourceNextActions(datasource: DatasourceProfile): Doct
   ];
 }
 
+interface UnresolvedTarget {
+  env: string;
+  service: string;
+  namespace?: string;
+  kbAvailable: boolean;
+}
+
+function unresolvedTargetLabel(target: UnresolvedTarget): string {
+  return `env=${target.env}${target.namespace ? ` namespace=${target.namespace}` : ''} service=${target.service}`;
+}
+
+function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
+  const label = unresolvedTargetLabel(target);
+  return [
+    {
+      check: 'target_datasource',
+      status: DoctorStatus.Fail,
+      detail: `No datasource profile for ${label}; doctor reports state and does not create one`,
+    },
+    {
+      check: 'kb routing',
+      status: target.kbAvailable ? DoctorStatus.Ok : DoctorStatus.Warn,
+      detail: target.kbAvailable
+        ? `KB has a connection for ${label}, so the profile can be created from it`
+        : `KB has no connection for ${label}, so the profile has to be described by hand`,
+    },
+    {
+      check: 'doctor blocked',
+      status: DoctorStatus.Warn,
+      detail: 'plugin/connectivity checks skipped until the datasource profile exists',
+    },
+  ];
+}
+
+function unresolvedTargetNextActions(target: UnresolvedTarget): DoctorNextAction[] {
+  const namespaceFlag = target.namespace ? ` --namespace ${target.namespace}` : '';
+  const command = target.kbAvailable
+    ? `taproot --json init datasource --env ${target.env}${namespaceFlag} --service ${target.service}`
+    : `taproot datasource add --name ${defaultDatasourceName(target.env, target.service, target.namespace)} --kind <kind> --env ${target.env}${namespaceFlag} --service ${target.service} --host <host> --port <port> --credential-ref <ref>`;
+  return [
+    {
+      command,
+      priority: ACTION_PRIORITIES.datasourceRepair,
+      reasons: [
+        target.kbAvailable
+          ? 'The datasource profile does not exist yet, so create it from KB routing before rerunning doctor.'
+          : 'The datasource profile does not exist yet and the KB cannot supply its routing, so describe it explicitly before rerunning doctor.',
+      ],
+      checks: ['target_datasource'],
+      codes: [],
+    },
+  ];
+}
+
 export function registerDoctor(program: Command, getCtx: () => AppContext): void {
   program
     .command('doctor')
@@ -372,11 +425,32 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           const namespace = normalizeNamespace(opts.namespace);
           datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
           if (!datasource) {
-            const bootstrapped = await bootstrapDatasource(ctx, opts.env, service, defaultDatasourceName(opts.env, service, namespace || undefined), namespace || undefined);
-            if (bootstrapped) {
-              datasource = bootstrapped.profile;
-              logVerbose(`bootstrapped datasource from KB (${bootstrapped.profile.name})`);
+            const target: UnresolvedTarget = {
+              env: opts.env,
+              service,
+              namespace: namespace || undefined,
+              kbAvailable: Boolean(ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined)),
+            };
+            logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
+            const checks = unresolvedTargetChecks(target);
+            const nextActionDetails = unresolvedTargetNextActions(target);
+            progress.fail(`no datasource profile for ${unresolvedTargetLabel(target)}`);
+            if (ctx.jsonMode) {
+              printJsonPluck({
+                datasource: null,
+                plugin: null,
+                warnings,
+                checks,
+                nextActionDetails,
+                summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
+              }, opts.pluck ? String(opts.pluck) : undefined);
+            } else {
+              console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
+              console.log('Next actions:');
+              for (const action of nextActionDetails) console.log(`- ${action.command}`);
             }
+            process.exitCode = EXIT_CODES.NOT_READY;
+            return;
           }
         }
         if (!datasource) {
