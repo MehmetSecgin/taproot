@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext, AppContext as Ctx } from '../core/app.js';
 import { runDatasourceConnectors } from '../core/app.js';
+import { badInput } from '../core/error-classification.js';
 import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
 import { DoctorStatus } from '../types/core.js';
 
@@ -160,7 +161,7 @@ export function registerConnector(program: Command, getCtx: () => AppContext): v
       const ctx = getCtx();
       const datasource = resolveDatasource(ctx, opts.datasource);
       const connector = String(opts.connector).trim();
-      if (!connector) throw new Error('Connector name is required.');
+      if (!connector) throw badInput('Connector name is required.');
       if (!datasource.connectors?.includes(connector)) {
         throw new Error(`Connector '${connector}' is not configured on datasource '${datasource.name}'.`);
       }

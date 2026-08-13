@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
+import { badInput } from '../core/error-classification.js';
 import { nowIso } from '../core/time.js';
 import { renderRecord, renderTable, printJson, printEnvelope, printEnvelopePluck } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
@@ -14,10 +15,10 @@ function parseHintPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
     const idx = value.indexOf('=');
-    if (idx <= 0) throw new Error(`Invalid --hint '${value}'. Expected key=value.`);
+    if (idx <= 0) throw badInput(`Invalid --hint '${value}'. Expected key=value.`);
     const key = value.slice(0, idx).trim();
     const val = value.slice(idx + 1);
-    if (!key) throw new Error(`Invalid --hint '${value}'. Empty key.`);
+    if (!key) throw badInput(`Invalid --hint '${value}'. Empty key.`);
     out[key] = val;
   }
   return out;
@@ -27,10 +28,10 @@ function parseConnectorRefPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
     const idx = value.indexOf('=');
-    if (idx <= 0) throw new Error(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
+    if (idx <= 0) throw badInput(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
     const connector = value.slice(0, idx).trim();
     const ref = value.slice(idx + 1).trim();
-    if (!connector || !ref) throw new Error(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
+    if (!connector || !ref) throw badInput(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
     out[`${connector}CredentialRef`] = ref;
   }
   return out;
@@ -278,7 +279,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--dry-run', 'validate and report without saving', false)
     .action((opts) => {
       const ctx = getCtx();
-      if (!opts.file) throw new Error('Specify --file <path>.');
+      if (!opts.file) throw badInput('Specify --file <path>.');
       const candidates = extractImportArray(JSON.parse(fs.readFileSync(String(opts.file), 'utf8')));
 
       const imported: string[] = [];

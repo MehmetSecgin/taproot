@@ -22,7 +22,7 @@ import { registerBench } from './commands/bench.js';
 import { registerDiscover } from './commands/discover.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
-import { classifyError } from './core/error-classification.js';
+import { badInput, classifyError } from './core/error-classification.js';
 import { cleanupProgress } from './core/progress.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
 import { str } from './core/strings.js';
@@ -48,7 +48,7 @@ program.hook('preAction', () => {
   if (fmt === 'iso' || fmt === 'js' || fmt === 'epoch') {
     process.env.TAPROOT_DATETIME_FORMAT = fmt;
   } else if (fmt) {
-    throw new Error(`Invalid --datetime-format '${fmt}'. Expected iso|js|epoch.`);
+    throw badInput(`Invalid --datetime-format '${fmt}'. Expected iso|js|epoch.`);
   }
 });
 

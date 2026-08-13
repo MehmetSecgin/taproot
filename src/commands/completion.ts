@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
+import { badInput } from '../core/error-classification.js';
 import { str } from '../core/strings.js';
 
 function uniqueSorted(values: string[]): string[] {
@@ -123,7 +124,7 @@ export function registerCompletion(program: Command, getCtx: () => AppContext): 
         process.stdout.write(fishScript());
         return;
       }
-      throw new Error(`Unsupported shell '${shell}'.`);
+      throw badInput(`Unsupported shell '${shell}'.`);
     });
 
   program

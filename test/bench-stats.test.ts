@@ -1,3 +1,7 @@
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { phaseStats, percentile, summarize, type IterationSample } from '../src/commands/bench.js';
 
@@ -44,5 +48,63 @@ describe('bench phase statistics', () => {
     expect(summary.resolve.avg).toBe(15);
     expect(summary.execute.avg).toBe(105);
     expect(summary.errors).toEqual({ CONNECTIVITY: 2, ACCESS_DENIED: 1 });
+  });
+});
+
+describe('bench argument guards', () => {
+  function runCli(args: string[]) {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-guards-'));
+    return spawnSync(process.execPath, [path.join(process.cwd(), 'dist', 'index.js'), ...args], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' },
+    });
+  }
+
+  it('missing target fails as bad input', () => {
+    const out = runCli(['--json', 'bench', '--query', 'SELECT 1']);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('--datasource or --env+--service required');
+  });
+
+  it('scenario file without scenarios[] fails as bad input', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
+    const file = path.join(dir, 'scenarios.json');
+    fs.writeFileSync(file, JSON.stringify({ iterations: 3 }));
+    const out = runCli(['--json', 'bench', '--scenario', file]);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('missing scenarios[]');
+  });
+
+  it('missing scenario file fails as bad input', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
+    const out = runCli(['--json', 'bench', '--scenario', path.join(dir, 'absent.json')]);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('scenario file not found');
+  });
+
+  it('scenario file with malformed JSON fails as bad input', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
+    const file = path.join(dir, 'scenarios.json');
+    fs.writeFileSync(file, '{ not json');
+    const out = runCli(['--json', 'bench', '--scenario', file]);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('is not valid JSON');
+  });
+
+  it('missing query fails as bad input', () => {
+    const out = runCli(['--json', 'bench', '--datasource', 'qa-orders']);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('--query required');
   });
 });

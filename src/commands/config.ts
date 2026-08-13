@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
+import { badInput } from '../core/error-classification.js';
 import { printJson, renderTable } from '../core/output.js';
 import {
   createSnapshot,
@@ -111,7 +112,7 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
     .action((opts) => {
       const ctx = getCtx();
       if (!opts.id && !opts.label && !opts.latest) {
-        throw new Error('Specify one of --id <id>, --label <label>, or --latest.');
+        throw badInput('Specify one of --id <id>, --label <label>, or --latest.');
       }
       const result = restoreSnapshot(
         ctx.paths.configDir,
@@ -133,7 +134,7 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
     .action((opts) => {
       const ctx = getCtx();
       const keep = Number(opts.keep);
-      if (!Number.isInteger(keep) || keep < 0) throw new Error(`Invalid --keep '${opts.keep}'. Expected a non-negative integer.`);
+      if (!Number.isInteger(keep) || keep < 0) throw badInput(`Invalid --keep '${opts.keep}'. Expected a non-negative integer.`);
       const removed = pruneSnapshots(ctx.paths.configSnapshotsDir, keep);
       if (ctx.jsonMode) printJson({ removed, kept: keep });
       else console.log(removed.length ? `pruned ${removed.length} snapshot(s), kept ${keep}` : `nothing to prune (keeping ${keep})`);

@@ -213,6 +213,27 @@ describe('query resolution', () => {
     expect(out.stderr).toContain("Invalid --param 'brokenpair'");
   });
 
+  it('conflicting --query and --sql fails as bad input', () => {
+    const { env } = setupState();
+    const out = runCli(
+      ['--json', 'query', '--datasource', 'qa-orders', '--query', 'SELECT 1', '--sql', 'SELECT 2'],
+      env,
+    );
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('pass either --query or --sql, not both with different values');
+  });
+
+  it('--explain without a query fails as bad input', () => {
+    const { env } = setupState();
+    const out = runCli(['--json', 'query', '--datasource', 'qa-orders', '--explain'], env);
+    expect(out.status).toBe(2);
+    const envelope = JSON.parse(out.stdout);
+    expect(envelope.error.code).toBe('BAD_INPUT');
+    expect(envelope.error.message).toContain('--explain requires --query (raw SQL)');
+  });
+
   it('service alias resolves transparently in query', () => {
     const { env } = setupState({
       runtimeConfig: {

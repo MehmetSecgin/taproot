@@ -1,15 +1,16 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
+import { badInput } from '../core/error-classification.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 function parseKv(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
     const idx = value.indexOf('=');
-    if (idx <= 0) throw new Error(`Invalid --kv '${value}'. Expected key=value.`);
+    if (idx <= 0) throw badInput(`Invalid --kv '${value}'. Expected key=value.`);
     const key = value.slice(0, idx).trim();
     const val = value.slice(idx + 1);
-    if (!key) throw new Error(`Invalid --kv '${value}'. Key cannot be empty.`);
+    if (!key) throw badInput(`Invalid --kv '${value}'. Key cannot be empty.`);
     out[key] = val;
   }
   return out;

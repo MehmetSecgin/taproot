@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 0.20.0 are recorded in the git history only.
 
+## [0.24.0]
+
+### Fixed
+
+- The `--query`/`--sql` conflict guard and the `--explain requires --query` guard in `query`, and the
+  missing-target and missing-`--query` guards in `bench`, now throw `BAD_INPUT` instead of a plain
+  error. All four already exited 2, because `classifyExitCode` sniffs the literal string
+  `invalid argument`, but the JSON envelope reported `"code": "GENERIC"` with the generic
+  `nextAction`. The envelope now carries `BAD_INPUT`, and the plain-text message is prefixed
+  `BAD_INPUT:` like the other argument failures.
+- `bench --scenario` reports a missing file, malformed JSON, and a file with no `scenarios[]` array as
+  `BAD_INPUT`, exiting 2 instead of 1.
+- The remaining CLI argument guards throw `BAD_INPUT` too, so they exit 2 instead of 1:
+  `--datetime-format`, `--hint`, `--connector-ref`, `--kv`, `--keep`, `datasource import` without
+  `--file`, `config restore` without a selector, `grpc describe` without `--proto-root`/`--datasource`,
+  `connector` without a name, and `completion` for an unsupported shell.
+
 ## [0.23.0]
 
 ### Changed

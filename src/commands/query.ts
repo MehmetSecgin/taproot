@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { environmentPolicy } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { badInput } from '../core/error-classification.js';
 import { deriveQueryTarget } from '../core/execute-query.js';
 import type { QueryExecutionRequest } from '../core/execute-query.js';
 import { createProgress } from '../core/progress.js';
@@ -58,7 +59,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       ensureStarterRuntime(ctx);
       if (opts.sql && !opts.query) opts.query = opts.sql;
       if (opts.sql && opts.query && opts.sql !== opts.query) {
-        throw new Error('Invalid argument: pass either --query or --sql, not both with different values.');
+        throw badInput('pass either --query or --sql, not both with different values.');
       }
       const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
       const rawTimeout = opts.timeout ?? opts.timeoutMs;
@@ -75,7 +76,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
       if (opts.explain && !opts.query) {
-        throw new Error('Invalid argument: --explain requires --query (raw SQL).');
+        throw badInput('--explain requires --query (raw SQL).');
       }
       const request: QueryExecutionRequest = {
         datasource: opts.datasource,

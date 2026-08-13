@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
+import { badInput } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
@@ -93,10 +94,18 @@ export function summarize(samples: IterationSample[], scenarioName: string): Sce
 }
 
 function loadScenarioFile(file: string): BenchScenarioConfig {
+  if (!fs.existsSync(file)) {
+    throw badInput(`scenario file not found: ${file}`);
+  }
   const raw = fs.readFileSync(file, 'utf8');
-  const parsed = JSON.parse(raw) as Partial<BenchScenarioConfig>;
+  let parsed: Partial<BenchScenarioConfig>;
+  try {
+    parsed = JSON.parse(raw) as Partial<BenchScenarioConfig>;
+  } catch (error) {
+    throw badInput(`invalid scenario file: ${file} is not valid JSON. ${(error as Error).message}`);
+  }
   if (!parsed.scenarios || !Array.isArray(parsed.scenarios)) {
-    throw new Error(`Invalid scenario file: missing scenarios[] in ${file}`);
+    throw badInput(`invalid scenario file: missing scenarios[] in ${file}`);
   }
   return { iterations: parsed.iterations, scenarios: parsed.scenarios };
 }
@@ -184,10 +193,10 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
         if (cfg.iterations) defaultIterations = Math.max(1, cfg.iterations);
       } else {
         if (!opts.datasource && !(opts.env && opts.service)) {
-          throw new Error('Invalid argument: --datasource or --env+--service required (or use --scenario <file>).');
+          throw badInput('--datasource or --env+--service required (or use --scenario <file>).');
         }
         if (!opts.query) {
-          throw new Error('Invalid argument: --query required.');
+          throw badInput('--query required.');
         }
         scenarios = [
           {

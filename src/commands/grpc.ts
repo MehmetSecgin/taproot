@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
+import { badInput } from '../core/error-classification.js';
 import { printJson, renderTable, respondOk } from '../core/output.js';
 import { loadProtobufRoot } from '../core/proto-loader.js';
 import {
@@ -15,7 +16,7 @@ import { str } from '../core/strings.js';
 function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string; datasource?: string } {
   if (opts.protoRoot) return { root: String(opts.protoRoot), source: 'flag', datasource: opts.datasource };
   if (!opts.datasource) {
-    throw new Error('--proto-root or --datasource required for grpc describe.');
+    throw badInput('--proto-root or --datasource required for grpc describe.');
   }
   const ds = ctx.datasourceStore.get(opts.datasource);
   if (!ds) throw new Error(`Datasource not found: ${opts.datasource}`);
