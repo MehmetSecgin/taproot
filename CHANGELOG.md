@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 0.20.0 are recorded in the git history only.
 
+## [0.21.0]
+
+### Changed
+
+- `--explain` queries run through the daemon instead of forcing the direct path. The EXPLAIN wrap
+  lives in the shared execution module, so both paths produce the same envelope.
+- `--json-extract` queries run through the daemon instead of forcing the direct path. The extraction
+  lives in the shared execution module, so both paths produce the same derived column.
+- A malformed `--param` value fails as `BAD_INPUT` instead of `GENERIC`, so the exit code is 2 rather
+  than 1. Callers that branch on exit code 1 for this failure need updating.
+
+### Fixed
+
+- A malformed `--json-extract` spec returns a `BAD_INPUT` failure instead of throwing out of the
+  execution module. The exit code was already 2; run artifacts and the ledger are untouched either
+  way.
+- `--explain` without `--query` no longer points at `--card`/`--template`, which were removed.
+
 ## [0.20.0]
 
 ### Changed

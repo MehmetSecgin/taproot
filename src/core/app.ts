@@ -11,6 +11,7 @@ import { loadBuiltins } from '../plugins/load-builtins.js';
 import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
+import { badInput } from './error-classification.js';
 export { classifyError } from './error-classification.js';
 
 export interface AppContext {
@@ -79,7 +80,7 @@ export function parseParamPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
     const idx = value.indexOf('=');
-    if (idx <= 0) throw new Error(`Invalid --param '${value}'. Expected key=value.`);
+    if (idx <= 0) throw badInput(`Invalid --param '${value}'. Expected key=value.`);
     const key = value.slice(0, idx).trim();
     const val = value.slice(idx + 1);
     out[key] = val;

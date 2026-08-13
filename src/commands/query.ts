@@ -9,6 +9,7 @@ import { parseTimeoutMs } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { runDaemonQuery } from './query-daemon.js';
 import { runDirectQuery } from './query-direct.js';
+import { queryRoute } from './query-route.js';
 import type { QueryOpts } from './query-types.js';
 
 export function registerQuery(program: Command, getCtx: () => AppContext): void {
@@ -73,13 +74,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         verbose: ctx.verbose,
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
-      const forceDirect =
-        process.env.TAPROOT_FORCE_DIRECT === '1' ||
-        allowDiscovery ||
-        Boolean(opts.explain) ||
-        Boolean(opts.jsonExtract && opts.jsonExtract.length);
       if (opts.explain && !opts.query) {
-        throw new Error('Invalid argument: --explain requires --query (raw SQL). Resolve --card/--template/--intent first, then re-run with --query and --explain.');
+        throw new Error('Invalid argument: --explain requires --query (raw SQL).');
       }
       const request: QueryExecutionRequest = {
         datasource: opts.datasource,
@@ -106,12 +102,13 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         timeoutMs,
         tz: opts.tz,
       };
+      const route = queryRoute(request);
       try {
         if (allowDiscovery && !ctx.jsonMode) {
           progress.update('discovery mode enabled, bypassing daemon');
         }
-        progress.update(forceDirect ? 'running direct query mode' : 'attempting daemon query path');
-        if (!forceDirect) {
+        progress.update(route === 'direct' ? 'running direct query mode' : 'attempting daemon query path');
+        if (route === 'daemon') {
           const outcome = await runDaemonQuery({ request, ctx, opts, progress });
           if (outcome === 'handled') return;
         }

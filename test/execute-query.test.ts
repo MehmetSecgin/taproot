@@ -165,6 +165,7 @@ describe('executeQuery failure', () => {
     const outcome = await executeQuery(queryRequest({ params: ['brokenpair'] }), { ctx, report: silentQueryReport });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
+    expect(outcome.code).toBe('BAD_INPUT');
     expect(outcome.message).toContain("Invalid --param 'brokenpair'");
     expect(outcome.meta.runId).toBeUndefined();
     expect(ledgerEntries().length).toBe(0);

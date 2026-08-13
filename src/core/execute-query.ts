@@ -5,6 +5,7 @@ import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflict
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
+import type { JsonExtractSpec } from './json-extract.js';
 import { buildQueryMemory, resolveReason } from './query-memory.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { liveColumnsFromSchemaContext } from './relations.js';
@@ -227,9 +228,11 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
   const sessionId = deps.openSession ? deps.openSession(datasource) : request.sessionId;
   let params: Record<string, string>;
+  let jsonExtractSpecs: JsonExtractSpec[];
   const query = request.query.trim();
   try {
     params = parseParamPairs(request.params || []);
+    jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
     if (!query) throw new Error('No query resolved. Provide --query/--sql.');
   } catch (error) {
     return failure(error, {});
@@ -241,7 +244,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     datasourceHint: datasource.resolverHints?.timeZone,
     configDefault: ctx.runtimeConfigStore.queryTimeZone(),
   });
-  const jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
   const dialect = dialectFromKind(datasource.kind);
   const referencedTables = collectReferencedTables(query, dialect);
   if (supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name)) {

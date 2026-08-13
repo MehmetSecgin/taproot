@@ -9,7 +9,18 @@ import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import { DatasourceStore } from '../src/store/datasources.js';
+import type { QueryResult, TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
+
+function queryRecordingPlugin(seen: string[]): TapRootPlugin {
+  const plugin = fakePlugin();
+  const inner = plugin.execute!;
+  plugin.execute = async (request, creds): Promise<QueryResult> => {
+    seen.push(request.query);
+    return inner(request, creds);
+  };
+  return plugin;
+}
 
 const previousEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -41,17 +52,16 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
   };
 }
 
-async function runBothPaths(request: QueryExecutionRequest, warnings: string[] = []) {
-  const plugin = fakePlugin({ warnings });
+async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => TapRootPlugin = () => fakePlugin()) {
   const ctx = buildContext({ jsonMode: true });
-  ctx.pluginRegistry.register(plugin);
+  ctx.pluginRegistry.register(makePlugin());
   const direct = await executeQuery(request, { ctx, report: silentQueryReport });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-parity.sock');
   const daemon = await startDaemon({
     stateRoot,
     socketPath,
-    configurePlugins: (registry) => registry.register(fakePlugin({ warnings })),
+    configurePlugins: (registry) => registry.register(makePlugin()),
   });
   try {
     const rpc = await rpcCall({ socketPath, method: 'query.execute', params: { ...request }, timeoutMs: 10_000 });
@@ -111,10 +121,44 @@ describe('query parity between the direct and daemon adapters', () => {
   });
 
   it('emits each warning exactly once on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest(), ['partition scan without predicate']);
+    const { direct, rpc } = await runBothPaths(baseRequest(), () =>
+      fakePlugin({ warnings: ['partition scan without predicate'] }),
+    );
     if (!direct.ok) throw new Error('direct path failed');
     expect(direct.data.warnings).toEqual(['partition scan without predicate']);
     expect((rpc.data as Record<string, unknown>)?.warnings).toEqual(['partition scan without predicate']);
+  });
+
+  it('wraps the query with EXPLAIN on both paths', async () => {
+    const seen: string[] = [];
+    const { direct, rpc } = await runBothPaths(baseRequest({ explain: true }), () => queryRecordingPlugin(seen));
+
+    expect(direct.ok).toBe(true);
+    expect(rpc.ok).toBe(true);
+    expect(seen).toEqual(['EXPLAIN SELECT 1 AS ok', 'EXPLAIN SELECT 1 AS ok']);
+    if (!direct.ok) return;
+    expect(rpc.data).toEqual(direct.data);
+  });
+
+  it('adds the json-extract derived column on both paths', async () => {
+    const { direct, rpc } = await runBothPaths(baseRequest({ jsonExtract: ['payload:order.id'] }), () =>
+      fakePlugin({ columns: ['payload'], rows: [{ payload: '{"order":{"id":"A1"}}' }] }),
+    );
+
+    if (!direct.ok) throw new Error('direct path failed');
+    expect(direct.data.columns).toEqual(['payload', 'payload.order.id']);
+    expect(direct.data.rows).toEqual([['{"order":{"id":"A1"}}', 'A1']]);
+    expect(rpc.data).toEqual(direct.data);
+  });
+
+  it('rejects a malformed json-extract spec on both paths', async () => {
+    const { direct, rpc } = await runBothPaths(baseRequest({ jsonExtract: ['payload'] }));
+
+    expect(direct.ok).toBe(false);
+    expect(rpc.ok).toBe(false);
+    if (direct.ok) return;
+    expect(direct.code).toBe('BAD_INPUT');
+    expect(rpc.error?.code).toBe('BAD_INPUT');
   });
 
   it('rejects a malformed param on both paths', async () => {
@@ -124,6 +168,8 @@ describe('query parity between the direct and daemon adapters', () => {
     if (direct.ok) return;
     expect(direct.message).toContain("Invalid --param 'brokenpair'");
     expect(rpc.error?.message).toContain("Invalid --param 'brokenpair'");
+    expect(direct.code).toBe('BAD_INPUT');
+    expect(rpc.error?.code).toBe('BAD_INPUT');
   });
 
   it('maps run, session and phase metadata onto the daemon response', async () => {

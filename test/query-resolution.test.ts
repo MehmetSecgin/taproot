@@ -206,6 +206,13 @@ describe('query resolution', () => {
     expect(out.stderr).toContain('No query resolved. Provide --query/--sql.');
   });
 
+  it('malformed --param fails as bad input', () => {
+    const { env } = setupState();
+    const out = runCli(['query', '--datasource', 'qa-orders', '--query', 'SELECT 1', '--param', 'brokenpair'], env);
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain("Invalid --param 'brokenpair'");
+  });
+
   it('service alias resolves transparently in query', () => {
     const { env } = setupState({
       runtimeConfig: {

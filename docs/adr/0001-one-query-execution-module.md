@@ -81,7 +81,8 @@ The direct path wins every divergence:
 2. A malformed `--param` fails on both paths. It classifies as `GENERIC` (exit 1), not `BAD_INPUT`,
    because the parser's message carries no `bad_input:` prefix for `classifyError` to match. The
    architecture review claimed `BAD_INPUT`; a live check against a QA datasource showed otherwise.
-   Correcting the class changes an exit code, so it is left for a separate change.
+   Correcting the class changes an exit code, so it is left for a separate change. Superseded: it
+   classifies as `BAD_INPUT` (exit 2) since the follow-ups below.
 3. Both paths resolve through the same resolver.
 4. Warnings render on TTY on both paths.
 5. The `resolved via=` line prints on both paths.
@@ -93,7 +94,8 @@ a `CHANGELOG.md` entry.
 
 - `forceDirect` is unchanged. `--explain` and `--json-extract` become ordinary request fields, which
   makes two of its four conditions removable, but removing them routes traffic to a path that has
-  never served it. Each condition is removed in its own later change with its own test.
+  never served it. Each condition is removed in its own later change with its own test. Superseded:
+  both are removed, and the predicate is now `queryRoute`, see the follow-ups below.
 - The existing subprocess tests stay. They are the only regression net over this pipeline, and
   removing them in the change that rewrites it would remove the evidence that the rewrite is safe.
 
@@ -138,6 +140,20 @@ requested value. The daemon computed a remaining budget for execute, and its `Ab
 ever gated the queue wait, so dropping the remaining-budget calculation would have removed the
 daemon's only real total-time guarantee. The module now sets one deadline at entry and every timed
 step draws from it. This makes the direct path stricter than before and is listed in the changelog.
+
+## Follow-ups settled after acceptance
+
+The three items deferred above landed under issue #47, one change each.
+
+The `--explain` and `--json-extract` conditions are gone from the routing predicate, which now reads
+`TAPROOT_FORCE_DIRECT` and discovery only. Both flags are ordinary request fields served by the
+module, so the daemon serves them. The predicate moved to `src/commands/query-route.ts` as
+`queryRoute(request)`, which makes the routing decision assertable without a subprocess. A malformed
+`--json-extract` spec threw out of the module rather than returning a failure, because the specs were
+parsed outside the guarded block; that parse moved inside it.
+
+A malformed `--param` now classifies as `BAD_INPUT` and exits 2. The parser threw a plain `Error`,
+which is why `classifyError` read it as `GENERIC`; it throws `badInput` instead.
 
 ## Consequences
 
