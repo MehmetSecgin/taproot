@@ -16,6 +16,8 @@ export interface Paths {
   kbDir: string;
 }
 
+export const RUNS_LEDGER_DIR_NAME = 'runs-ledger';
+
 const LEGACY_KB_SUBPATH = path.join('domains', 'engineering', 'references', 'db-kb');
 
 function legacyKbFromMemoryRoot(memoryRoot: string): string {
@@ -43,7 +45,7 @@ function buildPaths(stateRoot: string, kbDir: string): Paths {
     credentialFile: path.join(configDir, 'credentials.json.enc'),
     cacheDir: path.join(stateRoot, 'cache'),
     runsDir: path.join(stateRoot, 'runs'),
-    runsLedgerDir: path.join(stateRoot, 'learning', 'runs-ledger'),
+    runsLedgerDir: path.join(stateRoot, 'learning', RUNS_LEDGER_DIR_NAME),
     learningDir: path.join(stateRoot, 'learning'),
     kbDir,
   };

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape, RpcServiceShape } from '../types/core.js';
+import { RUNS_LEDGER_DIR_NAME } from '../core/paths.js';
 import { nowIso } from '../core/time.js';
 import { extractQueryShape } from '../core/schema-learning.js';
 import type { RefreshedSchemaJoin, RefreshedSchemaTable } from '../core/schema-refresh.js';
@@ -76,6 +77,7 @@ export class LearningStore {
   private readonly schemaJoinFile: string;
   private readonly schemaCatalogFile: string;
   private readonly grpcSchemaFile: string;
+  private readonly runsLedgerDir: string;
   private schemaKeysMigrated = false;
 
   constructor(private readonly dir: string) {
@@ -85,6 +87,7 @@ export class LearningStore {
     this.schemaJoinFile = path.join(dir, 'schema-joins.json');
     this.schemaCatalogFile = path.join(dir, 'schema-catalog.json');
     this.grpcSchemaFile = path.join(dir, 'grpc-schemas.json');
+    this.runsLedgerDir = path.join(dir, RUNS_LEDGER_DIR_NAME);
   }
 
   private migrateSchemaKeysIfNeeded(): void {
@@ -334,5 +337,7 @@ export class LearningStore {
 
   clear(): void {
     this.saveAll({ resolution: [], schemaObservations: [], schemaJoins: [], schemaCatalog: [], grpcSchemas: [] });
+    fs.rmSync(this.runsLedgerDir, { recursive: true, force: true });
+    fs.mkdirSync(this.runsLedgerDir, { recursive: true });
   }
 }

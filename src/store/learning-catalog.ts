@@ -46,8 +46,5 @@ export function compactCatalog(rows: SchemaCatalogEntry[]): SchemaCatalogEntry[]
 }
 
 export function pruneCatalog(rows: SchemaCatalogEntry[], cutoffMs: number): SchemaCatalogEntry[] {
-  return rows.filter((row) => {
-    const fetched = Date.parse(str(row.fetchedAt));
-    return !Number.isFinite(fetched) || fetched >= cutoffMs;
-  });
+  return rows.filter((row) => Date.parse(str(row.fetchedAt)) >= cutoffMs);
 }

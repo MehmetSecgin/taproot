@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Releases before 0.20.0 are recorded in the git history only.
 
+## [0.22.0]
+
+### Fixed
+
+- `learn prune` drops catalog rows with an unparseable timestamp instead of keeping them. The other
+  four learning files already dropped them, so the catalog was the only one that grew without bound
+  when a row carried a bad date.
+- `learn clear` and `cache clear --kind all` remove the runs ledger. The ledger is nested inside the
+  learning directory, so it survived both.
+
 ## [0.21.0]
 
 ### Changed
