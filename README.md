@@ -231,16 +231,22 @@ taproot --json query --datasource qa-catalog-grpc \
 taproot --json query --datasource qa-catalog-grpc \
   --query "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
   --param text=Widget
+
+# client-streaming or bidi call: one array element per request message.
+# Returns one row per response message (columns seq, value):
+taproot --json query --datasource qa-catalog-grpc \
+  --query "com.example.catalog.v1.CatalogService/lookupItems" \
+  --request-json '[{"id":1},{"id":2},{"id":3}]'
 ```
 
 gRPC plugin notes:
 - Discovery: `grpc find <pattern>` searches every service/method by substring; `grpc list [pattern]` filters the method table; `grpc describe --service/--method` accept short names or unambiguous substrings (no need to copy the fully-qualified name). `grpc describe --method <m> --skeleton` prints an editable request JSON plus the exact `query` call line.
 - Learned schema cache (mirrors the SQL `learn` flow): `taproot learn refresh-schema --datasource <grpc>` introspects the proto root once and caches the full descriptor (services/methods/messages/enums) keyed by service. `taproot learn schema --datasource <grpc>` reads it back (no proto-root needed in cwd) and `taproot learn ensure-schema --datasource <grpc>` introspects on first use then serves cache; add `--refresh` after a proto change, `--detailed` to include message/enum shapes. The cache shows up in `learn status` as `grpc schema entries`.
 - Service/method typos in a call return a "did you mean" suggestion and the list of available methods; method names are matched case-insensitively.
-- Unary calls only in v1. Server/client/bidi streaming deferred.
+- Streaming calls run as a batch: every request message is sent, the stream is half-closed, and every response is collected. Up to 1000 messages each way (`TAPROOT_GRPC_STREAM_MESSAGE_LIMIT`). A server-side stream failure fails the query; `error.details.receivedRows` keeps the rows that arrived first.
 - Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
 - `--request-json` takes precedence over `--param`. `--param key=value` builds a flat JSON object; numeric strings → numbers, `true`/`false` → bool.
-- Response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck data.rows.0.0.<field>`.
+- Unary response: single row, `value` = full decoded message (oneofs collapsed, `longs:String` for int64). Pluck nested fields with `--pluck data.rows.0.0.<field>`.
 - Every grpc query result carries `meta.schemaContext.services` + `.messages` + `.enums` for the called method (transitive expansion of request + response shapes) — read that to compose follow-up calls instead of re-running `grpc describe`.
 - proto-root is loaded recursively via the shared proto loader (`@grpc/proto-loader` + `protobufjs`); all imports must be findable under `--proto-root` or beside the loaded files. Use the service repo's `build/extracted-protos/main` for one-shot self-contained loading.
 - Doctor opens a real channel against the first service in the loaded package by default. Override with `--hint probeService=<fq>` on `datasource add` to pin a specific service.

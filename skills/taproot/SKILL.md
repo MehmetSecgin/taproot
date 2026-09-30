@@ -1,6 +1,6 @@
 ---
 name: taproot
-description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly, gRPC unary calls), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, call gRPC endpoints, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB, `redis-cli`, or `grpcurl` scripts.
+description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly, gRPC unary and streaming calls), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, call gRPC endpoints, diagnose connector or auth issues, resolve env/service to a datasource, reuse learned query or target selections, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB, `redis-cli`, or `grpcurl` scripts.
 ---
 
 # TapRoot
@@ -11,7 +11,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 | Task | File |
 | --- | --- |
 | New machine, init, credentials, connectors, first call | `references/setup.md` |
-| gRPC endpoints (offline introspection, unary calls) | `references/grpc.md` |
+| gRPC endpoints (offline introspection, unary and streaming calls) | `references/grpc.md` |
 | Redis / Dragonfly (command tiers, protobuf payloads) | `references/redis.md` |
 | SQL schema cache, partitions, relations | `references/sql.md` |
 | JSON envelope, `--pluck`, rows shape, benchmarking | `references/output.md` |

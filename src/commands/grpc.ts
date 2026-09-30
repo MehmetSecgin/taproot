@@ -132,11 +132,12 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         for (const svc of descriptor.services) {
           for (const m of svc.methods) {
             if (methodName && m.name !== methodName) continue;
+            const message = buildRequestSkeleton(protobufRoot, m.requestType, { maxDepth });
             skeletons.push({
               service: svc.name,
               method: m.name,
               request: m.requestType,
-              skeleton: buildRequestSkeleton(protobufRoot, m.requestType, { maxDepth }),
+              skeleton: m.requestStream ? [message] : message,
             });
           }
         }

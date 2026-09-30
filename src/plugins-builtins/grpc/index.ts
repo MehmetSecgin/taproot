@@ -3,6 +3,7 @@ import type {
   DoctorCheck,
   QueryRequest,
   QueryResult,
+  RpcMethodShape,
   RpcServiceShape,
   SchemaContext,
   TapRootPlugin,
@@ -20,6 +21,7 @@ import {
 import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
 import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
+import { callStreaming, isStreamingMethod } from './stream-call.js';
 
 interface GrpcClient extends Record<string, unknown> {
   waitForReady: (deadline: number, callback: (err?: Error) => void) => void;
@@ -85,16 +87,16 @@ function resolveProtoRoot(request: QueryRequest): string {
   return root;
 }
 
-function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> {
+function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> | unknown[] {
   const pp = (request.pluginParams || {}) as GrpcPluginParams;
   const raw = pp.requestJson;
   if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('request JSON must decode to a non-array object');
+      if (parsed === null || typeof parsed !== 'object') {
+        throw new Error('request JSON must decode to an object, or an array of objects for a client-streaming or bidi method');
       }
-      return parsed as Record<string, unknown>;
+      return parsed as Record<string, unknown> | unknown[];
     } catch (err) {
       throw new Error(`invalid --request-json: ${(err as Error).message}`);
     }
@@ -107,6 +109,27 @@ function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string,
     else out[k] = v;
   }
   return out;
+}
+
+function requestMessages(
+  payload: Record<string, unknown> | unknown[],
+  service: string,
+  method: RpcMethodShape,
+): Record<string, unknown>[] {
+  if (!Array.isArray(payload)) return [payload];
+  if (!method.requestStream) {
+    throw badInput(`${service}/${method.name} takes one request message, not an array. Pass a JSON object in --request-json.`);
+  }
+  const limit = RUNTIME_CONSTANTS.grpc.streamMessageLimit;
+  if (payload.length > limit) {
+    throw badInput(`stream request has ${payload.length} messages; the limit is ${limit} per call. Split the batch or raise TAPROOT_GRPC_STREAM_MESSAGE_LIMIT.`);
+  }
+  payload.forEach((message, index) => {
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+      throw badInput(`request[${index}] must be a JSON object`, { field: `[${index}]`, expected: 'object' });
+    }
+  });
+  return payload as Record<string, unknown>[];
 }
 
 function callUnary(
@@ -232,14 +255,16 @@ export const grpcPlugin: TapRootPlugin = {
         throw new Error(`grpc method '${method}' not found on ${service}.${hint} Available: ${methodNames.join(', ')}.`);
       }
     }
+    const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod)!;
+    const messages = requestMessages(payload, service, methodShape);
     const skipProtoValidate = pp.skipProtoValidate === true || pp.skipProtoValidate === 'true';
     if (!skipProtoValidate) {
-      const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod);
-      if (methodShape) {
-        const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, payload);
+      for (const [index, message] of messages.entries()) {
+        const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, message);
         if (validationError) {
-          throw badInput(validationError.message, {
-            field: validationError.field,
+          const position = Array.isArray(payload) ? `request[${index}]` : '';
+          throw badInput(position ? `${position}: ${validationError.message}` : validationError.message, {
+            field: position ? `[${index}].${validationError.field}` : validationError.field,
             expected: validationError.expected,
             nextCommand: `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`,
           });
@@ -261,10 +286,20 @@ export const grpcPlugin: TapRootPlugin = {
       for (const [k, v] of metaHints) metadata.add(k, v);
     }
     const deadlineMs = request.timeoutMs && request.timeoutMs > 0 ? request.timeoutMs : 5000;
-    let response: Record<string, unknown>;
+    const streaming = isStreamingMethod(methodShape);
+    let rows: Array<Record<string, unknown>>;
+    const warnings: string[] = [];
     try {
-      response = await Promise.race([
-        callUnary(client, canonicalMethod, payload, metadata, deadlineMs),
+      const call = streaming
+        ? callStreaming(client, methodShape, messages, metadata ?? new bundle.grpcModule.Metadata(), deadlineMs).then((out) => {
+          if (out.truncated) {
+            warnings.push(`response stream stopped at ${out.responses.length} messages. Narrow the request or raise TAPROOT_GRPC_STREAM_MESSAGE_LIMIT.`);
+          }
+          return out.responses.map((value, seq) => ({ seq, value }));
+        })
+        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs).then((value) => [{ value }]);
+      rows = await Promise.race([
+        call,
         new Promise<never>((_, reject) => setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500)),
       ]);
     } catch (err) {
@@ -285,13 +320,13 @@ export const grpcPlugin: TapRootPlugin = {
       plugin: 'grpc',
       capability: request.capability,
       query: { native: `${service}/${canonicalMethod}` },
-      result: { columns: ['value'], rows: [{ value: response }] },
+      result: { columns: streaming ? ['seq', 'value'] : ['value'], rows },
       timings: {
         startedAt,
         endedAt: nowIso(),
         durationMs: Date.now() - start,
       },
-      warnings: [],
+      warnings,
       classification: 'success',
     };
     if (schemaContext) result.meta = { schemaContext };

@@ -1,6 +1,6 @@
 # gRPC
 
-Treat `kind: grpc` datasources as RPC endpoints, not databases. v1 supports **unary calls only** (server, client, and bidi streaming are deferred). Persistent learning for unary calls is deferred too.
+Treat `kind: grpc` datasources as RPC endpoints, not databases. Unary, server-streaming, client-streaming, and bidi methods are all callable. A streaming call is a batch: TapRoot sends every request message, half-closes, and collects every response before it returns. Persistent learning for calls is deferred.
 
 ## Introspection is offline
 `grpc list`, `grpc find`, and `grpc describe` read the local proto root only. They need no network, no VPN, no running server, and no credentials. Use them to explore an API and build a request before connectivity exists. Only `doctor` and `query` open a channel.
@@ -18,7 +18,11 @@ When a gRPC call fails, first establish which half is broken: if introspection a
 ## Calling
 - Query syntax: `--query "<fully.qualified.package.Service/Method>"`, mirroring `grpcurl`. The slash separates service from method, and method casing must match the `.proto` rpc declaration.
 - Request payload: full JSON via `--request-json '{...}'` (takes precedence), or built from `--param key=value` pairs (numeric strings become numbers, `true`/`false` become bools, everything else stays string). The shape must match the request message exactly. Use `grpc describe` rather than grepping `.proto` by hand.
-- Response: single row, `value` is the full decoded message object. Pluck nested fields with `--pluck data.rows.0.0.<field>`. int64 comes back as strings (`longs: String`). Oneofs carry a sibling key naming the active branch.
+- Streaming request: for a client-streaming or bidi method, pass a JSON array in `--request-json`, one element per message. A single object is sent as a one-message stream. An array on a unary or server-streaming method is `BAD_INPUT`. Validation errors name the element: `request[2]: unknown field ...` with `field: [2].<name>`. `grpc describe --skeleton` emits the array form for these methods.
+- Stream limits: at most 1000 request messages per call (`BAD_INPUT` above it). A response stream stops at 1000 messages and adds a warning. `TAPROOT_GRPC_STREAM_MESSAGE_LIMIT` changes both. `--timeout` covers the whole stream.
+- Stream failure: if the server fails the stream, the query fails. `error.details.stream` holds `sent`, `received`, and `grpcCode`, and `error.details.receivedRows` holds the rows that arrived before the failure (first 100). Treat the call as failed. Resend what is missing.
+- Streaming response: one row per response message, columns `seq` and `value`, in arrival order. gRPC does not pair responses with requests, so pair them by a field the service echoes, or by `seq` when the service answers one per request in order.
+- Unary response: single row, `value` is the full decoded message object. Pluck nested fields with `--pluck data.rows.0.0.<field>`. int64 comes back as strings (`longs: String`). Oneofs carry a sibling key naming the active branch.
 - `meta.schemaContext.services` (the called service) plus `meta.schemaContext.messages` and `.enums` (request and response shapes, transitively expanded) ride on every grpc query result. Read those instead of re-running `grpc describe` after a successful call.
 
 ## Configuration

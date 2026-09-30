@@ -37,7 +37,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
     .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
-    .option('--request-json <json>', 'gRPC plugin: request message body as JSON. Overrides --param-built payloads. Example: \'{"values":[1,2,3]}\'.')
+    .option('--request-json <json>', 'gRPC plugin: request message body as JSON. Overrides --param-built payloads. Example: \'{"values":[1,2,3]}\'. For a client-streaming or bidi method, pass an array with one element per message.')
     .option('--skip-proto-validate', 'gRPC plugin: bypass local proto schema validation of the request payload. Off by default; only use for deliberately malformed payloads (e.g. fuzzing).', false)
     .option(
       '--timeout <ms>',

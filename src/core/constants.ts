@@ -42,6 +42,10 @@ export const RUNTIME_CONSTANTS = {
     openvpnStatusTimeoutMs: 1_500,
     openvpnCommandTimeoutMs: 3_000,
   },
+  grpc: {
+    streamMessageLimit: intFromEnv('TAPROOT_GRPC_STREAM_MESSAGE_LIMIT', 1000),
+    streamFailureRowLimit: 100,
+  },
   defaultPorts: {
     mysql: 3306,
     postgres: 5432,
