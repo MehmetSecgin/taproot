@@ -34,6 +34,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - Use `--json` for anything parsed or relayed. Envelope: `{ ok, data, meta, error }`.
 - `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form.
 - `--pluck <dot.path>` projects a subtree in-process; prefer it over piping to jq. On failure it writes the error envelope to stderr and exits non-zero, so always gate on exit code.
+- The SQL or native command goes in `--query "<native>"` (alias `--sql`), never as a positional argument; a positional string fails with "too many arguments for 'query'". Example: `taproot --json query --datasource <name> --reason "<why>" --query "<sql>" --pluck data.rows`
 - Every query response carries `meta.schemaContext` for referenced tables (SQL) or the called service and messages (gRPC). Read it instead of re-introspecting.
 - The table catalog is cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`). After a migration, force a re-read with `learn refresh-schema --datasource <name>`.
 - Wide scans warn rather than block: `unbounded_range`, `wide_range:<table>.<key>:actual=N:max=M`, and `range_unverified` land in `data.warnings`. Tighten the range unless the wide scan is intended.
