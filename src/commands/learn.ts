@@ -7,6 +7,7 @@ import { connectivity } from '../core/error-classification.js';
 import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
+import { describeResolutionFailure } from '../core/resolve-datasource.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import { str } from '../core/strings.js';
 import { emptyState, isTargetedRequest, printEmptyState, resolveDatasource, scopedRows, unresolvedNextCommand } from './learn-common.js';
@@ -90,7 +91,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
-      if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
+      if (!datasource) throw new Error(describeResolutionFailure(ctx.datasourceStore.list(), { rawDs: opts.datasource, env: opts.env, namespace: opts.namespace, service: opts.service }));
       if (datasource.kind === DatasourceKind.Grpc) {
         const refreshed = await refreshGrpcSchemaForDatasource(ctx, datasource);
         const methodCount = refreshed.services.reduce((acc, s) => acc + s.methods.length, 0);

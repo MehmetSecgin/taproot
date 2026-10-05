@@ -8,6 +8,49 @@ import { str } from './strings.js';
 
 export type ResolutionSource = 'explicit' | 'store' | 'learning' | 'kb' | 'unknown';
 
+export interface ResolutionAsk {
+  rawDs?: string;
+  env?: string;
+  namespace?: string;
+  service?: string;
+}
+
+function splitDatasourceName(rawDs: string, services: string[]): { service: string; env: string } | undefined {
+  const parts = rawDs.split('-');
+  for (const service of [...services].sort((a, b) => b.length - a.length)) {
+    const want = service.split('-');
+    for (let i = 0; i + want.length <= parts.length; i++) {
+      if (want.every((w, j) => parts[i + j] === w)) return { service, env: parts.slice(0, i).join('-') };
+    }
+  }
+  return undefined;
+}
+
+export function describeResolutionFailure(profiles: DatasourceProfile[], ask: ResolutionAsk): string {
+  const rawDs = str(ask.rawDs).trim();
+  const known = [...new Set(profiles.map((p) => str(p.service).trim()).filter(Boolean))];
+  const fromName = rawDs ? splitDatasourceName(rawDs, known) : undefined;
+  const service = str(ask.service).trim() || fromName?.service || '';
+  const env = str(ask.env).trim() || fromName?.env || '';
+  const namespace = str(ask.namespace).trim();
+  const asked = rawDs ? `datasource '${rawDs}'` : `env=${env || '?'} service=${service || '?'}`;
+  const head = `Datasource resolution failed: no profile for ${asked}.`;
+  const matches = service ? profiles.filter((p) => str(p.service).trim() === service) : [];
+  if (!matches.length) return `${head} Use --datasource or --env+--service; list profiles with taproot --json datasource list.`;
+  const names = matches.map((p) => p.name).sort();
+  const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` (+${names.length - 6})` : '');
+  const envLabel = (p: DatasourceProfile) => str(p.env).trim() + (str(p.namespace).trim() ? `/${str(p.namespace).trim()}` : '');
+  const envs = [...new Set(matches.map(envLabel).filter(Boolean))].sort().join(', ');
+  const inEnv = (p: DatasourceProfile) => {
+    const ns = str(p.namespace).trim();
+    if (p.env === env) return !namespace || ns === namespace;
+    return !namespace && Boolean(ns) && `${p.env}-${ns}` === env;
+  };
+  const where = `env '${env}'${namespace ? ` namespace '${namespace}'` : ''}`;
+  const missing = env && !matches.some(inEnv) ? ` No profile in ${where}; add one with taproot datasource add.` : '';
+  return `${head} Profiles for service '${service}': ${shown} (envs: ${envs}).${missing}`;
+}
+
 export interface DatasourceResolution {
   datasource?: DatasourceProfile;
   source: ResolutionSource;

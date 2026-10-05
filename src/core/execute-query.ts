@@ -9,7 +9,7 @@ import type { JsonExtractSpec } from './json-extract.js';
 import { buildQueryMemory, resolveReason } from './query-memory.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { liveColumnsFromSchemaContext } from './relations.js';
-import { resolveDatasourceWithFallbacks } from './resolve-datasource.js';
+import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
 import { appendRunsLedgerEntry, ledgerInputFromResult } from './runs-ledger.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from './safety.js';
 import { buildSchemaContext, collectReferencedTables } from './schema-context.js';
@@ -174,7 +174,7 @@ async function resolveTargetDatasource(
       `environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`,
     );
   }
-  if (!datasource) throw new Error('Datasource resolution failed. Use --datasource or --env+--service.');
+  if (!datasource) throw new Error(describeResolutionFailure(ctx.datasourceStore.list(), { rawDs: request.datasource, env: request.optsEnv || env, namespace: namespace || undefined, service }));
   if (deterministic && !request.allowDiscovery && resolution.source === 'learning') {
     throw deterministicRequiredErr(
       `environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`,
