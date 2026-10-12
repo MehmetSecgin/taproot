@@ -60,6 +60,13 @@ describe('CLI argument guards classify as BAD_INPUT', () => {
     expectBadInput(['--json', 'grpc', 'describe'], '--proto-root or --datasource required');
   });
 
+  it('points a positional query argument at --query and --datasource', () => {
+    expectBadInput(
+      ['--json', 'query', 'demo-db', 'SELECT 1'],
+      'Pass the query text with --query "<sql>" (alias --sql) and the datasource with --datasource <name>',
+    );
+  });
+
   it('rejects an unsupported completion shell', () => {
     expectBadInput(['--json', 'completion', 'tcsh'], "Unsupported shell 'tcsh'");
   });

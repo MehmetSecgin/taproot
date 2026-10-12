@@ -17,6 +17,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
   program
     .command('query')
     .description('Execute plugin-native query against resolved datasource')
+    .allowExcessArguments()
     .option('--datasource <name>')
     .option('--env <env>')
     .option('--namespace <namespace>')
@@ -54,7 +55,12 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       (v, p: string[]) => (p || []).concat(v),
       [],
     )
-    .action(async (opts: QueryOpts) => {
+    .action(async (opts: QueryOpts, command: Command) => {
+      if (command.args.length > 0) {
+        throw badInput(
+          `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --query "<sql>" (alias --sql) and the datasource with --datasource <name>, e.g. taproot query --datasource demo-db --query "SELECT 1".`,
+        );
+      }
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
       if (opts.sql && !opts.query) opts.query = opts.sql;
