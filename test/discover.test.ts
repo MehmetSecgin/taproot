@@ -99,6 +99,13 @@ describe('classifyTshDatabase', () => {
     expect(p?.resolverHints.teleportCredentialRef).toBe('tsh:prod');
   });
 
+  it('carries the db user only when tsh allows exactly one', () => {
+    const one: TshDatabase = { name: 'prod-orders', protocol: 'mysql', users: { allowed: ['reader', '*'] } };
+    const several: TshDatabase = { name: 'prod-orders', protocol: 'mysql', users: { allowed: ['reader', 'writer'] } };
+    expect(classifyTshDatabase(one, { env: 'prod' })?.resolverHints.dbUser).toBe('reader');
+    expect(classifyTshDatabase(several, { env: 'prod' })?.resolverHints.dbUser).toBeUndefined();
+  });
+
   it('classifies postgres tsh DB', () => {
     const db: TshDatabase = {
       metadata: { name: 'prod-billing-pg', labels: { env: 'prod', service: 'billing' } },

@@ -8,8 +8,9 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
+import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/discover-datasources.js';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
-import type { QueryResult, TapRootPlugin } from '../../types/core.js';
+import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { str } from '../../core/strings.js';
 
 type ProxyRuntime = {
@@ -25,15 +26,34 @@ type ProxyRuntime = {
 
 const proxiesByKey = new Map<string, ProxyRuntime>();
 const proxyKeyBySession = new Map<string, Set<string>>();
+const allowedUsersByTarget = new Map<string, string[]>();
 let globalCleanupRegistered = false;
 
 function proxyKey(sessionId: string, target: string, user: string, database: string): string {
   return `${sessionId}|${target}|${user}|${database}`;
 }
 
-function resolveDbUser(ds: { resolverHints?: Record<string, string> }, creds: Record<string, string>): string {
+function tshAllowedUsers(target: string): string[] {
+  if (!allowedUsersByTarget.has(target)) {
+    for (const db of fetchTshDatabases().databases) allowedUsersByTarget.set(tshDbName(db), tshDbAllowedUsers(db));
+  }
+  return allowedUsersByTarget.get(target) || [];
+}
+
+function resolveDbUser(ds: DatasourceProfile, creds: Record<string, string>): string {
   const hints = ds.resolverHints || {};
-  return str(creds.dbUser || creds.user || hints.dbUser || hints.user).trim();
+  const explicit = str(creds.dbUser || creds.user || hints.dbUser || hints.user).trim();
+  const target = str(ds.connection.target).trim();
+  if (explicit || !target) return explicit;
+  const users = tshAllowedUsers(target);
+  if (users.length > 1) {
+    throw new Error(
+      `teleport-mysql found several allowed db users for '${target}' in 'tsh db ls': ${users.join(', ')}. ` +
+        `Pick one with 'taproot creds set --ref ${ds.credentialRef} --db-user <user>' ` +
+        `or 'taproot datasource add --name ${ds.name} ... --hint dbUser=<user>'.`,
+    );
+  }
+  return users[0] || '';
 }
 
 function ensureGlobalCleanup(): void {
@@ -227,10 +247,15 @@ export const teleportMysqlPlugin: TapRootPlugin = {
 
   async doctor(input) {
     const target = input.datasource.connection.target;
-    const user = resolveDbUser(input.datasource, input.credentials);
     const database = input.datasource.connection.database;
+    let user = '';
+    let detail = 'missing target/dbUser/database in datasource+credentials';
+    try {
+      user = resolveDbUser(input.datasource, input.credentials);
+    } catch (error) {
+      detail = (error as Error).message;
+    }
     if (!target || !user || !database) {
-      const detail = 'missing target/dbUser/database in datasource+credentials';
       return [{ check: 'teleport-mysql doctor', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
     }
     const sessionId = `doctor-${process.pid}-${Date.now()}`;

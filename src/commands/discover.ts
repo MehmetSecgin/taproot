@@ -37,7 +37,7 @@ function nextStepHints(proposals: DiscoveryProposal[]): void {
   const refs = new Set<string>();
   for (const p of proposals) {
     refs.add(p.credentialRef);
-    for (const value of Object.values(p.resolverHints)) refs.add(value);
+    for (const [key, value] of Object.entries(p.resolverHints)) if (key.endsWith('CredentialRef')) refs.add(value);
   }
   console.log('\nCredentials to set after applying:');
   for (const ref of [...refs].sort()) {

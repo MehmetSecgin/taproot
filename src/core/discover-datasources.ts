@@ -35,6 +35,7 @@ export interface TshDatabase {
   protocol?: string;
   labels?: Record<string, string>;
   uri?: string;
+  users?: { allowed?: string[] };
 }
 
 export type DiscoveryProposalKind =
@@ -155,8 +156,12 @@ export function classifyKubeService(svc: KubeService, opts: KubeClassifyOptions)
   };
 }
 
-function tshDbName(db: TshDatabase): string {
+export function tshDbName(db: TshDatabase): string {
   return (db.metadata?.name || db.name || '').trim();
+}
+
+export function tshDbAllowedUsers(db: TshDatabase): string[] {
+  return (db.users?.allowed || []).filter((u) => u && u !== '*');
 }
 
 function tshDbProtocol(db: TshDatabase): string {
@@ -196,6 +201,8 @@ export function classifyTshDatabase(db: TshDatabase, opts: TshClassifyOptions): 
   const connectors = vpn ? ['openvpn', 'teleport'] : ['teleport'];
   const resolverHints: Record<string, string> = { teleportCredentialRef: `tsh:${opts.env}` };
   if (vpn) resolverHints.openvpnCredentialRef = 'vpn:work';
+  const users = tshDbAllowedUsers(db);
+  if (users.length === 1) resolverHints.dbUser = users[0];
 
   return {
     name: profileName,
