@@ -19,6 +19,7 @@ export const RUNTIME_CONSTANTS = {
   daemon: {
     maxConcurrentQueries: intFromEnv('TAPROOT_MAX_CONCURRENT_QUERIES', 6),
     maxQueuedQueries: intFromEnv('TAPROOT_MAX_QUEUED_QUERIES', 24),
+    idleExitMs: intFromEnv('TAPROOT_DAEMON_IDLE_EXIT_MS', 30 * 60 * 1000),
   },
   sweeper: {
     tickMs: 15 * 1000,

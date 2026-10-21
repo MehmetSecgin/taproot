@@ -1,31 +1,10 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { printJson, renderRecord } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { rpcCall } from '../daemon/client.js';
+import { daemonLogPath, spawnDaemon } from '../daemon/spawn.js';
 import { RpcMethod } from '../daemon/types.js';
-
-function runDirFromCtx(ctx: AppContext): string {
-  return path.join(ctx.paths.stateRoot || path.join(os.homedir(), '.taproot'), 'run');
-}
-
-function resolveDaemonEntry(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    path.join(here, 'daemon-main.js'),
-    path.join(here, '..', 'daemon-main.js'),
-    path.join(here, '..', '..', 'dist', 'daemon-main.js'),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return candidates[0];
-}
 
 function shouldPrintPlainSuccess(ctx: AppContext): boolean {
   if (ctx.jsonMode) return false;
@@ -46,36 +25,18 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
     });
     try {
-      const runDir = runDirFromCtx(ctx);
-      fs.mkdirSync(runDir, { recursive: true });
-      const logPath = path.join(runDir, 'taprootd.log');
       progress.update('starting taprootd');
-      const child = spawn(process.execPath, [resolveDaemonEntry()], {
-        detached: true,
-        stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
-      });
-      child.unref();
-
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < 5000) {
-        try {
-          progress.update('waiting for daemon health check');
-          const res = await rpcCall({ method: RpcMethod.DaemonStatus });
-          if (res.ok) {
-            if (ctx.jsonMode) printJson({ started: true, status: res.data });
-            else {
-              if (shouldPrintPlainSuccess(ctx)) console.log('taprootd started');
-              else progress.succeed('taprootd started');
-            }
-            return;
-          }
-        } catch {
-          // wait for daemon
+      const res = await spawnDaemon();
+      if (res) {
+        if (ctx.jsonMode) printJson({ started: true, status: res.data });
+        else {
+          if (shouldPrintPlainSuccess(ctx)) console.log('taprootd started');
+          else progress.succeed('taprootd started');
         }
-        await new Promise((r) => setTimeout(r, 200));
+        return;
       }
       progress.fail('taprootd start timed out');
-      throw new Error(`taprootd did not become healthy within timeout. Check ${logPath}`);
+      throw new Error(`taprootd did not become healthy within timeout. Check ${daemonLogPath()}`);
     } finally {
       progress.stop();
     }
@@ -140,14 +101,10 @@ export function registerDaemon(program: Command, getCtx: () => AppContext): void
       } catch {
         // ignore if not running
       }
-      const runDir = runDirFromCtx(ctx);
-      fs.mkdirSync(runDir, { recursive: true });
-      const logPath = path.join(runDir, 'taprootd.log');
-      const child = spawn(process.execPath, [resolveDaemonEntry()], {
-        detached: true,
-        stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
-      });
-      child.unref();
+      if (!(await spawnDaemon())) {
+        progress.fail('taprootd restart timed out');
+        throw new Error(`taprootd did not become healthy within timeout. Check ${daemonLogPath()}`);
+      }
       if (shouldPrintPlainSuccess(ctx)) console.log('taprootd restarted');
       else progress.succeed('taprootd restarted');
     } finally {

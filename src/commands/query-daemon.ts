@@ -4,6 +4,7 @@ import type { QueryOutcomeMeta, QuerySuccessData, QueryExecutionRequest } from '
 import type { ProgressReporter } from '../core/progress.js';
 import { str } from '../core/strings.js';
 import { rpcCall } from '../daemon/client.js';
+import { spawnDaemon } from '../daemon/spawn.js';
 import { RpcMethod } from '../daemon/types.js';
 import type { RpcResponse } from '../daemon/types.js';
 import { presentQueryOutcome, queryFailureError } from './query-present.js';
@@ -21,21 +22,30 @@ export async function runDaemonQuery(input: {
   const logVerbose = (msg: string): void => {
     if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
   };
-  let rpc: RpcResponse;
-  try {
-    rpc = await rpcCall({
-      timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, request.timeoutMs + 1000),
-      method: RpcMethod.QueryExecute,
-      params: { ...request },
-    });
-  } catch (error) {
-    const msg = str((error as Error).message);
-    if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
-      progress.fail('daemon query failed');
-      throw error;
+  const callDaemon = async (): Promise<RpcResponse | undefined> => {
+    try {
+      return await rpcCall({
+        timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, request.timeoutMs + 1000),
+        method: RpcMethod.QueryExecute,
+        params: { ...request },
+      });
+    } catch (error) {
+      const msg = str((error as Error).message);
+      if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
+        progress.fail('daemon query failed');
+        throw error;
+      }
+      logVerbose(`daemon RPC unavailable (${msg})`);
+      return undefined;
     }
+  };
+  let rpc = await callDaemon();
+  if (!rpc) {
+    progress.update('starting taprootd');
+    if (await spawnDaemon()) rpc = await callDaemon();
+  }
+  if (!rpc) {
     progress.update('daemon unavailable, falling back to direct mode');
-    logVerbose(`daemon RPC unavailable (${msg})`);
     return 'fallback';
   }
 

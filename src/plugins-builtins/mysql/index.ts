@@ -7,7 +7,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
-import { baseConnConfig, closeMysqlConnection } from '../_shared/db-conn.js';
+import { baseConnConfig, leaseMysqlConnection } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
@@ -45,9 +45,12 @@ export const mysqlPlugin: TapRootPlugin = {
   async execute(request, creds): Promise<QueryResult> {
     const startedAt = nowIso();
     const start = Date.now();
-    const conn = await mysql.createConnection(connConfig(request.datasource, creds));
+    const { conn, release } = await leaseMysqlConnection(
+      connConfig(request.datasource, creds),
+      request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
+      Boolean(creds.__sessionId) && request.capability === 'executeRead',
+    );
     try {
-      await conn.query('SET time_zone = ?', [request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE]);
       const [rows, fields] = await conn.query(
         request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
       );
@@ -78,7 +81,7 @@ export const mysqlPlugin: TapRootPlugin = {
       if (enriched !== message) throw new Error(enriched);
       throw error;
     } finally {
-      await closeMysqlConnection(conn);
+      await release();
     }
   },
 };

@@ -2,7 +2,7 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
-import { closeMysqlConnection } from '../_shared/db-conn.js';
+import { leaseMysqlConnection } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
@@ -277,15 +277,18 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     try {
       const proxy = await ensureProxy(effectiveSessionId, String(target), String(user), String(database));
       proxyReady = true;
-      const conn = await mysql.createConnection({
-        host: '127.0.0.1',
-        port: proxy.port,
-        user: String(user),
-        password: creds.password,
-        database: String(database),
-      });
+      const { conn, release } = await leaseMysqlConnection(
+        {
+          host: '127.0.0.1',
+          port: proxy.port,
+          user: String(user),
+          password: creds.password,
+          database: String(database),
+        },
+        request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
+        Boolean(sessionId) && request.capability === 'executeRead',
+      );
       try {
-        await conn.query('SET time_zone = ?', [request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE]);
         const [rows, fields] = await conn.query(
           request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
         );
@@ -312,7 +315,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         if (enriched !== message) throw new Error(enriched);
         throw error;
       } finally {
-        await closeMysqlConnection(conn);
+        await release();
       }
     } catch (proxyError) {
       if (proxyReady || str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {

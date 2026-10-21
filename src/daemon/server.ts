@@ -11,7 +11,10 @@ import type { PluginRegistry } from '../plugins/registry.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
+import { closeAllMysqlPools } from '../plugins-builtins/_shared/db-conn.js';
+import { rpcCall } from './client.js';
 import { HANDLERS, type HandlerDeps } from './handlers/index.js';
+import { RpcMethod } from './types.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -49,7 +52,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   const lockFile = path.join(runDir, 'taprootd.pid');
   fs.mkdirSync(runDir, { recursive: true });
 
-  if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
+  if (fs.existsSync(socketPath)) {
+    const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then(() => true, () => false);
+    if (alive) throw new Error(`taprootd already running on ${socketPath}`);
+    fs.rmSync(socketPath, { force: true });
+  }
   if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
 
   const sessions = new SessionRegistry(runDir);
@@ -59,6 +66,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   const startedAt = Date.now();
 
   const deps: HandlerDeps = { ctx, sessions, queryLimiter, socketPath, startedAt };
+  let inFlight = 0;
+  let lastActivityAt = startedAt;
 
   const server = net.createServer((socket) => {
     let buffer = '';
@@ -97,6 +106,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
         }
 
         chain = chain.then(async () => {
+          inFlight += 1;
           const begin = Date.now();
           const base = responseBase(req);
           let postWrite: 'stopSocket' | undefined;
@@ -122,6 +132,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
 
           base.meta = { ...base.meta, timings: { durationMs: Date.now() - begin } };
           write(base);
+          inFlight -= 1;
+          lastActivityAt = Date.now();
 
           if (postWrite === 'stopSocket') {
             socket.end();
@@ -151,6 +163,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
         void closeTeleportMysqlSessionProxies(sessionId);
       }
     }
+    if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) onSignal();
   }, RUNTIME_CONSTANTS.sweeper.tickMs);
 
   let stopped = false;
@@ -160,6 +173,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     clearInterval(interval);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await closeAllTeleportMysqlProxies();
+    await closeAllMysqlPools();
     if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
     if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
   };
