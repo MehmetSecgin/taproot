@@ -110,32 +110,53 @@ function setupKbState() {
 }
 
 describe('kb resolution', () => {
-  it('kb resolve-connection returns active connection', () => {
+  it('kb resolve returns active connection', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-connection', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'qa-portforward' });
   });
 
-  it('kb resolve-connection prefers latest verified_at', () => {
+  it('kb resolve prefers latest verified_at', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-connection', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).verified_at_utc).toBe('2026-03-10T00:00:00Z');
   });
 
-  it('kb resolve-credentials returns credential hints', () => {
+  it('kb resolve returns credential hints', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-credentials', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).db_user).toBe('orders_reader');
   });
 
-  it('kb resolve-database-name returns database', () => {
+  it('kb resolve returns database', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-database-name', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).database).toBe('orders');
+  });
+
+  it('kb resolve --datasource takes env and service from the profile', () => {
+    // arrange
+    const { env } = setupKbState();
+    runCli(['datasource', 'add', '--name', 'qa-orders', '--kind', 'mysql', '--credential-ref', 'qa:orders', '--env', 'qa', '--service', 'orders'], env);
+    // act
+    const out = runCli(['--json', 'kb', 'resolve', '--datasource', 'qa-orders'], env);
+    // assert
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout)).toMatchObject({ service: 'orders', database: 'orders', db_user: 'orders_reader' });
+  });
+
+  it('kb resolve without a datasource or env and service is bad input', () => {
+    // arrange
+    const { env } = setupKbState();
+    // act
+    const out = runCli(['kb', 'resolve', '--service', 'orders'], env);
+    // assert
+    expect(out.status).not.toBe(0);
+    expect(out.stderr + out.stdout).toContain('Specify --datasource <name>, or --env <env> and --service <service>.');
   });
 
   it('kb tables lists table catalog', () => {
@@ -146,9 +167,9 @@ describe('kb resolution', () => {
     expect(parsed[0].tables).toEqual(['orders', 'order_items']);
   });
 
-  it('kb resolve-connection unknown env returns hint listing available envs', () => {
+  it('kb resolve unknown env returns hint listing available envs', () => {
     const { env } = setupKbState();
-    const out = runCli(['kb', 'resolve-connection', '--service', 'orders', '--env', 'prod'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'prod'], env);
     expect(out.status).not.toBe(0);
     const message = out.stderr + out.stdout;
     expect(message).toContain('orders');
@@ -156,9 +177,9 @@ describe('kb resolution', () => {
     expect(message).toContain('qa');
   });
 
-  it('kb resolve-connection unknown service hints known services', () => {
+  it('kb resolve unknown service hints known services', () => {
     const { env } = setupKbState();
-    const out = runCli(['kb', 'resolve-connection', '--service', 'unknown-svc', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'unknown-svc', '--env', 'qa'], env);
     expect(out.status).not.toBe(0);
     const message = out.stderr + out.stdout;
     expect(message).toContain('not registered in KB');
@@ -200,12 +221,12 @@ describe('kb resolution', () => {
 
   it('service alias resolves in kb commands', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve-database-name', '--service', 'legacy', '--env', 'qa'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'legacy', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ service: 'orders', database: 'orders' });
   });
 
-  it('kb resolve-connection honors namespace when provided', () => {
+  it('kb resolve honors namespace when provided', () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kb-ns-'));
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
@@ -226,7 +247,7 @@ describe('kb resolution', () => {
       ]),
     );
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', OBSIDIAN_MEMORY_ROOT: memoryRoot };
-    const out = runCli(['--json', 'kb', 'resolve-connection', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
+    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
   });

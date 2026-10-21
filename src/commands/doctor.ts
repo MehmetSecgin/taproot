@@ -133,7 +133,7 @@ function datasourceRepairHint(datasource: DatasourceProfile): string {
   if (datasource.env && datasource.service) {
     return `taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`;
   }
-  return `taproot datasource show --name ${datasource.name}`;
+  return `taproot datasource show ${datasource.name}`;
 }
 
 function addActionForCheck(
@@ -206,7 +206,7 @@ function addExecutorNextActions(
       }
       addActionForCheck(
         actions,
-        `taproot datasource show --name ${datasource.name}`,
+        `taproot datasource show ${datasource.name}`,
         ACTION_PRIORITIES.datasourceShow,
         orderRef,
         check,

@@ -3,17 +3,29 @@ import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
+import { badInput } from '../core/error-classification.js';
 import { normalizeRelations, validateRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
 
-  kb.command('resolve-connection').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
+  kb.command('resolve')
+    .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')
+    .option('--datasource <name>', 'take env, namespace and service from this datasource profile')
+    .option('--service <service>')
+    .option('--env <env>')
+    .option('--namespace <namespace>')
+    .action((opts) => {
     const ctx = getCtx();
-    const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const namespace = normalizeNamespace(opts.namespace) || undefined;
-    const out = ctx.kbStore.resolveConnection(service, opts.env, namespace);
+    const profile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
+    if (opts.datasource && !profile) throw badInput(`Datasource not found: ${opts.datasource}. List profiles with taproot --json datasource list.`);
+    const env = str(opts.env || profile?.env).trim();
+    const rawService = str(opts.service || profile?.service).trim();
+    if (!env || !rawService) throw badInput(opts.datasource ? `Datasource ${opts.datasource} has no env or service; pass --env and --service.` : 'Specify --datasource <name>, or --env <env> and --service <service>.');
+    const service = normalizeService(rawService, ctx.runtimeConfigStore.serviceAliases());
+    const namespace = normalizeNamespace(opts.namespace || profile?.namespace) || undefined;
+    const out = ctx.kbStore.resolveConnection(service, env, namespace);
     if (!out) {
       const svc = ctx.kbStore.services().find((s) => str(s.service).trim().toLowerCase() === service.toLowerCase());
       if (!svc) {
@@ -25,39 +37,10 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).sort();
       const nsHint = namespace ? ` namespace=${namespace}` : '';
       throw new Error(
-        `No KB connection match: service '${service}' is registered but not for env=${opts.env}${nsHint}. Available: ${envs.join(', ') || '(none active)'}. Register this env with 'taproot datasource add --env ${opts.env} --service ${service} ...' or pick an available env.`,
+        `No KB connection match: service '${service}' is registered but not for env=${env}${nsHint}. Available: ${envs.join(', ') || '(none active)'}. Register this env with 'taproot datasource add --env ${env} --service ${service} ...' or pick an available env.`,
       );
     }
-    if (ctx.jsonMode) printJson(out);
-    else console.log(renderRecord(out));
-  });
-
-  kb.command('resolve-credentials').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
-    const ctx = getCtx();
-    const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveConnection(service, opts.env, normalizeNamespace(opts.namespace) || undefined);
-    if (!out) throw new Error('No KB credentials match.');
-    const rows = {
-      service,
-      env: opts.env,
-      namespace: normalizeNamespace(opts.namespace) || undefined,
-      target: out.target,
-      database: out.database,
-      db_user: out.db_user,
-      engine: out.engine,
-      access_method: out.access_method,
-      verified_at_utc: out.verified_at_utc,
-    };
-    if (ctx.jsonMode) printJson(rows);
-    else console.log(renderRecord(rows));
-  });
-
-  kb.command('resolve-database-name').requiredOption('--service <service>').requiredOption('--env <env>').option('--namespace <namespace>').action((opts) => {
-    const ctx = getCtx();
-    const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-    const out = ctx.kbStore.resolveConnection(service, opts.env, normalizeNamespace(opts.namespace) || undefined);
-    if (!out) throw new Error('No KB database match.');
-    const row = { service, env: opts.env, namespace: normalizeNamespace(opts.namespace) || undefined, database: out.database, verified_at_utc: out.verified_at_utc };
+    const row = { service, ...out };
     if (ctx.jsonMode) printJson(row);
     else console.log(renderRecord(row));
   });

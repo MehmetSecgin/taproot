@@ -72,7 +72,7 @@ describe('datasource CRUD', () => {
   it('datasource show returns added profile', () => {
     const { env } = setupState();
     addProfile(env);
-    const out = runCli(['--json', 'datasource', 'show', '--name', 'qa-svc'], env);
+    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data).toMatchObject({ name: 'qa-svc', kind: 'mysql', env: 'qa' });
   });
@@ -101,7 +101,7 @@ describe('datasource CRUD', () => {
     );
     expect(out.status).not.toBe(0);
     expect(out.stderr + out.stdout).toContain('PROBE_FAILED');
-    const showOut = runCli(['datasource', 'show', '--name', 'qa-probe'], env);
+    const showOut = runCli(['datasource', 'show', 'qa-probe'], env);
     expect(showOut.status).toBe(1);
   });
 
@@ -121,8 +121,8 @@ describe('datasource CRUD', () => {
   it('datasource remove deletes profile', () => {
     const { env } = setupState();
     addProfile(env);
-    const removeOut = runCli(['datasource', 'remove', '--name', 'qa-svc'], env);
-    const showOut = runCli(['datasource', 'show', '--name', 'qa-svc'], env);
+    const removeOut = runCli(['datasource', 'remove', 'qa-svc'], env);
+    const showOut = runCli(['datasource', 'show', 'qa-svc'], env);
     expect(removeOut.status).toBe(0);
     expect(showOut.status).toBe(1);
   });
@@ -229,7 +229,7 @@ describe('datasource CRUD', () => {
   it('datasource add with connectors', () => {
     const { env } = setupState();
     addProfile(env, ['--connector', 'openvpn', '--connector-ref', 'openvpn=openvpn:qa:svc']);
-    const out = runCli(['--json', 'datasource', 'show', '--name', 'qa-svc'], env);
+    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.connectors).toEqual(['openvpn']);
@@ -239,7 +239,7 @@ describe('datasource CRUD', () => {
   it('datasource add with confidence', () => {
     const { env } = setupState();
     addProfile(env, ['--confidence', '0.5']);
-    const out = runCli(['--json', 'datasource', 'show', '--name', 'qa-svc'], env);
+    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data.confidence).toBe(0.5);
   });

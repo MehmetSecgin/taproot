@@ -71,11 +71,11 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     });
 
   ds.command('show')
-    .requiredOption('--name <name>')
-    .action((opts) => {
+    .argument('<name>')
+    .action((name: string) => {
     const ctx = getCtx();
-    const item = ctx.datasourceStore.get(opts.name);
-    if (!item) throw new Error(`Datasource not found: ${opts.name}`);
+    const item = ctx.datasourceStore.get(name);
+    if (!item) throw new Error(`Datasource not found: ${name}`);
     if (ctx.jsonMode) printEnvelope(true, item);
     else {
       console.log(renderRecord({
@@ -99,12 +99,12 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     }
   });
 
-  ds.command('remove').requiredOption('--name <name>').action((opts) => {
+  ds.command('remove').argument('<name>').action((name: string) => {
     const ctx = getCtx();
-    const ok = ctx.datasourceStore.remove(opts.name);
-    if (!ok) throw new Error(`Datasource not found: ${opts.name}`);
-    if (ctx.jsonMode) printEnvelope(true, { removed: true, name: opts.name });
-    else console.log(`Removed datasource ${opts.name}`);
+    const ok = ctx.datasourceStore.remove(name);
+    if (!ok) throw new Error(`Datasource not found: ${name}`);
+    if (ctx.jsonMode) printEnvelope(true, { removed: true, name });
+    else console.log(`Removed datasource ${name}`);
   });
 
   ds.command('add')

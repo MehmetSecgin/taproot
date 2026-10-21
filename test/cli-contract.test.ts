@@ -162,7 +162,7 @@ describe('cli contract', () => {
         },
       ]),
     );
-    const kbOut = runCli(['--json', 'kb', 'resolve-database-name', '--service', 'legacyservice', '--env', 'sandbox'], {
+    const kbOut = runCli(['--json', 'kb', 'resolve', '--service', 'legacyservice', '--env', 'sandbox'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       OBSIDIAN_MEMORY_ROOT: memoryRoot,

@@ -83,7 +83,7 @@ taproot --json doctor --datasource <name> --connect
 
 # don't rediscover routing if datasource is already known
 taproot --json datasource resolve --env <env> --service <service>
-taproot --json kb resolve-connection --service <service> --env <env>
+taproot --json kb resolve --service <service> --env <env>
 ```
 
 - Doctor known datasource:
@@ -102,7 +102,7 @@ nextActionDetails[0].command
 - Resolve from env/service:
 ```bash
 taproot --json datasource resolve --env <env> --service <service>
-taproot --json kb resolve-connection --service <service> --env <env>
+taproot --json kb resolve --service <service> --env <env>
 taproot --json kb list-services
 ```
 

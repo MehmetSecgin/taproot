@@ -50,9 +50,9 @@ describe('doctor executor codes', () => {
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
-    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name qa-demo');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show qa-demo');
     expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: 'taproot datasource show --name qa-demo',
+      command: 'taproot datasource show qa-demo',
       priority: 60,
       checks: ['mysql connect'],
       codes: ['executor_connectivity'],
@@ -99,8 +99,8 @@ describe('doctor executor codes', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
       'executor_connectivity',
     );
-    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name prod-orders');
-    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show --name prod-orders');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show prod-orders');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot datasource show prod-orders');
   });
 
   it('returns repair hints for executor configuration failures', () => {
@@ -184,11 +184,11 @@ describe('doctor executor codes', () => {
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.nextActionDetails[0].command).toBe('taproot doctor --datasource qa-demo --connect');
-    expect(parsed.nextActionDetails.map((d: { command: string }) => d.command)).toContain('taproot datasource show --name qa-demo');
+    expect(parsed.nextActionDetails.map((d: { command: string }) => d.command)).toContain('taproot datasource show qa-demo');
     expect(parsed.nextActionDetails[0]).toMatchObject({
       command: 'taproot doctor --datasource qa-demo --connect',
       priority: 30,
     });
-    expect(parsed.nextActionDetails[1].command).toBe('taproot datasource show --name qa-demo');
+    expect(parsed.nextActionDetails[1].command).toBe('taproot datasource show qa-demo');
   });
 });

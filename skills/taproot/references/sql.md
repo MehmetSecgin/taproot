@@ -40,7 +40,7 @@ Services share entity keys (a `*_id` owned by one service, referenced by others)
 
 ## Resolution and routing
 - If the datasource is already known, use it directly. Do not start with `doctor` for routine reads.
-- `taproot --json kb resolve-connection --service <service> --env <env>` or `taproot --json datasource resolve --env <env> --service <service>` only when resolution is actually needed. On a miss the error lists available envs for the service, or the known-service list; treat that as authoritative and do not re-probe with variants.
+- `taproot --json kb resolve --service <service> --env <env>` (or `--datasource <name>`) or `taproot --json datasource resolve --env <env> --service <service>` only when resolution is actually needed. On a miss the error lists available envs for the service, or the known-service list; treat that as authoritative and do not re-probe with variants.
 - `taproot --json kb list-services` when the service name is uncertain.
 - `--env <env>` accepts shorthand like `qa-develop` even though the canonical pair is `--env qa --namespace develop`. The resolver retries with the split on a miss, so either form resolves. Do not nag about which one.
 - `taproot kb tables --service <service> --list` gives a flat per-table listing. Add `--match <text>` to filter. Bare `kb tables --service <service>` returns a count-only summary, not names.

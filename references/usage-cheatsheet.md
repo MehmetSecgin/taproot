@@ -18,9 +18,8 @@
 - `taproot query --datasource production-sample --sql "SELECT 1 AS ok"`
 
 ## KB
-- `taproot kb resolve-connection --service sample --env production`
-- `taproot kb resolve-credentials --service sample --env production`
-- `taproot kb resolve-database-name --service sample --env production`
+- `taproot kb resolve --service sample --env production`
+- `taproot kb resolve --datasource production-sample`
 
 ## Learning + Cache
 - `taproot learn status`

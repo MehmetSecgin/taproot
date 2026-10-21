@@ -41,7 +41,7 @@ describe('--probe runs connector connect before the DB probe', () => {
     expect(out.status).not.toBe(0);
     expect(out.stderr + out.stdout).toContain('PROBE_FAILED');
     expect(out.stderr + out.stdout).toContain('kubectl-portforward');
-    expect(runCli(['datasource', 'show', '--name', 'svc-probe'], env).status).toBe(1);
+    expect(runCli(['datasource', 'show', 'svc-probe'], env).status).toBe(1);
   });
 });
 
@@ -81,13 +81,13 @@ describe('datasource export / import', () => {
     fs.writeFileSync(dumpFile, exported.stdout);
 
     // act — wipe and re-import from the exported envelope
-    runCli(['datasource', 'remove', '--name', 'svc-x'], env);
+    runCli(['datasource', 'remove', 'svc-x'], env);
     const imported = runCli(['--json', 'datasource', 'import', '--file', dumpFile], env);
 
     // assert
     expect(imported.status).toBe(0);
     const result = JSON.parse(imported.stdout).data;
     expect(result.imported).toEqual(['svc-x']);
-    expect(runCli(['--json', 'datasource', 'show', '--name', 'svc-x'], env).status).toBe(0);
+    expect(runCli(['--json', 'datasource', 'show', 'svc-x'], env).status).toBe(0);
   });
 });

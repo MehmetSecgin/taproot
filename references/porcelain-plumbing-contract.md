@@ -49,7 +49,7 @@ Legend:
 | `doctor` | P | L | Pre-flight diagnostics. Structured `nextActionDetails` in plumbing mode. |
 | `query` | P | L | Primary execution path. Daemon-routed includes `meta.requestId`, `meta.runId`, `meta.sessionId`. |
 | `datasource list/show/add/remove/resolve/import/export` | P | L | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import --file` bulk-adds profiles; `export` round-trips with it. |
-| `kb resolve-* / tables / related / list-services` | P | L | Knowledge-base resolvers; safe-by-default read paths. |
+| `kb resolve / tables / related / list-services` | P | L | Knowledge-base resolvers; safe-by-default read paths. |
 | `learn status/schema/tables/joins/ensure-schema/refresh-schema` | P | L | Learning cache inspection and maintenance. |
 | `cache show/prune/clear` | P | L | Cache maintenance. |
 | `creds set/show/list/unset/migrate-to-fallback` | P | — | Interactive by design; credential material never returned in plumbing JSON. |

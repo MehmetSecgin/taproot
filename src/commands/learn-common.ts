@@ -30,7 +30,7 @@ export function isTargetedRequest(opts: LearnTargetOpts): boolean {
 
 export function unresolvedNextCommand(opts: LearnTargetOpts, ctx?: AppContext): string | null {
   const datasource = str(opts.datasource).trim();
-  if (datasource) return `taproot --json datasource show --name ${datasource}`;
+  if (datasource) return `taproot --json datasource show ${datasource}`;
   const env = str(opts.env).trim();
   const namespace = normalizeNamespace(str(opts.namespace));
   const service = str(opts.service).trim();

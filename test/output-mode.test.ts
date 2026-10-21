@@ -42,7 +42,7 @@ function setupStateRoot() {
 describe('output mode contract', () => {
   it('shows datasource in human-readable mode by default', () => {
     const stateRoot = setupStateRoot();
-    const out = runCli(['datasource', 'show', '--name', 'qa-orders'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
+    const out = runCli(['datasource', 'show', 'qa-orders'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('Rows:');
     expect(out.stdout).toContain('qa-orders');
@@ -51,7 +51,7 @@ describe('output mode contract', () => {
 
   it('returns datasource as JSON only when --json is set', () => {
     const stateRoot = setupStateRoot();
-    const out = runCli(['--json', 'datasource', 'show', '--name', 'qa-orders'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
+    const out = runCli(['--json', 'datasource', 'show', 'qa-orders'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.data.name).toBe('qa-orders');

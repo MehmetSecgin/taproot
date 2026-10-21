@@ -419,9 +419,9 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
 - `taproot query --datasource <name> --sql <sql> [--param k=v] [--reason <why>] [--allow-discovery]`
-- `taproot datasource <list|show|add|remove|resolve>`
+- `taproot datasource <list|show <name>|add|remove <name>|resolve>`
 - `taproot connector <setup|status>`
-- `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|tables|related|list-services>`
+- `taproot kb <resolve|tables|related|list-services>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
 - `taproot cache <show|prune|clear>`
 - `taproot learn <status|compact|replay|refresh-schema|schema|ensure-schema|tables|joins|relations>` — `refresh-schema`/`schema`/`ensure-schema` also handle `grpc` datasources (proto descriptor cached per service)
 - `taproot creds <set|show|unset>`
