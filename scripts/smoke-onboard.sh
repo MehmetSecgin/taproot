@@ -40,7 +40,7 @@ docker run -d --name "$DB_CT" --network "$NET" \
 
 echo "== smoke: wait for MySQL to be ready =="
 for i in $(seq 1 60); do
-  if docker exec "$DB_CT" mysqladmin ping -uroot -p"$ROOT_PW" --silent >/dev/null 2>&1; then
+  if docker exec "$DB_CT" mysql -h127.0.0.1 -uroot -p"$ROOT_PW" -e "SELECT 1" >/dev/null 2>&1; then
     echo "   mysql ready after ${i}s"
     break
   fi
@@ -119,7 +119,7 @@ docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc '
 
 echo "== smoke: run query =="
 docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc '
-  taproot --json query --datasource dev-smoke --query "SELECT id, label FROM sample_records ORDER BY id"
+  taproot --json query --datasource dev-smoke --sql "SELECT id, label FROM sample_records ORDER BY id"
 '
 
 echo "== smoke: PASS =="
