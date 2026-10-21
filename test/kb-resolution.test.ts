@@ -25,8 +25,7 @@ function setupKbState() {
       },
     }),
   );
-  const memoryRoot = path.join(stateRoot, 'memory-root');
-  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  const kbDir = path.join(stateRoot, 'kb');
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
@@ -104,7 +103,7 @@ function setupKbState() {
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
-      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+      TAPROOT_KB_DIR: kbDir,
     },
   };
 }
@@ -231,8 +230,7 @@ describe('kb resolution', () => {
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({}));
-    const memoryRoot = path.join(stateRoot, 'memory-root');
-    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    const kbDir = path.join(stateRoot, 'kb');
     fs.mkdirSync(kbDir, { recursive: true });
     fs.writeFileSync(
       path.join(kbDir, 'services.json'),
@@ -246,7 +244,7 @@ describe('kb resolution', () => {
         },
       ]),
     );
-    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', OBSIDIAN_MEMORY_ROOT: memoryRoot };
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir };
     const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ namespace: 'develop', database: 'orders_dev' });

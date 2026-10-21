@@ -1,4 +1,4 @@
-import { readJsonFile } from '../core/json.js';
+import { readJsonFile, writeJsonFile } from '../core/json.js';
 import type { EnvironmentPolicy, LedgerRedactionTier, RuntimeConfig } from '../types/core.js';
 import { RuntimeConfigSchema } from './schemas.js';
 import { str } from '../core/strings.js';
@@ -24,6 +24,10 @@ export class RuntimeConfigStore {
     const raw = readJsonFile<unknown>(this.file, {});
     const parsed = RuntimeConfigSchema.safeParse(raw);
     return parsed.success ? parsed.data : {};
+  }
+
+  saveKbDir(kbDir: string): void {
+    writeJsonFile(this.file, { ...readJsonFile<Record<string, unknown>>(this.file, {}), kbDir });
   }
 
   environmentPolicy(env?: string): EnvironmentPolicy {

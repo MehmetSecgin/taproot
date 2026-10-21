@@ -33,8 +33,7 @@ function setupState() {
       },
     }),
   );
-  const memoryRoot = path.join(stateRoot, 'memory-root');
-  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  const kbDir = path.join(stateRoot, 'kb');
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
@@ -47,7 +46,7 @@ function setupState() {
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
-      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+      TAPROOT_KB_DIR: kbDir,
     },
   };
 }

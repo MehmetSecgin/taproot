@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import path from 'node:path';
+import { kbMissing } from '../core/error-classification.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { normalizeRelations, relationsForTables } from '../core/relations.js';
 import type { KbRelation, SchemaRelationEdge } from '../types/core.js';
@@ -9,6 +11,17 @@ export class KbStore {
 
   private file(name: string): string {
     return path.join(this.kbDir, name);
+  }
+
+  missingReason(): string | undefined {
+    if (this.services().length) return undefined;
+    const state = fs.existsSync(this.kbDir) ? 'has no services in services.json' : 'does not exist';
+    return `KB directory ${this.kbDir} ${state}. Set it with 'taproot init --kb-dir <dir>' (saved in TapRoot config) or TAPROOT_KB_DIR.`;
+  }
+
+  requirePresent(): void {
+    const reason = this.missingReason();
+    if (reason) throw kbMissing(reason);
   }
 
   services(): any[] {

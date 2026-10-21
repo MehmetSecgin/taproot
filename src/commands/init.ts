@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
@@ -6,6 +6,7 @@ import { reconcileDatasource } from '../core/bootstrap.js';
 import { printJson } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
+import { str } from '../core/strings.js';
 import { DoctorStatus } from '../types/core.js';
 
 function printHumanInit(checks: Array<{ check: string; status: string; detail: string }>, readiness: string, nextActions: string[]): void {
@@ -25,6 +26,8 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
   init.action(async (opts) => {
     const ctx = getCtx();
     const createdConfig = ensureStarterRuntime(ctx);
+    const kbDirToSave = str(program.opts().kbDir).trim() || (ctx.runtimeConfigStore.get().kbDir ? '' : str(process.env.TAPROOT_KB_DIR).trim());
+    if (kbDirToSave) ctx.runtimeConfigStore.saveKbDir(path.resolve(kbDirToSave));
     const snapshot = await collectReadinessSnapshot(ctx, { createdConfig, setupKind: opts.kind });
     const trimmedChecks = snapshot.checks.map((check) => check.status === DoctorStatus.Ok
       ? { check: check.check, status: check.status }
@@ -33,6 +36,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       checks: trimmedChecks,
       readiness: snapshot.readiness,
       nextActionDetails: snapshot.nextActionDetails,
+      ...(kbDirToSave ? { savedKbDir: path.resolve(kbDirToSave) } : {}),
     };
     if (ctx.jsonMode) printJson(data);
     else printHumanInit(snapshot.checks, snapshot.readiness, snapshot.nextActions);
@@ -45,6 +49,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
     .requiredOption('--service <service>')
     .action(async (opts) => {
       const ctx = getCtx();
+      ctx.kbStore.requirePresent();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const namespace = normalizeNamespace(opts.namespace);
       const datasourceName = defaultDatasourceName(opts.env, service, namespace || undefined);

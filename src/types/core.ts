@@ -94,6 +94,7 @@ export interface EnvironmentPolicy {
 }
 
 export interface RuntimeConfig {
+  kbDir?: string;
   defaults?: {
     profile?: string;
     json?: boolean;

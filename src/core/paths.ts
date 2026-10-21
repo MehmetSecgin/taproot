@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readJsonFile } from './json.js';
+import { str } from './strings.js';
 
 export interface Paths {
   stateRoot: string;
@@ -18,20 +20,15 @@ export interface Paths {
 
 export const RUNS_LEDGER_DIR_NAME = 'runs-ledger';
 
-const LEGACY_KB_SUBPATH = path.join('domains', 'engineering', 'references', 'db-kb');
-
-function legacyKbFromMemoryRoot(memoryRoot: string): string {
-  return path.join(memoryRoot, LEGACY_KB_SUBPATH);
+function runtimeConfigFileFor(stateRoot: string): string {
+  return path.join(stateRoot, 'config', 'deterministic-config.json');
 }
 
 export function resolveKbDir(explicit: string | undefined, stateRoot: string): string {
   const direct = (explicit || process.env.TAPROOT_KB_DIR || '').trim();
   if (direct) return direct;
-  const legacyEnv = (process.env.OBSIDIAN_MEMORY_ROOT || '').trim();
-  if (legacyEnv) return legacyKbFromMemoryRoot(legacyEnv);
-  const legacyHome = path.join(os.homedir(), 'memory-root');
-  if (fs.existsSync(legacyHome)) return legacyKbFromMemoryRoot(legacyHome);
-  return path.join(stateRoot, 'kb');
+  const saved = str(readJsonFile<{ kbDir?: unknown }>(runtimeConfigFileFor(stateRoot), {}).kbDir).trim();
+  return saved || path.join(stateRoot, 'kb');
 }
 
 function buildPaths(stateRoot: string, kbDir: string): Paths {
@@ -40,7 +37,7 @@ function buildPaths(stateRoot: string, kbDir: string): Paths {
     stateRoot,
     configDir,
     configSnapshotsDir: path.join(stateRoot, 'config-snapshots'),
-    runtimeConfigFile: path.join(configDir, 'deterministic-config.json'),
+    runtimeConfigFile: runtimeConfigFileFor(stateRoot),
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),
     cacheDir: path.join(stateRoot, 'cache'),

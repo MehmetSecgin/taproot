@@ -140,8 +140,7 @@ describe('cli contract', () => {
         },
       }),
     );
-    const memoryRoot = path.join(stateRoot, 'memory-root');
-    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    const kbDir = path.join(stateRoot, 'kb');
     fs.mkdirSync(kbDir, { recursive: true });
     fs.writeFileSync(
       path.join(kbDir, 'services.json'),
@@ -165,7 +164,7 @@ describe('cli contract', () => {
     const kbOut = runCli(['--json', 'kb', 'resolve', '--service', 'legacyservice', '--env', 'sandbox'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
-      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+      TAPROOT_KB_DIR: kbDir,
     });
     expect(kbOut.status).toBe(0);
     expect(JSON.parse(kbOut.stdout).service).toBe('sample-service');

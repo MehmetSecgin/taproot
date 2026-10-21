@@ -34,7 +34,7 @@ An agent with only the skill still depends on several local prerequisites:
 - Runtime state must exist under `~/.taproot/` or `TAPROOT_STATE_ROOT`.
 - Runtime config may be needed at `~/.taproot/config/deterministic-config.json`.
 - `TAPROOT_MASTER_KEY` should be set so credential storage does not fall back to a machine-derived secret.
-- KB files are expected at the configured KB directory (`TAPROOT_KB_DIR` or default `<state-root>/kb`).
+- KB files are expected at the configured KB directory (`--kb-dir`, `TAPROOT_KB_DIR`, the `kbDir` saved by `taproot init --kb-dir`, or default `<state-root>/kb`).
 - Datasource profiles may need to exist in `datasources.json`, unless KB bootstrap is sufficient.
 - Credential refs may need to exist in the credential store.
 - Connector command values may need to be configured for VPN, Teleport, or port-forward workflows.
@@ -54,7 +54,7 @@ These requirements come from the current runtime path and command behavior in:
 For a user or agent to succeed on day one, the current setup is usually:
 
 1. Install dependencies and build TapRoot.
-2. Ensure `TAPROOT_KB_DIR` (or `--kb-dir`) points at a directory containing KB files, or place them at the default `<state-root>/kb`.
+2. Save the KB directory with `taproot init --kb-dir <dir>`, or place KB files at the default `<state-root>/kb`.
 3. Optionally create runtime config at `~/.taproot/config/deterministic-config.json`.
 4. Store credentials with `taproot creds set`.
 5. Either:
@@ -163,7 +163,7 @@ The next improvement is to keep the remediation contract aligned across every ag
 
 ### 5. Make KB Dependency More Explicit
 
-Today, KB-backed resolution is powerful, but first-run success depends on KB existing at the configured `TAPROOT_KB_DIR`.
+Today, KB-backed resolution is powerful, but first-run success depends on KB existing at the configured KB directory.
 
 Improve this by:
 

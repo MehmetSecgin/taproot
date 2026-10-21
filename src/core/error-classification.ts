@@ -28,6 +28,7 @@ const ERROR_CLASS_DEFS = {
   },
   DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
   DISCOVERY_UNAVAILABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /discovery_unavailable/ },
+  KB_MISSING: { exitCode: EXIT_CODES.NOT_READY, match: /kb_missing/ },
   UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },
   UNKNOWN_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /unknown column|column \S+ does not exist/ },
   UNKNOWN_TABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/ },
@@ -57,6 +58,7 @@ const CLASSIFY_ORDER: ErrorClass[] = [
   'MISCONFIGURED_DATASOURCE',
   'DETERMINISTIC_REQUIRED',
   'DISCOVERY_UNAVAILABLE',
+  'KB_MISSING',
   'UNKNOWN_DATASOURCE',
   'UNKNOWN_COLUMN',
   'UNKNOWN_TABLE',
@@ -112,6 +114,7 @@ export const queryTimeoutErr = makeThrower('QUERY_TIMEOUT');
 export const misconfiguredDatasource = makeThrower('MISCONFIGURED_DATASOURCE');
 export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');
 export const discoveryUnavailable = makeThrower('DISCOVERY_UNAVAILABLE');
+export const kbMissing = makeThrower('KB_MISSING');
 export const overloaded = makeThrower('OVERLOADED');
 export const sessionBusy = makeThrower('SESSION_BUSY');
 export const accessDenied = makeThrower('ACCESS_DENIED');

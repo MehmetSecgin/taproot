@@ -49,6 +49,7 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 
 - `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop. `getaddrinfo ENOTFOUND` on an in-cluster hostname means the cluster network (VPN, telepresence, port-forward) is down.
 - `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables` (`--json`) or `learn tables --datasource <n>` (`--jsonl`), fix the query, then retry.
+- `KB_MISSING`: the KB directory named in the message does not exist or lists no services. Ask the user for the KB path and run `taproot init --kb-dir <dir>`, or use `datasource add`.
 - `UNKNOWN_DATASOURCE`: no profile has that name. Use a name from the `Did you mean` list, or pass `--env` + `--service`.
 - `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
 - `error.details.shortCircuited`: the same query (or, for `CONNECTIVITY`, any query on that datasource) failed under a minute ago, so TapRoot returned that error without connecting. Fix the cause or wait `retryAfterMs`.

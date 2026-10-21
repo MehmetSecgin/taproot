@@ -179,12 +179,14 @@ async function resolveTargetDatasource(
   });
   for (const line of resolution.verboseLogs) report.verbose(line);
   const datasource = resolution.datasource;
+  const kbMissing = !datasource && !request.datasource && env && service ? ctx.kbStore.missingReason() : undefined;
+  const kbSuffix = kbMissing ? ` ${kbMissing}` : '';
   if (!datasource && deterministic && !request.allowDiscovery) {
     throw deterministicRequiredErr(
-      `environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.`,
+      `environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.${kbSuffix}`,
     );
   }
-  if (!datasource) throw new Error(describeResolutionFailure(ctx.datasourceStore.list(), { rawDs: request.datasource, env: request.optsEnv || env, namespace: namespace || undefined, service }));
+  if (!datasource) throw new Error(`${describeResolutionFailure(ctx.datasourceStore.list(), { rawDs: request.datasource, env: request.optsEnv || env, namespace: namespace || undefined, service })}${kbSuffix}`);
   if (deterministic && !request.allowDiscovery && resolution.source === 'learning') {
     throw deterministicRequiredErr(
       `environment '${env || 'unknown'}' requires KB/profile-backed datasource resolution. Retry without discovery cache or enable discovery in config or CLI.`,

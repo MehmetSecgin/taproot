@@ -21,8 +21,7 @@ function setupState() {
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({}));
 
-  const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-bootstrap-memory-'));
-  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-bootstrap-kb-'));
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
@@ -52,7 +51,7 @@ function setupState() {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_FORCE_DIRECT: '1',
-      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+      TAPROOT_KB_DIR: kbDir,
       PATH: '',
     },
   };

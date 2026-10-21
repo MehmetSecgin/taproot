@@ -6,6 +6,7 @@
 - The gRPC chain deliberately has no `creds set` step and adds `grpc list` before `doctor`, because introspection validates the proto root offline before any network access is needed.
 - `taproot doctor` with no target is not a health check. It requires `--datasource <name>` or `--env <env> --service <service>` and exits non-zero without one. For whole-install health use `taproot init` or `taproot --json self-check --agent`.
 - `readiness` reports the first unmet item and ranks `missing_kb` above datasources, so a machine with no KB reports `missing_kb` even when the KB is irrelevant. The KB is optional and only powers `--env`/`--service` routing. If datasources are addressed by name, skip it and read `nextActionDetails` for the real sequence.
+- `taproot init --kb-dir <dir>` saves the KB directory in TapRoot config, so shells without `TAPROOT_KB_DIR` still find it. Order: `--kb-dir`, `TAPROOT_KB_DIR`, saved `kbDir`, `<state-root>/kb`.
 
 ## Readiness payloads
 - `taproot --json self-check --agent` is the machine-readable readiness check. Prefer targeted runs with `--datasource <name>` or `--env <env> --service <service>` when checking a real query path.

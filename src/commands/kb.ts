@@ -9,6 +9,7 @@ import { str } from '../core/strings.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
+  kb.hook('preAction', () => getCtx().kbStore.requirePresent());
 
   kb.command('resolve')
     .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')

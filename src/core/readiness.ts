@@ -276,7 +276,7 @@ export function nextActionDetailsForReadiness(
     case 'missing_kb':
       add(
         actionForReadiness({
-          command: 'export TAPROOT_KB_DIR=<dir>',
+          command: 'taproot init --kb-dir <dir>',
           priority: READINESS_ACTION_PRIORITIES.kbSetup,
           reason: 'No KB is configured. The KB is optional and only powers env/service routing, so skip this and run `taproot datasource add` if you address datasources by name.',
           checks: ['kb_dir'],

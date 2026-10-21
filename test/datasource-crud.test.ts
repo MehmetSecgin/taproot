@@ -20,17 +20,16 @@ function setupState() {
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), '{}');
-  const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-datasource-memory-'));
-  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-datasource-kb-'));
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(path.join(kbDir, 'services.json'), '[]');
   return {
     stateRoot,
-    memoryRoot,
+    kbDir,
     env: {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
-      OBSIDIAN_MEMORY_ROOT: memoryRoot,
+      TAPROOT_KB_DIR: kbDir,
     },
   };
 }
@@ -203,8 +202,7 @@ describe('datasource CRUD', () => {
   });
 
   it('datasource resolve from KB saves canonical bootstrap shape', () => {
-    const { env, stateRoot, memoryRoot } = setupState();
-    const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+    const { env, stateRoot, kbDir } = setupState();
     fs.writeFileSync(
       path.join(kbDir, 'services.json'),
       JSON.stringify([

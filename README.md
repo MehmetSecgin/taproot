@@ -316,8 +316,7 @@ taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orde
 | `TAPROOT_STATE_ROOT` | Override state directory | `~/.taproot` |
 | `TAPROOT_MASTER_KEY` | Symmetric key for the encrypted credential fallback file. **Set this for portable, deterministic secrets.** | derived from `$USER@$platform` |
 | `TAPROOT_NO_KEYCHAIN` | Force the encrypted file even when `keytar` is available | unset |
-| `TAPROOT_KB_DIR` | Path to the KB directory (the one containing `services.json`). TapRoot does not care how you author the KB — Obsidian, a git repo, a hand-edited folder, anything. | `<TAPROOT_STATE_ROOT>/kb` |
-| `OBSIDIAN_MEMORY_ROOT` | **Deprecated.** Legacy alias. When set (and `TAPROOT_KB_DIR` is unset), TapRoot appends `domains/engineering/references/db-kb` to it. Prefer `TAPROOT_KB_DIR`. | unset |
+| `TAPROOT_KB_DIR` | Path to the KB directory (the one containing `services.json`). Overrides the directory saved by `taproot init --kb-dir`. TapRoot does not care how you author the KB: Obsidian, a git repo, a hand-edited folder, anything. | saved `kbDir`, else `<TAPROOT_STATE_ROOT>/kb` |
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |
 | `TAPROOT_QA_LOCAL_PORT` | Default local port for `qa-portforward` | `4406` |
 | `TAPROOT_DATETIME_FORMAT` | Render Date columns as `iso` / `js` / `epoch` | `iso` |
@@ -332,24 +331,26 @@ taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orde
 
 TapRoot can auto-create datasources from a local KB — a plain directory containing `services.json` and friends. The KB is just files on disk: an Obsidian vault, a checked-out git repo, or any folder you maintain by hand all work.
 
-Point TapRoot at it via `TAPROOT_KB_DIR` (or `--kb-dir <path>`):
+Save the KB directory once with `taproot init --kb-dir <path>`. It lands as `kbDir` in `deterministic-config.json`, so every shell, daemon and agent finds it without an env var:
 
 ```bash
-export TAPROOT_KB_DIR="$HOME/work/team-kb"   # any directory you control
+taproot init --kb-dir "$HOME/work/team-kb"   # any directory you control
 taproot init datasource --env qa --service orders
 ```
+
+TapRoot picks the KB directory in this order: `--kb-dir`, then `TAPROOT_KB_DIR`, then the saved `kbDir`, then `<TAPROOT_STATE_ROOT>/kb`. When `TAPROOT_KB_DIR` is set and nothing is saved yet, `taproot init` saves it.
+
+KB commands (`kb *`, `init datasource`) fail with `KB_MISSING` when that directory does not exist or lists no services. The message names the directory TapRoot looked in.
 
 Expected layout:
 
 ```
-$TAPROOT_KB_DIR/
+<kb-dir>/
   services.json       # required; service → connection metadata
   relations.json
 ```
 
 If you do not have a KB, use `taproot datasource add ...` directly (see [Getting Started](#4-create-a-datasource-store-credentials-query) above). Skip this section if you do not use one.
-
-> Legacy: setups that previously used `OBSIDIAN_MEMORY_ROOT` keep working — when set, TapRoot appends `domains/engineering/references/db-kb` to it. New setups should set `TAPROOT_KB_DIR` to the KB directory directly.
 
 ---
 
@@ -360,7 +361,7 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 ### From KB (preferred when you have one)
 
 ```bash
-# Read TAPROOT_KB_DIR/services.json, generate proposals for the env.
+# Read <kb-dir>/services.json, generate proposals for the env.
 # Dry-run by default; nothing is saved.
 taproot discover kb --env qa
 

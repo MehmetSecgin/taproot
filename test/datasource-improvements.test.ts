@@ -16,11 +16,10 @@ function setupState() {
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), '{}');
-  const memoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-improve-kb-'));
-  const kbDir = path.join(memoryRoot, 'domains', 'engineering', 'references', 'db-kb');
+  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-improve-kb-'));
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(path.join(kbDir, 'services.json'), '[]');
-  return { stateRoot, env: { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', OBSIDIAN_MEMORY_ROOT: memoryRoot } };
+  return { stateRoot, env: { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir } };
 }
 
 describe('--probe runs connector connect before the DB probe', () => {

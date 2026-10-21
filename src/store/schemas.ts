@@ -39,6 +39,7 @@ export const EnvironmentPolicySchema = z.object({
 });
 
 export const RuntimeConfigSchema = z.object({
+  kbDir: z.string().optional(),
   defaults: z.object({
     profile: z.string().optional(),
     json: z.boolean().optional(),
