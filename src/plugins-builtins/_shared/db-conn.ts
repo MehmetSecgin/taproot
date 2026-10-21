@@ -1,3 +1,4 @@
+import type { Connection } from 'mysql2/promise';
 import type { QueryRequest } from '../../types/core.js';
 
 export interface BaseConnConfig {
@@ -20,4 +21,11 @@ export function baseConnConfig(
     password: creds.password,
     database: ds.connection.database,
   };
+}
+
+export async function closeMysqlConnection(conn: Connection): Promise<void> {
+  await conn.end().then(
+    () => (conn as unknown as { connection?: { stream?: { unref?: () => void } } }).connection?.stream?.unref?.(),
+    () => conn.destroy(),
+  );
 }

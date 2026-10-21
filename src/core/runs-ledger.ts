@@ -150,13 +150,14 @@ export function readRunsLedgerEntries(ledgerDir: string, limit = 500): RunsLedge
     .readdirSync(ledgerDir)
     .filter((name) => name.endsWith('.jsonl'))
     .sort()
-    .slice(-6);
+    .slice(-6)
+    .reverse();
   const rows: RunsLedgerEntry[] = [];
   for (const file of files) {
+    if (rows.length >= limit) break;
     const fullPath = path.join(ledgerDir, file);
-    const text = fs.readFileSync(fullPath, 'utf8');
-    for (const line of text.split(/\n+/)) {
-      if (!line.trim()) continue;
+    const lines = fs.readFileSync(fullPath, 'utf8').split(/\n+/).filter((line) => line.trim());
+    for (const line of lines.slice(-(limit - rows.length))) {
       try {
         rows.push(JSON.parse(line) as RunsLedgerEntry);
       } catch {

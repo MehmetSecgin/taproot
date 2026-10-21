@@ -7,7 +7,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
-import { baseConnConfig } from '../_shared/db-conn.js';
+import { baseConnConfig, closeMysqlConnection } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
@@ -78,9 +78,7 @@ export const mysqlPlugin: TapRootPlugin = {
       if (enriched !== message) throw new Error(enriched);
       throw error;
     } finally {
-      await conn.end().catch(() => {
-        (conn as any).destroy?.();
-      });
+      await closeMysqlConnection(conn);
     }
   },
 };

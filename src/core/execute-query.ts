@@ -49,7 +49,7 @@ export interface QueryExecutionRequest {
   sessionId?: string;
 }
 
-export type QueryPhase = 'resolve' | 'connect' | 'execute';
+export type QueryPhase = 'resolve' | 'catalog' | 'connect' | 'execute';
 
 export interface QueryReport {
   update(message: string): void;
@@ -269,12 +269,19 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       meta: { schemaContext: buildSchemaContext(query, { service: datasource.service, datasource: datasource.name, dialect }, ctx.learningStore) },
     };
   }
-  if (supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name)) {
+  const firstCatalog = supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name);
+  if (firstCatalog) {
     report.notice(`first query against ${datasource.name}, caching its full schema catalog once`);
   }
-  const catalog = await ensureDatasourceCatalog(ctx, datasource);
-  if (catalog.outcome === 'failed') report.verbose(`schema catalog skipped: ${catalog.error}`);
-  else if (catalog.outcome === 'fetched') report.verbose(`schema catalog cached: ${catalog.tableCount} tables`);
+  let phaseCatalogMs = 0;
+  const catalogStart = Date.now();
+  const catalogTask = ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
+    phaseCatalogMs = Date.now() - catalogStart;
+    report.phase('catalog', phaseCatalogMs);
+    if (catalog.outcome === 'failed') report.verbose(`schema catalog skipped: ${catalog.error}`);
+    else if (catalog.outcome === 'fetched') report.verbose(`schema catalog cached: ${catalog.tableCount} tables`);
+  });
+  if (firstCatalog) await catalogTask;
 
   const schemaContext = buildSchemaContext(
     query,
@@ -305,6 +312,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   }
   const execute = plugin.execute;
   if (!plugin.manifest.capabilities.includes(capability as any)) {
+    await catalogTask;
     return failure(new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`), { schemaContext, queryMemory });
   }
 
@@ -402,11 +410,13 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     }
     phaseExecuteMs = Date.now() - executeStart;
     report.phase('execute', phaseExecuteMs);
+    await catalogTask;
 
     result.runId = artifacts.runId;
     if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
     const phases = {
       resolveMs: phaseResolveMs,
+      catalogMs: phaseCatalogMs,
       connectMs: phaseConnectMs,
       executeMs: phaseExecuteMs,
       totalMs: Date.now() - startedAt,
@@ -470,6 +480,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       },
     };
   } catch (error) {
+    await catalogTask;
     const message = str((error as Error).message);
     const code = classifyError(message);
     appendEvent(artifacts.runDir, `query failed code=${code} message=${message}`);

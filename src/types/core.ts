@@ -128,6 +128,7 @@ export interface QueryRequest {
 
 export interface QueryPhaseTimings {
   resolveMs?: number;
+  catalogMs?: number;
   connectMs?: number;
   executeMs?: number;
   totalMs?: number;

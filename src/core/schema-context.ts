@@ -1,14 +1,7 @@
-import parserPkg from 'node-sql-parser';
 import type { SchemaCatalogSummary, SchemaContext, TableContext } from '../types/core.js';
 import { schemaObservationHasCurrentMetadata, type LearningStore, type SchemaObservationEntry } from '../store/learning.js';
-import { parserDatabaseOption, type SqlDialect } from './sql-dialect.js';
+import { astifySql, type SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
-
-const { Parser } = parserPkg as unknown as {
-  Parser: new () => { astify: (sql: string, opts?: Record<string, unknown>) => unknown };
-};
-
-const parser = new Parser();
 
 export interface PredicateColumnRefs {
   byTable: Map<string, Set<string>>;
@@ -49,7 +42,7 @@ function safeAlias(node: unknown): string {
 
 function parseAst(sql: string, dialect: SqlDialect): unknown | null {
   try {
-    return parser.astify(sql, { database: parserDatabaseOption(dialect) });
+    return astifySql(sql, dialect);
   } catch {
     return null;
   }

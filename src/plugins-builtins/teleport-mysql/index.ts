@@ -2,6 +2,7 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
+import { closeMysqlConnection } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
@@ -311,9 +312,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         if (enriched !== message) throw new Error(enriched);
         throw error;
       } finally {
-        await conn.end().catch(() => {
-          (conn as any).destroy?.();
-        });
+        await closeMysqlConnection(conn);
       }
     } catch (proxyError) {
       if (proxyReady || str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {

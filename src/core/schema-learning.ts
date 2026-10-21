@@ -1,5 +1,4 @@
-import parserPkg from 'node-sql-parser';
-import { dialectFromKind, parserDatabaseOption, type SqlDialect } from './sql-dialect.js';
+import { astifySql, dialectFromKind, type SqlDialect } from './sql-dialect.js';
 
 export type ColumnRole = 'select' | 'filter' | 'group' | 'order';
 
@@ -31,10 +30,6 @@ export interface QueryShapeObservation {
   confidence: number;
 }
 
-const { Parser } = parserPkg as unknown as {
-  Parser: new () => { astify: (sql: string, opt?: { database?: string }) => unknown };
-};
-const parser = new Parser();
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -282,7 +277,7 @@ export function extractQueryShape(sql: string, options?: { dialect?: SqlDialect 
   const dialect = dialectFromKind(options?.dialect);
 
   try {
-    const astRaw = parser.astify(sql, { database: parserDatabaseOption(dialect) });
+    const astRaw = astifySql(sql, dialect);
     const ast = Array.isArray(astRaw) ? astRaw[0] : astRaw;
     if (!ast || typeof ast !== 'object') return fallbackExtract(sql);
 

@@ -27,7 +27,7 @@ export async function rpcCall(input: {
   };
   const payload = `${JSON.stringify(req)}\n`;
 
-  const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ENOENT', 'EAGAIN']);
+  const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'EAGAIN']);
 
   const attempt = (): Promise<RpcResponse> =>
     new Promise<RpcResponse>((resolve, reject) => {

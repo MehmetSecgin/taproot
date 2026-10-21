@@ -86,6 +86,34 @@ describe('runs ledger', () => {
     expect(rows[0].sql).not.toContain('2026');
   });
 
+  it('reads only the newest entries up to the limit across month files', () => {
+    // arrange
+    const ledgerDir = tmpDir('ledger-limit');
+    const append = (runId: string, ts: string) =>
+      appendRunsLedgerEntry({
+        ledgerDir,
+        runId,
+        datasource,
+        sql: 'SELECT 1',
+        tables: [],
+        capability: 'executeRead',
+        outcomeCode: 'ok',
+        redactionTier: 'raw',
+        ts,
+      });
+    append('run-1', '2026-04-30T10:00:00.000Z');
+    append('run-2', '2026-05-01T10:00:00.000Z');
+    append('run-3', '2026-05-02T10:00:00.000Z');
+
+    // act
+    const two = readRunsLedgerEntries(ledgerDir, 2);
+    const all = readRunsLedgerEntries(ledgerDir, 10);
+
+    // assert
+    expect(two.map((row) => row.runId)).toEqual(['run-3', 'run-2']);
+    expect(all.map((row) => row.runId)).toEqual(['run-3', 'run-2', 'run-1']);
+  });
+
   it('honors TAPROOT_LEDGER=off', () => {
     const ledgerDir = tmpDir('ledger-off');
     process.env.TAPROOT_LEDGER = 'off';

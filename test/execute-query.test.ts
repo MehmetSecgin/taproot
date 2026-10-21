@@ -76,7 +76,7 @@ describe('executeQuery success', () => {
     });
     expect(outcome.meta.runId).toBeTruthy();
     expect(outcome.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
-    expect(recorder.phases.map(([phase]) => phase)).toEqual(['resolve', 'connect', 'execute']);
+    expect(recorder.phases.map(([phase]) => phase)).toEqual(['resolve', 'catalog', 'connect', 'execute']);
   });
 
   it('omits rowsForm and returns objects when rowsObject is set', async () => {
@@ -119,6 +119,37 @@ describe('executeQuery success', () => {
     const summary = path.join(stateRoot, 'runs', outcome.meta.runId!, 'summary.json');
     expect(fs.existsSync(summary)).toBe(true);
     expect(ledgerEntries().length).toBe(1);
+  });
+
+  it('runs the query while a stale catalog refreshes and reports catalogMs', async () => {
+    // arrange
+    stateRoot = await setupQueryState({ kind: 'mysql' });
+    let releaseCatalog: () => void = () => {};
+    const catalogGate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    const plugin = fakePlugin({ kind: 'mysql' });
+    const inner = plugin.execute!;
+    plugin.execute = async (request, creds): Promise<QueryResult> => {
+      if (request.query.includes('information_schema')) await catalogGate;
+      else releaseCatalog();
+      return inner(request, creds);
+    };
+    const ctx = contextWith(plugin);
+    ctx.learningStore.saveSchemaCatalog({ datasource: ctx.datasourceStore.get('qa-fake')!, tableCount: 1 });
+    const catalogFile = path.join(stateRoot, 'learning', 'schema-catalog.json');
+    const rows = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
+    rows[0].fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+    fs.writeFileSync(catalogFile, JSON.stringify(rows));
+    const recorder = recordingReport();
+
+    // act
+    const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report });
+
+    // assert
+    expect(recorder.notices).toEqual([]);
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.meta.phases?.catalogMs).toEqual(expect.any(Number));
   });
 
   it('emits the catalog notice on the first query against a sql datasource', async () => {
