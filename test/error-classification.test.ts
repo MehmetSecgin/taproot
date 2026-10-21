@@ -28,6 +28,11 @@ describe('error classification', () => {
     expect(exitCodeForClass('SQL_SYNTAX')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
+  it('maps several allowed Teleport db users to AMBIGUOUS_DB_USER', () => {
+    expect(classifyError("teleport-mysql found several allowed db users for 'db-a' in 'tsh db ls': reader, writer.")).toBe('AMBIGUOUS_DB_USER');
+    expect(exitCodeForClass('AMBIGUOUS_DB_USER')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
   it('maps unknown datasource names to UNKNOWN_DATASOURCE', () => {
     expect(classifyError("Datasource resolution failed: no profile for datasource 'qa-shop-develp'. Did you mean qa-shop-develop?")).toBe('UNKNOWN_DATASOURCE');
     expect(exitCodeForClass('UNKNOWN_DATASOURCE')).toBe(EXIT_CODES.BAD_INPUT);

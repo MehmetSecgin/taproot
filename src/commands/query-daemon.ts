@@ -31,7 +31,7 @@ export async function runDaemonQuery(input: {
       });
     } catch (error) {
       const msg = str((error as Error).message);
-      if (!/(ENOENT|ECONNREFUSED|EPIPE|socket hang up)/i.test(msg)) {
+      if (!/(ENOENT|ECONNREFUSED|EINVAL|ENAMETOOLONG|EPIPE|socket hang up)/i.test(msg)) {
         progress.fail('daemon query failed');
         throw error;
       }
