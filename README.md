@@ -71,12 +71,12 @@ taproot datasource add \
   --kind mysql \
   --env dev \
   --service orders \
-  --credential-ref dev:orders \
   --host 127.0.0.1 \
   --port 3306 \
   --database orders
 
-taproot creds set --ref dev:orders --user reader --password '***'
+# --credential-ref defaults to --env (here: dev); pass it when the ref differs
+taproot creds set --ref dev --user reader --password '***'
 
 # preflight: confirm the datasource resolves and connects
 taproot doctor --datasource dev-orders --connect
@@ -189,7 +189,7 @@ taproot --json query --datasource qa-order-cache \
 # imports it so you know which repo to clone.
 ```
 
-`taproot init --kind grpc` prints this flow as runnable next actions, with no credential step: gRPC datasources need no stored credentials, so `--credential-ref` is just a label. Add `--ssl` if the endpoint speaks TLS rather than plaintext h2c.
+`taproot init --kind grpc` prints this flow as runnable next actions, with no credential step: gRPC datasources need no stored credentials, so leave `--credential-ref` off (it defaults to `--env`). Add `--ssl` if the endpoint speaks TLS rather than plaintext h2c.
 
 Everything under `grpc list` / `find` / `describe` reads the local proto root only, so you can explore an API and build a request skeleton before you have network access to the service. Only `doctor` and `query` need to reach it.
 
@@ -198,7 +198,6 @@ taproot datasource add \
   --name qa-catalog-grpc --kind grpc \
   --env qa --namespace develop --service catalog-grpc \
   --host catalog-grpc.develop --port 6565 \
-  --credential-ref qa:grpc:catalog \
   --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/repos/catalog-service,$HOME/repos/shared-protos
 

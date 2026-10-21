@@ -85,11 +85,14 @@ describe('datasource CRUD', () => {
     expect(JSON.parse(out.stdout).data.some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
   });
 
-  it('datasource add --probe rolls back when plugin doctor fails', () => {
+  it('datasource add --probe keeps the profile when plugin doctor fails', () => {
+    // arrange
     const { env } = setupState();
+
+    // act
     const out = runCli(
       [
-        'datasource', 'add',
+        '--json', 'datasource', 'add',
         '--name', 'qa-probe',
         '--kind', 'mysql',
         '--credential-ref', 'qa:probe',
@@ -99,10 +102,38 @@ describe('datasource CRUD', () => {
       ],
       env,
     );
+
+    // assert
     expect(out.status).not.toBe(0);
-    expect(out.stderr + out.stdout).toContain('PROBE_FAILED');
-    const showOut = runCli(['datasource', 'show', 'qa-probe'], env);
-    expect(showOut.status).toBe(1);
+    const error = JSON.parse(out.stdout).error;
+    expect(error.message).toContain('PROBE_FAILED');
+    expect(error.details.nextAction).toBe('taproot doctor --datasource qa-probe --connect');
+    expect(error.details.removeCommand).toBe('taproot datasource remove qa-probe');
+    expect(runCli(['datasource', 'show', 'qa-probe'], env).status).toBe(0);
+  });
+
+  it('datasource add defaults --credential-ref to --env', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const out = runCli(['--json', 'datasource', 'add', '--name', 'qa-default', '--kind', 'mysql', '--env', 'qa', '--service', 'svc'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+    expect(JSON.parse(out.stdout).data.credentialRef).toBe('qa');
+  });
+
+  it('datasource add without --env or --credential-ref is BAD_INPUT', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const out = runCli(['--json', 'datasource', 'add', '--name', 'bare', '--kind', 'mysql'], env);
+
+    // assert
+    expect(out.status).toBe(2);
+    expect(JSON.parse(out.stdout).error.message).toContain('--env or --credential-ref');
   });
 
   it('datasource list orders rows by env, namespace, service, name', () => {

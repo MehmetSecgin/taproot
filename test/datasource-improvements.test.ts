@@ -24,7 +24,7 @@ function setupState() {
 }
 
 describe('--probe runs connector connect before the DB probe', () => {
-  it('rolls back and reports the connector failure (not a DB error)', () => {
+  it('keeps the profile and reports the connector failure (not a DB error)', () => {
     // arrange — a connector whose connect command fails
     const { env } = setupState();
     runCli(['creds', 'set', '--ref', 'kpf:test', '--status-command', 'false', '--connect-command', 'false'], env);
@@ -37,11 +37,11 @@ describe('--probe runs connector connect before the DB probe', () => {
       env,
     );
 
-    // assert — probe failed on the connector and rolled the profile back
+    // assert
     expect(out.status).not.toBe(0);
     expect(out.stderr + out.stdout).toContain('PROBE_FAILED');
     expect(out.stderr + out.stdout).toContain('kubectl-portforward');
-    expect(runCli(['datasource', 'show', 'svc-probe'], env).status).toBe(1);
+    expect(runCli(['datasource', 'show', 'svc-probe'], env).status).toBe(0);
   });
 });
 

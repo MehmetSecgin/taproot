@@ -16,7 +16,8 @@
 
 ## Datasources
 - `taproot --json init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for datasource profiles.
-- When registering a new datasource, prefer `taproot --json datasource add --probe ...`. `--probe` runs a connect probe against the host/port/credential combo and rolls back the saved profile on failure (`PROBE_FAILED: profile rolled back. <reason>`). It catches host/port/cred typos at registration time instead of on first query. `--probe` needs credentials to already exist, so store them first.
+- When registering a new datasource, prefer `taproot --json datasource add --probe ...`. `--probe` runs a connect probe against the host/port/credential combo. On failure the profile stays saved and the command exits non-zero with `PROBE_FAILED: profile <name> saved, probe failed. <reason>`. Fix the cause (tunnel, credentials, proto root), then re-run the probe with `taproot doctor --datasource <name> --connect` instead of re-adding. Remove a bad profile with `taproot datasource remove <name>`. `--probe` needs credentials to already exist, so store them first.
+- `--credential-ref` defaults to `--env`, so `--env qa` stores the profile under ref `qa`. Pass `--credential-ref` only when the ref differs from the env (per-service refs, tunnel refs). `datasource add` with neither flag fails with `BAD_INPUT`.
 - `--ssl` is a boolean flag with no value. `--ssl true` is rejected with `error: too many arguments`.
 - `datasource list/show/add/resolve/remove/import/export` wrap output in the `{ok,data}` envelope, so pluck and jq paths need the `data.` prefix.
 
@@ -44,12 +45,10 @@ Steps 1 to 3 need no network, no VPN, and no credentials. Only step 4 onward tou
 taproot init --kind grpc                     # prints this sequence as next actions
 
 # 1. register the endpoint. protoRoot is a LOCAL dir of .proto sources, loaded recursively.
-#    --credential-ref is a required label only; gRPC stores no credentials.
 taproot --json datasource add \
   --name pilot-grpc --kind grpc \
   --env qa --service profile \
   --host <host> --port <port> \
-  --credential-ref pilot-grpc \
   --hint protoRoot=$HOME/repos
 
 # 2. validate the proto root offline. Non-empty output proves protoRoot is correct.

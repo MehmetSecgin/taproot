@@ -163,7 +163,6 @@ taproot --json datasource add \
   --name qa-<svc>-grpc --kind grpc \
   --env qa --namespace develop --service <svc>-grpc \
   --host <svc>-grpc.develop --port 6565 \
-  --credential-ref qa:grpc:<svc> \
   --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/<svc>
 

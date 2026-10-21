@@ -24,6 +24,15 @@ function parseHintPairs(values: string[]): Record<string, string> {
   return out;
 }
 
+function probeFailed(name: string, detail: string): Error {
+  const rerun = `taproot doctor --datasource ${name} --connect`;
+  const remove = `taproot datasource remove ${name}`;
+  return Object.assign(
+    new Error(`PROBE_FAILED: profile ${name} saved, probe failed. ${detail}. Re-run: ${rerun}. Remove: ${remove}`),
+    { details: { datasource: name, nextAction: rerun, removeCommand: remove } },
+  );
+}
+
 function parseConnectorRefPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
@@ -110,7 +119,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   ds.command('add')
     .requiredOption('--name <name>')
     .requiredOption('--kind <kind>')
-    .requiredOption('--credential-ref <ref>')
+    .option('--credential-ref <ref>', 'defaults to --env')
     .option('--env <env>')
     .option('--namespace <namespace>')
     .option('--service <service>')
@@ -127,9 +136,11 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
     .option('--confidence <n>', 'confidence 0..1', '0.8')
-    .option('--probe', 'after save, run plugin doctor() against the new profile; rollback on failure', false)
+    .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
       const ctx = getCtx();
+      const credentialRef = opts.credentialRef || opts.env;
+      if (!credentialRef) throw badInput('datasource add needs --env or --credential-ref; the credential ref defaults to --env.');
       const profile = {
         name: opts.name,
         kind: opts.kind,
@@ -144,7 +155,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           target: opts.target,
           ssl: Boolean(opts.ssl),
         },
-        credentialRef: opts.credentialRef,
+        credentialRef,
         connectors: opts.connector || [],
         policy: {
           allowRead: Boolean(opts.allowRead),
@@ -179,17 +190,13 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           });
           const connectorFailures = connectorChecks.filter((c) => c.status === DoctorStatus.Fail);
           if (connectorFailures.length) {
-            if (!existed) ctx.datasourceStore.remove(saved.name);
-            const detail = connectorFailures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
-            throw new Error(`PROBE_FAILED: profile rolled back. ${detail}`);
+            throw probeFailed(saved.name, connectorFailures.map((c) => `${c.check}: ${c.detail}`).join(' | '));
           }
           const creds = await ctx.credentialStore.get(saved.credentialRef);
           const checks = await plugin.doctor({ datasource: saved, credentials: creds });
           const failures = checks.filter((c) => c.status === DoctorStatus.Fail);
           if (failures.length) {
-            if (!existed) ctx.datasourceStore.remove(saved.name);
-            const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
-            throw new Error(`PROBE_FAILED: profile rolled back. ${detail}`);
+            throw probeFailed(saved.name, failures.map((c) => `${c.check}: ${c.detail}`).join(' | '));
           }
           const allChecks = [...connectorChecks, ...checks];
           if (ctx.jsonMode) printEnvelope(true, { ...saved, probe: { ok: true, checks: allChecks } });
@@ -200,8 +207,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         } catch (err) {
           const message = (err as Error).message || String(err);
           if (message.startsWith('PROBE_FAILED') || message.startsWith('PROBE_UNSUPPORTED')) throw err;
-          if (!existed) ctx.datasourceStore.remove(saved.name);
-          throw new Error(`PROBE_FAILED: profile rolled back. ${message}`);
+          throw probeFailed(saved.name, message);
         }
       }
       if (ctx.jsonMode) printEnvelope(true, saved);
