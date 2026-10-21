@@ -171,9 +171,13 @@ async function credentialRefsCheck(ctx: AppContext): Promise<ReadinessCheck> {
     refToDatasources.get(ref)!.push(d.name);
   }
   const dangling: string[] = [];
-  for (const [ref, names] of refToDatasources) {
-    const creds = await ctx.credentialStore.get(ref);
-    if (!Object.keys(creds).length) dangling.push(`${ref} (${names.length} datasource(s))`);
+  try {
+    for (const [ref, names] of refToDatasources) {
+      const creds = await ctx.credentialStore.get(ref);
+      if (!Object.keys(creds).length) dangling.push(`${ref} (${names.length} datasource(s))`);
+    }
+  } catch (error) {
+    return { check: 'credential_refs', status: DoctorStatus.Fail, detail: str((error as Error).message) };
   }
   return {
     check: 'credential_refs',

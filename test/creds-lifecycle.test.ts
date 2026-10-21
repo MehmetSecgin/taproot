@@ -113,3 +113,36 @@ describe('credential lifecycle', () => {
     expect(out.stdout).toContain('tsh db login');
   });
 });
+
+describe('credential master key', () => {
+  it('moves a file written with the default key to TAPROOT_MASTER_KEY on first read', () => {
+    // arrange
+    const { env } = setupState();
+    const { TAPROOT_MASTER_KEY: _unused, ...defaultKeyEnv } = env;
+    runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user'], { ...defaultKeyEnv, TAPROOT_MASTER_KEY: '' });
+
+    // act
+    const withKey = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], env);
+    const withDefault = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], { ...defaultKeyEnv, TAPROOT_MASTER_KEY: '' });
+
+    // assert
+    expect(withKey.status).toBe(0);
+    expect(withKey.stdout).toContain('qa_user');
+    expect(withDefault.status).not.toBe(0);
+    expect(withDefault.stderr + withDefault.stdout).toContain('cannot be decrypted');
+  });
+
+  it('refuses to overwrite a credential file it cannot decrypt', () => {
+    // arrange
+    const { env } = setupState();
+    runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user'], env);
+
+    // act
+    const wrongKey = runCli(['creds', 'set', '--ref', 'qa:other', '--user', 'other'], { ...env, TAPROOT_MASTER_KEY: 'wrong-key' });
+    const rightKey = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], env);
+
+    // assert
+    expect(wrongKey.status).not.toBe(0);
+    expect(rightKey.stdout).toContain('qa_user');
+  });
+});

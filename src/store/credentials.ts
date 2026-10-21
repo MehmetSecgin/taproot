@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { accessDenied } from '../core/error-classification.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import { str } from '../core/strings.js';
 
@@ -13,8 +14,12 @@ interface FallbackFileShape {
   data: string;
 }
 
+function derivedSecret(): string {
+  return `${process.env.USER || 'user'}@${process.platform}`;
+}
+
 function getMasterSecret(): string {
-  return process.env.TAPROOT_MASTER_KEY || `${process.env.USER || 'user'}@${process.platform}`;
+  return process.env.TAPROOT_MASTER_KEY || derivedSecret();
 }
 
 function encryptJson(payload: Record<string, Record<string, string>>): FallbackFileShape {
@@ -31,12 +36,12 @@ function encryptJson(payload: Record<string, Record<string, string>>): FallbackF
   };
 }
 
-function decryptJson(input: FallbackFileShape): Record<string, Record<string, string>> {
+function decryptJson(input: FallbackFileShape, secret: string): Record<string, Record<string, string>> {
   const salt = Buffer.from(input.salt, 'base64');
   const iv = Buffer.from(input.iv, 'base64');
   const authTag = Buffer.from(input.authTag, 'base64');
   const data = Buffer.from(input.data, 'base64');
-  const key = crypto.pbkdf2Sync(getMasterSecret(), salt, 200000, 32, 'sha256');
+  const key = crypto.pbkdf2Sync(secret, salt, 200000, 32, 'sha256');
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
   const out = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
@@ -78,10 +83,23 @@ export class CredentialStore {
     const raw = readJsonFile<unknown>(this.encryptedFile, null);
     if (!raw || typeof raw !== 'object') return {};
     try {
-      return decryptJson(raw as FallbackFileShape);
+      return decryptJson(raw as FallbackFileShape, getMasterSecret());
     } catch {
-      return {};
+      if (!process.env.TAPROOT_MASTER_KEY) throw this.unreadable();
     }
+    try {
+      const payload = decryptJson(raw as FallbackFileShape, derivedSecret());
+      this.saveFallback(payload);
+      return payload;
+    } catch {
+      throw this.unreadable();
+    }
+  }
+
+  private unreadable(): Error {
+    return accessDenied(
+      `credential file ${this.encryptedFile} cannot be decrypted with the current key (TAPROOT_MASTER_KEY, or the default derived key when it is unset). Set the key the file was written with; TapRoot does not overwrite it while it is unreadable.`,
+    );
   }
 
   private saveFallback(payload: Record<string, Record<string, string>>): void {
