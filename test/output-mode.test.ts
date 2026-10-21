@@ -55,6 +55,15 @@ describe('output mode contract', () => {
     expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
   });
 
+  it('prints exactly one JSON document and nothing on stderr for every CLI surface', () => {
+    for (const args of [[], ['--version'], ['--help'], ['query', '--help'], ['daemon'], ['nosuch'], ['query', '--bogus'], ['--json', 'datasource', 'list']]) {
+      const out = runCli(args);
+      expect(out.stderr, args.join(' ')).toBe('');
+      expect(out.stdout.trim().split('\n'), args.join(' ')).toHaveLength(1);
+      expect(() => JSON.parse(out.stdout), args.join(' ')).not.toThrow();
+    }
+  });
+
   it('prints CLI errors as a JSON envelope', () => {
     const out = runCli(['query', '--bogus']);
     expect(out.status).not.toBe(0);

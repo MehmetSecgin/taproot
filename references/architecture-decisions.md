@@ -11,7 +11,6 @@ For each capability:
 ## v1 chosen dependencies
 - CLI framework: `commander`
 - Validation: `zod`
-- Logging: `pino`
 - DB client protocols:
   - MySQL: `mysql2`
   - Postgres: `pg`

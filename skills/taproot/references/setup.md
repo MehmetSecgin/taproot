@@ -35,7 +35,6 @@
 
 ## Operations
 - `taproot sanitize check-repo` scans tracked files for leaked secrets before committing or sharing the repo.
-- `taproot completion zsh|bash|fish` prints or installs shell completion.
 - `taproot config snapshot|list|status|diff|restore|prune` versions the local config. Snapshot a known-good state before risky config edits.
 
 ## First successful call (gRPC, no database access needed)

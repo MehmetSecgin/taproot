@@ -42,11 +42,10 @@ function toPastRun(row: RunsLedgerEntry, currentDatasource?: string): QueryMemor
   return out;
 }
 
-function recurringFailureHints(rows: RunsLedgerEntry[], tables: string[]): string[] {
+function recurringFailureHints(rows: RunsLedgerEntry[]): string[] {
   const groups = new Map<string, { count: number; lesson?: string; errorClass: string; tables: string[] }>();
   for (const row of rows) {
     if (!row.errorClass) continue;
-    if (tables.length && !overlaps(tables, row.tables)) continue;
     const key = `${row.errorClass}|${row.tables.join(',')}`;
     const prev = groups.get(key) || { count: 0, lesson: row.lesson, errorClass: row.errorClass, tables: row.tables };
     groups.set(key, { ...prev, count: prev.count + 1, lesson: prev.lesson || row.lesson });
@@ -67,10 +66,8 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
     if (input.env && input.service && row.env === input.env && row.service === input.service) return true;
     return false;
   });
-  const similarPastRuns = rows
-    .filter((row) => row.fingerprint === fingerprint || overlaps(tables, row.tables))
-    .slice(0, 3)
-    .map((row) => toPastRun(row, input.datasource));
+  const related = rows.filter((row) => row.fingerprint === fingerprint || overlaps(tables, row.tables));
+  const similarPastRuns = related.slice(0, 3).map((row) => toPastRun(row, input.datasource));
 
   const hints: string[] = [];
   if (!str(input.reason).trim()) {
@@ -90,11 +87,11 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
       `recurring_shape: this query has succeeded in ${distinctSessions.size} distinct sessions; reuse the run with "taproot run show --run-id <id>" instead of rewriting it`,
     );
   }
-  hints.push(...recurringFailureHints(rows, tables));
+  hints.push(...recurringFailureHints(related));
 
   const dedupedHints = Array.from(new Set(hints));
   const out: QueryMemory = {};
-  if (similarPastRuns.length) out.similarPastRuns = similarPastRuns;
+  if (similarPastRuns.some((run) => run.outcomeCode !== 'ok')) out.similarPastRuns = similarPastRuns;
   if (dedupedHints.length) out.hints = dedupedHints;
   return out;
 }

@@ -1,7 +1,7 @@
-# Output: JSON envelope, JSON lines, pluck, benchmarking
+# Output: JSON envelope, pluck, benchmarking
 
 ## Envelope
-- Every command prints JSON on stdout.
+- Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version`. stderr stays empty unless `--verbose` is set.
 - Stable envelope shape: `{ ok, data, meta, error }`. `meta.requestId` on daemon-routed commands, `meta.runId` and `meta.sessionId` where applicable.
 - The JSON envelope is compacted across all surfaces (rows as positional arrays, schema-context indexes stripped of defaults, query-memory deduped, empty arrays omitted).
 - Frozen envelope shape: `references/json-envelope-contract.md` in the project repo.
@@ -19,16 +19,11 @@
 - `meta.schemaContext.relations` is auto-injected when a query touches a table with curated KB relations, cross-service edges first. Each edge is `{ from: "service.table.column", to: "service.table.column", relationship, crossService, notes }`.
 - Empty `meta.queryMemory`, empty `warnings`, and empty `meta.schemaContext.tables` are omitted entirely.
 
-## JSON lines
-- `--jsonl` is the shortest path from a query to rows: `taproot --jsonl query --datasource <name> --sql "<sql>"` prints one row object per line (`{"id":1,"name":"a"}`), ready for `head`, `grep` or `jq -c`. No envelope, no `meta`, nothing to post-process.
-- On failure stdout stays empty, stderr gets one `CODE: message` line plus a `nextAction: ...` line when there is one, and the exit code is non-zero.
-- It is global. On other commands an array prints one item per line and anything else prints as one line; `{ok,data}` envelopes are unwrapped to `data`. With `--pluck`, the plucked value is printed the same way.
-
 ## Pluck
 - `--pluck <dot.path>` returns only that subtree of the envelope and cuts token cost sharply. Array indexing works (`data.rows[0]`). It is a global option, so every command accepts it. Pluck runs in-process, so prefer it over `| jq` for anything it can reach.
-- On a **failed** command `--pluck` prints only the `error` object (`{code,message,details}`) to **stderr** and exits non-zero. When capturing a plucked value, always gate on exit code. Empty stdout plus non-zero exit means failure, not zero rows.
+- On a **failed** command `--pluck` is ignored: stdout gets the full error envelope (`{"ok":false,"error":{code,message,details}}`) and the exit code is non-zero. When capturing a plucked value, always gate on exit code.
 - Paths differ per command:
-  - `query ... --pluck data.rows` (rows only), `--pluck data.columns`, `--pluck meta.schemaContext.tables.<t>.indexes`, `--pluck error.details.nextAction`.
+  - `query ... --pluck data.rows` (rows only), `--pluck data.columns`, `--pluck meta.schemaContext.tables.<t>.indexes`.
   - `learn ensure-schema ... --pluck tables`, NOT `meta.schemaContext.tables`; that nested shape exists only on `query` responses. `--pluck "tables[0]"` for the first table, `--pluck "tables[0].indexes"` for its indexes.
   - `learn tables ... --pluck rows`, `learn joins ... --pluck rows`.
   - `datasource list|show|add|resolve|remove|import|export` wrap output in `{ok,data}`, so paths need the `data.` prefix: `--pluck "data[0].name"`, `jq '.data[]'`.

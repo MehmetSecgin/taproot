@@ -6,8 +6,8 @@ import { runRegisteredCleanup } from './core/cleanup.js';
 function fatal(error: unknown, code: string): void {
   const message = (error as Error)?.message || String(error || 'Unknown error');
   void runRegisteredCleanup().finally(() => {
-    process.stderr.write(`${code}: ${message}\n`);
-    process.exit(classifyExitCode(error));
+    process.stderr.write(`${JSON.stringify({ ok: false, error: { code, message } })}\n`);
+    process.exit(classifyExitCode(error) || EXIT_CODES.GENERAL_ERROR);
   });
 }
 
@@ -16,12 +16,7 @@ process.on('uncaughtException', (error) => fatal(error, 'UNCAUGHT_EXCEPTION'));
 
 async function main() {
   const instance = await startDaemon();
-  process.stdout.write(`taprootd started on ${instance.socketPath}\n`);
+  process.stdout.write(`${JSON.stringify({ started: true, socketPath: instance.socketPath })}\n`);
 }
 
-main().catch((error) => {
-  void runRegisteredCleanup().finally(() => {
-    process.stderr.write(`${(error as Error).message}\n`);
-    process.exit(classifyExitCode(error) || EXIT_CODES.GENERAL_ERROR);
-  });
-});
+main().catch((error) => fatal(error, 'DAEMON_START_FAILED'));

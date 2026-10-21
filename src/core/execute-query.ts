@@ -50,13 +50,8 @@ export interface QueryExecutionRequest {
   sessionId?: string;
 }
 
-export type QueryPhase = 'resolve' | 'catalog' | 'connect' | 'execute';
-
 export interface QueryReport {
-  update(message: string): void;
-  phase(phase: QueryPhase, ms: number): void;
-  verbose(message: string): void;
-  notice(message: string): void;
+  log(message: string): void;
 }
 
 export interface QueryDeps {
@@ -97,12 +92,7 @@ export interface QueryTarget {
   explicitProfile?: DatasourceProfile;
 }
 
-export const silentQueryReport: QueryReport = {
-  update: () => {},
-  phase: () => {},
-  verbose: () => {},
-  notice: () => {},
-};
+export const silentQueryReport: QueryReport = { log: () => {} };
 
 export function deriveQueryTarget(
   ctx: AppContext,
@@ -180,7 +170,7 @@ async function resolveTargetDatasource(
   const { env, namespace, service } = request;
   const policy = environmentPolicy(ctx, env);
   const deterministic = policy.deterministicRequired;
-  report.update(`resolving datasource (${request.datasource || `${env}-${service || 'unknown'}`})`);
+  report.log(`resolving datasource (${request.datasource || `${env}-${service || 'unknown'}`})`);
   const resolution = await resolveDatasourceWithFallbacks({
     ctx,
     rawDs: request.datasource,
@@ -193,7 +183,7 @@ async function resolveTargetDatasource(
     deterministicRequired: deterministic,
     policy,
   });
-  for (const line of resolution.verboseLogs) report.verbose(line);
+  for (const line of resolution.verboseLogs) report.log(line);
   const datasource = resolution.datasource;
   const kbMissing = !datasource && !request.datasource && env && service ? ctx.kbStore.missingReason() : undefined;
   const kbSuffix = kbMissing ? ` ${kbMissing}` : '';
@@ -222,7 +212,7 @@ async function resolveTargetDatasource(
       if (conflicts.length) {
         const warning = `datasource overrides KB (${conflicts.join('; ')})`;
         warnings.push(warning);
-        report.verbose(`warning: ${warning}`);
+        report.log(`warning: ${warning}`);
       }
     }
   }
@@ -248,8 +238,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     resolutionSource = resolved.source;
     warnings.push(...resolved.warnings);
     phaseResolveMs = Date.now() - resolveStart;
-    report.update(`datasource ready (${datasource.name})`);
-    report.phase('resolve', phaseResolveMs);
+    report.log(`datasource ready (${datasource.name})`);
   } catch (error) {
     return failure(error, {});
   }
@@ -265,7 +254,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   } catch (error) {
     return failure(error, {});
   }
-  report.update('query resolved');
+  report.log('query resolved');
 
   const sessionTimeZone = resolveSessionTimeZone({
     override: request.tz,
@@ -295,15 +284,14 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   }
   const firstCatalog = supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name);
   if (firstCatalog) {
-    report.notice(`first query against ${datasource.name}, caching its full schema catalog once`);
+    report.log(`first query against ${datasource.name}, caching its full schema catalog once`);
   }
   let phaseCatalogMs = 0;
   const catalogStart = Date.now();
   const catalogTask = ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
     phaseCatalogMs = Date.now() - catalogStart;
-    report.phase('catalog', phaseCatalogMs);
-    if (catalog.outcome === 'failed') report.verbose(`schema catalog skipped: ${catalog.error}`);
-    else if (catalog.outcome === 'fetched') report.verbose(`schema catalog cached: ${catalog.tableCount} tables`);
+    if (catalog.outcome === 'failed') report.log(`schema catalog skipped: ${catalog.error}`);
+    else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
   if (firstCatalog) await catalogTask;
 
@@ -367,7 +355,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     );
     warnings.push(...collectRangeWarnings({ sql: query, schemaContext, dialect }));
 
-    report.update('checking connectors');
+    report.log('checking connectors');
     const connectStart = Date.now();
     const preflightBudgetMs = Math.max(remainingMs(), RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
     const connectorChecks = await withQueryTimeout({
@@ -381,10 +369,9 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
         }),
     });
     phaseConnectMs = Date.now() - connectStart;
-    report.phase('connect', phaseConnectMs);
     for (const c of connectorChecks) {
       appendEvent(artifacts.runDir, `connector ${c.check} ${c.status}: ${c.detail}`);
-      report.verbose(`connector ${c.check}: ${c.status}`);
+      report.log(`connector ${c.check}: ${c.status}`);
     }
     if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
       throw new Error(
@@ -392,7 +379,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       );
     }
 
-    report.update(`executing query via ${plugin.manifest.name}`);
+    report.log(`executing query via ${plugin.manifest.name}`);
     const executeStart = Date.now();
     const executedQuery = request.explain ? `EXPLAIN ${query}` : query;
     const pluginParams = buildPluginParams(request, params, datasource.kind);
@@ -415,7 +402,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
     const result: QueryResult = await runExecute();
     phaseExecuteMs = Date.now() - executeStart;
-    report.phase('execute', phaseExecuteMs);
     await catalogTask;
 
     result.runId = artifacts.runId;

@@ -28,5 +28,3 @@
 - `taproot cache show`
 - `taproot cache prune --ttl-hours 168`
 
-## Completion
-- `eval "$(taproot completion zsh)"`

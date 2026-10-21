@@ -254,12 +254,9 @@ taproot learn tables --datasource <name> --limit 50
 taproot learn joins --datasource <name> --limit 50
 ```
 
-- Repo safety and shell completion:
+- Repo safety:
 ```bash
 taproot sanitize check-repo
-taproot completion zsh
-taproot completion bash
-taproot completion fish
 ```
 
 ## Output Expectations

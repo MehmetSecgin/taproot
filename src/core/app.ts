@@ -97,9 +97,9 @@ export function nextAction(errorCode: string): string {
     DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
     KB_MISSING: 'Point TapRoot at the KB directory with "taproot init --kb-dir <dir>" (saved in TapRoot config), or register the datasource with "taproot datasource add".',
     AMBIGUOUS_DB_USER: 'Ask the user which of the listed db users this datasource should use, then save it with the creds set or --hint dbUser= command in the message.',
-    UNKNOWN_DATASOURCE: 'Use a datasource name suggested in the message, or pass --env and --service instead. List profiles with "taproot --jsonl datasource list".',
+    UNKNOWN_DATASOURCE: 'Use a datasource name suggested in the message, or pass --env and --service instead. List profiles with "taproot datasource list".',
     UNKNOWN_COLUMN: 'Check column names against the cached schema (meta.schemaContext.tables, or "taproot learn ensure-schema --datasource <name>"), fix the query, then retry.',
-    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables, or "taproot --jsonl learn tables --datasource <name>"), then fix the query.',
+    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables, or "taproot learn tables --datasource <name>"), then fix the query.',
     SQL_SYNTAX: 'Fix the SQL syntax near the position the error names. The same SQL fails the same way, so do not retry it unchanged.',
     GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };

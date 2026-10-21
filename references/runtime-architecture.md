@@ -345,7 +345,7 @@ Envelope (v1):
   - `timings?`
 
 Rules:
-- Progress output goes to stderr, and only under `--verbose`.
+- Progress output goes to stderr as JSON lines, and only under `--verbose`.
 - Correlation IDs are mandatory.
 - Breaking shape changes require `envelopeVersion` bump.
 

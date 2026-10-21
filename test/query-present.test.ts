@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryOutcome } from '../src/core/execute-query.js';
 import { presentQueryOutcome, queryFailureError } from '../src/commands/query-present.js';
-import { setOutputOptions } from '../src/core/output.js';
+import { setPluck } from '../src/core/output.js';
 
 function successOutcome(overrides: Partial<Extract<QueryOutcome, { ok: true }>> = {}): QueryOutcome {
   return {
@@ -26,7 +26,7 @@ function successOutcome(overrides: Partial<Extract<QueryOutcome, { ok: true }>> 
 
 afterEach(() => {
   vi.restoreAllMocks();
-  setOutputOptions({ jsonl: false });
+  setPluck(undefined);
 });
 
 describe('presentQueryOutcome', () => {
@@ -55,23 +55,9 @@ describe('presentQueryOutcome', () => {
       writes.push(String(chunk));
       return true;
     });
-    setOutputOptions({ pluck: 'data.columns', jsonl: false });
+    setPluck('data.columns');
     presentQueryOutcome(successOutcome(), 'req-9');
     expect(JSON.parse(writes.join(''))).toEqual(['id', 'name']);
-  });
-
-  it('prints one row object per line in jsonl mode', () => {
-    // arrange
-    const writes: string[] = [];
-    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
-      writes.push(String(chunk));
-      return true;
-    });
-    setOutputOptions({ jsonl: true });
-    // act
-    presentQueryOutcome(successOutcome({ data: { ...(successOutcome() as Extract<QueryOutcome, { ok: true }>).data, rows: [[1, 'alpha'], [2, 'beta']] } }), 'req-9');
-    // assert
-    expect(writes.join('')).toBe('{"id":1,"name":"alpha"}\n{"id":2,"name":"beta"}\n');
   });
 });
 

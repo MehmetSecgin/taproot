@@ -292,20 +292,17 @@ taproot query --datasource prod-orders \
   --json-extract payload:order.status --json-extract payload:order.total
 ```
 
-### Output for agents: `--jsonl` and `--pluck`
+### Output
 
-Both are global options that every command accepts.
+Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version` alike. `--pluck <dot.path>` is a global option that prints only that subtree of the envelope.
 
 ```bash
-taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT 3"
-{"id":1,"status":"open"}
-{"id":2,"status":"paid"}
-{"id":3,"status":"open"}
+taproot query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT 3" --pluck data.rows
+[[1,"open"],[2,"paid"],[3,"open"]]
 ```
 
-- `--jsonl` prints query rows as one JSON object per line. Other commands print an array one item per line and anything else as one line. On failure stdout stays empty and stderr gets one `CODE: message` line, plus `nextAction: ...` when there is one.
-- `--pluck <dot.path>` prints only that subtree of the envelope (`data.rows`, `meta.schemaContext`). On failure it prints only the `error` object to stderr.
-- Both exit non-zero on failure, so empty stdout plus a non-zero exit is never mistaken for zero rows.
+- On failure the command prints the full error envelope (`{"ok":false,"error":{...}}`), even with `--pluck`, and exits non-zero.
+- `--verbose` adds diagnostics on stderr as JSON lines (`{"verbose":"..."}`).
 
 ---
 
@@ -319,9 +316,7 @@ taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orde
 | `TAPROOT_KB_DIR` | Path to the KB directory (the one containing `services.json`). Overrides the directory saved by `taproot init --kb-dir`. TapRoot does not care how you author the KB: Obsidian, a git repo, a hand-edited folder, anything. | saved `kbDir`, else `<TAPROOT_STATE_ROOT>/kb` |
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |
 | `TAPROOT_QA_LOCAL_PORT` | Default local port for `qa-portforward` | `4406` |
-| `TAPROOT_DATETIME_FORMAT` | Render Date columns as `iso` / `js` / `epoch` | `iso` |
 | `TAPROOT_QUERY_TIMEOUT_MS` | Default query statement timeout (ms). Override per-query with `--timeout`, or globally via `defaults.query.timeoutMs` in runtime config. | `15000` |
-| `TAPROOT_LOG_LEVEL` | pino log level | `info` |
 | `TAPROOT_ALLOW_SCHEMA_INTROSPECTION` | Allow heavy introspection queries | unset (gated) |
 | `TAPROOT_ALLOW_PARTITION_SCAN` | Allow partition scans | unset (gated) |
 
@@ -427,7 +422,6 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot creds <set|show|unset>`
 - `taproot daemon <start|status|stop|restart>`
 - `taproot session <open|ls|inspect|close|close-all>`
-- `taproot completion <zsh|bash|fish>`
 - `taproot sanitize check-repo`
 - `taproot grpc describe [--datasource <name> | --proto-root <dir>] [--service <name>] [--method <name>] [--skeleton] [--max-depth <n>]` — `--service`/`--method` accept partial names
 - `taproot grpc list [pattern] [--datasource <name> | --proto-root <dir>] [--service <name>]`

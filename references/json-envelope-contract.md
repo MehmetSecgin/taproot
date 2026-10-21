@@ -53,4 +53,5 @@ Error envelope:
   - `open`/`inspect` should include `meta.sessionId` when available
 
 ## Output Discipline
-- stdout contains only one JSON payload, or one JSON value per line under `--jsonl`.
+- stdout contains exactly one line of compact JSON, for every command, error, `--help` and `--version`.
+- stderr is empty unless `--verbose` is set, which adds JSON lines.

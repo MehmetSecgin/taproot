@@ -37,23 +37,11 @@ describe('cli contract', () => {
     expect(out.stdout).toContain('grpc');
   });
 
-  it('prints skill version', async () => {
+  it('prints the version as JSON', async () => {
     const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
-    const out = runCli(['--skill-version']);
+    const out = runCli(['--version']);
     expect(out.status).toBe(0);
-    expect(out.stdout.trim()).toBe(`taproot-skill@${pkg.version}`);
-  });
-
-  it('completion zsh includes command name', () => {
-    const out = runCli(['completion', 'zsh']);
-    expect(out.status).toBe(0);
-    expect(out.stdout).toContain('compdef _taproot_complete taproot');
-  });
-
-  it('completion root suggestions are driven by command tree', () => {
-    const out = runCli(['__complete', 'con']);
-    expect(out.status).toBe(0);
-    expect(out.stdout).toContain('connector');
+    expect(JSON.parse(out.stdout)).toEqual({ version: pkg.version });
   });
 
   it('learn help includes schema snapshot command', () => {
@@ -61,35 +49,6 @@ describe('cli contract', () => {
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('schema');
     expect(out.stdout).toContain('ensure-schema');
-  });
-
-  it('provides dynamic datasource completion entries', () => {
-    const stateRoot = path.join(os.tmpdir(), `taproot-complete-${Date.now()}`);
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, 'datasources.json'),
-      JSON.stringify([
-        {
-          name: 'qa-orders',
-          kind: 'mysql',
-          env: 'qa',
-          service: 'orders',
-          tags: [],
-          connection: {},
-          credentialRef: 'qa:orders',
-          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-          updatedAt: new Date().toISOString(),
-          confidence: 1,
-        },
-      ]),
-    );
-    const outDs = runCli(['__complete', 'query', '--datasource', 'qa'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-    });
-    expect(outDs.status).toBe(0);
-    expect(outDs.stdout).toContain('qa-orders');
   });
 
   it('self-check json includes checks', () => {
@@ -102,7 +61,9 @@ describe('cli contract', () => {
   it('returns bad-input exit code for unknown option', () => {
     const out = runCli(['creds', 'set', '--ref', 'x', '--host', 'localhost']);
     expect(out.status).toBe(2);
-    expect(out.stderr.toLowerCase()).toContain('unknown option');
+    const parsed = JSON.parse(out.stdout);
+    expect(parsed.error.message.toLowerCase()).toContain('unknown option');
+    expect(parsed.error.details.nextAction).toContain('datasource add');
   });
 
   it('enforces prod no-guess mode unless discovery is explicit', () => {

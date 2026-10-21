@@ -63,7 +63,4 @@ describe('CLI argument guards classify as BAD_INPUT', () => {
     );
   });
 
-  it('rejects an unsupported completion shell', () => {
-    expectBadInput(['completion', 'tcsh'], "Unsupported shell 'tcsh'");
-  });
 });

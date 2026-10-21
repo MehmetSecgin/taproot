@@ -169,6 +169,34 @@ describe('runs ledger', () => {
     expect(memory.similarPastRuns || []).toHaveLength(2);
   });
 
+  it('keeps failure hints and ok-only past runs out of unrelated queries', () => {
+    // arrange
+    const ledgerDir = tmpDir('query-memory-scope');
+    const write = (runId: string, sql: string, tables: string[], errorClass?: string) =>
+      appendRunsLedgerEntry({
+        ledgerDir,
+        runId,
+        datasource,
+        reason: 'test',
+        sql,
+        tables,
+        capability: 'executeRead',
+        outcomeCode: errorClass || 'ok',
+        errorClass,
+        redactionTier: 'strict',
+      });
+    write('run-1', 'SELECT bad FROM order_items', ['order_items'], 'UNKNOWN_COLUMN');
+    write('run-2', 'SELECT worse FROM order_items', ['order_items'], 'UNKNOWN_COLUMN');
+    write('run-3', 'SELECT 1', []);
+    write('run-4', 'SELECT 1', []);
+
+    // act
+    const memory = buildQueryMemory({ ledgerDir, datasource: datasource.name, reason: 'test', sql: 'SELECT 1', tables: [] });
+
+    // assert
+    expect(memory).toEqual({});
+  });
+
   it('uses env-aware default redaction tiers from runtime config', () => {
     const root = tmpDir('runtime');
     const file = path.join(root, 'deterministic-config.json');

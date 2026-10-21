@@ -3,7 +3,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
-import type { QueryPhase, QueryReport } from '../src/core/execute-query.js';
+import type { QueryReport } from '../src/core/execute-query.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
@@ -11,21 +11,9 @@ import { contextWith, queryRequest, restoreQueryEnv, setupQueryState } from './h
 
 let stateRoot = '';
 
-function recordingReport(): { report: QueryReport; phases: Array<[QueryPhase, number]>; updates: string[]; notices: string[] } {
-  const phases: Array<[QueryPhase, number]> = [];
-  const updates: string[] = [];
-  const notices: string[] = [];
-  return {
-    phases,
-    updates,
-    notices,
-    report: {
-      update: (m) => updates.push(m),
-      phase: (p, ms) => phases.push([p, ms]),
-      verbose: () => {},
-      notice: (m) => notices.push(m),
-    },
-  };
+function recordingReport(): { report: QueryReport; logs: string[] } {
+  const logs: string[] = [];
+  return { logs, report: { log: (m) => logs.push(m) } };
 }
 
 function capturingPlugin(capture: { query?: string; creds?: Record<string, string> }): TapRootPlugin {
@@ -77,7 +65,7 @@ describe('executeQuery success', () => {
     });
     expect(outcome.meta.runId).toBeTruthy();
     expect(outcome.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
-    expect(recorder.phases.map(([phase]) => phase)).toEqual(['resolve', 'catalog', 'connect', 'execute']);
+    expect(Object.keys(outcome.meta.phases || {})).toEqual(['resolveMs', 'catalogMs', 'connectMs', 'executeMs', 'totalMs']);
   });
 
   it('omits rowsForm and returns objects when rowsObject is set', async () => {
@@ -148,7 +136,7 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report });
 
     // assert
-    expect(recorder.notices).toEqual([]);
+    expect(recorder.logs.join(' ')).not.toContain('caching its full schema catalog');
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.meta.phases?.catalogMs).toEqual(expect.any(Number));
   });
@@ -158,7 +146,7 @@ describe('executeQuery success', () => {
     const ctx = contextWith(fakePlugin({ kind: 'mysql' }));
     const recorder = recordingReport();
     await executeQuery(queryRequest(), { ctx, report: recorder.report });
-    expect(recorder.notices.join(' ')).toContain('qa-fake');
+    expect(recorder.logs.join(' ')).toContain('caching its full schema catalog');
   });
 });
 

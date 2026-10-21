@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
+import { Command, type Help } from 'commander';
 import { buildContext, nextAction } from './core/app.js';
-import { printEnvelope, setOutputOptions } from './core/output.js';
+import { printEnvelope, printJson, setPluck } from './core/output.js';
 import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerQuery } from './commands/query.js';
@@ -10,7 +10,6 @@ import { registerConfig } from './commands/config.js';
 import { registerKb } from './commands/kb.js';
 import { registerCache } from './commands/cache.js';
 import { registerLearn } from './commands/learn.js';
-import { registerCompletion } from './commands/completion.js';
 import { registerCreds } from './commands/creds.js';
 import { registerConnector } from './commands/connector.js';
 import { registerSanitize } from './commands/sanitize.js';
@@ -23,25 +22,46 @@ import { registerDiscover } from './commands/discover.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
-import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
+import { TAPROOT_VERSION } from './core/version.js';
 import { str } from './core/strings.js';
+
+if (process.argv[2] === '-V' || process.argv[2] === '--version') {
+  printJson({ version: TAPROOT_VERSION });
+  process.exit(EXIT_CODES.OK);
+}
+
+function helpJson(cmd: Command, helper: Help): string {
+  const data = {
+    usage: helper.commandUsage(cmd),
+    description: helper.commandDescription(cmd) || undefined,
+    arguments: helper.visibleArguments(cmd).map((a) => ({ name: helper.argumentTerm(a), description: helper.argumentDescription(a) || undefined })),
+    options: helper.visibleOptions(cmd).map((o) => ({ flags: helper.optionTerm(o), description: helper.optionDescription(o) || undefined })),
+    commands: helper.visibleCommands(cmd).map((c) => ({ name: helper.subcommandTerm(c), description: helper.subcommandDescription(c) || undefined })),
+  };
+  return `${JSON.stringify({ ok: true, data })}\n`;
+}
 
 const program = new Command();
 
 program
   .name('taproot')
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
-  .version(TAPROOT_VERSION)
-  .option('--jsonl', 'Output JSON lines: query rows as one object per line, other arrays one item per line; errors as one CODE: message line on stderr', false)
-  .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). On failure, print only the error object to stderr.')
+  .option('-V, --version', 'Print the version')
+  .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
   .option('--profile <name>', 'Runtime profile name')
   .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')
-  .option('--verbose', 'Diagnostics on stderr', false)
-  .option('--skill-version', 'Print skill version and exit', false);
+  .option('--verbose', 'Diagnostics on stderr as JSON lines', false)
+  .configureHelp({ formatHelp: helpJson })
+  .configureOutput({
+    writeErr: (text) => process.stdout.write(text),
+    outputError: () => {
+      // All command errors are emitted once via emitError() in the parseAsync catch block.
+    },
+  });
 
 function applyOutputOptions(): void {
   const opts = program.opts();
-  setOutputOptions({ pluck: opts.pluck ? String(opts.pluck) : undefined, jsonl: Boolean(opts.jsonl) });
+  setPluck(opts.pluck ? String(opts.pluck) : undefined);
 }
 
 program.hook('preAction', applyOutputOptions);
@@ -49,11 +69,6 @@ program.hook('preAction', applyOutputOptions);
 program.exitOverride((error) => {
   throw error;
 });
-
-if (process.argv.includes('--skill-version')) {
-  process.stdout.write(`taproot-skill@${TAPROOT_SKILL_VERSION}\n`);
-  process.exit(EXIT_CODES.OK);
-}
 
 function context() {
   const opts = program.opts();
@@ -73,7 +88,6 @@ registerCache(program, context);
 registerLearn(program, context);
 registerCreds(program, context);
 registerConnector(program, context);
-registerCompletion(program, context);
 registerSanitize(program, context);
 registerDaemon(program);
 registerSession(program);
@@ -82,12 +96,6 @@ registerRun(program, context);
 registerBench(program);
 registerDiscover(program, context);
 registerGrpc(program, context);
-
-program.configureOutput({
-  outputError: () => {
-    // All command errors are emitted once via emitError() in the parseAsync catch block.
-  },
-});
 
 function hasCredsTopologyMisuseHint(input: string): boolean {
   const m = input.toLowerCase();
@@ -123,7 +131,7 @@ process.on('uncaughtException', (error) => {
 
 program.parseAsync(process.argv).catch((error) => {
   const commanderCode = str((error as { code?: string })?.code);
-  if (commanderCode === 'commander.helpDisplayed' || commanderCode === 'commander.version') {
+  if (commanderCode === 'commander.helpDisplayed' || commanderCode === 'commander.help') {
     process.exit(EXIT_CODES.OK);
     return;
   }

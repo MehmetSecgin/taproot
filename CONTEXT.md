@@ -34,12 +34,12 @@ adapter holds no pipeline logic. When a step appears in both adapters, it belong
 
 **Pipeline phase**
 One named stage of execution: resolve, connect, execute. Each phase reports its duration, and the
-durations reach the caller as `meta.phases`. Phases are the unit the report dependency speaks in.
+durations reach the caller as `meta.phases`.
 
 **Report**
-The dependency through which the module emits progress, phase timings and verbose detail, as data
-rather than as terminal output. The CLI adapter writes it to stderr under `--verbose`. The daemon
-passes a no op. It is required rather than optional so the module body has no conditional reporting.
+The dependency through which the module emits progress and diagnostic lines through one `log` method, as data
+rather than as terminal output. The CLI adapter writes it to stderr as JSON lines under `--verbose`. The daemon
+passes a no op. Phase timings travel in `meta.phases` instead. It is required rather than optional so the module body has no conditional reporting.
 
 ## Decisions
 

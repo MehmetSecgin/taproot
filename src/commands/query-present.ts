@@ -1,5 +1,5 @@
 import type { QueryOutcome } from '../core/execute-query.js';
-import { getOutputOptions, printJson, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
+import { printJson, trimQueryJsonEnvelope } from '../core/output.js';
 
 export function queryFailureError(outcome: Extract<QueryOutcome, { ok: false }>): Error {
   const prefixed = outcome.message.toLowerCase().startsWith(`${outcome.code.toLowerCase()}:`)
@@ -14,7 +14,5 @@ export function queryFailureError(outcome: Extract<QueryOutcome, { ok: false }>)
 export function presentQueryOutcome(outcome: QueryOutcome, requestId: string): void {
   if (!outcome.ok) throw queryFailureError({ ...outcome, meta: { ...outcome.meta, requestId } });
   const { data, meta } = outcome;
-  const { jsonl, pluck } = getOutputOptions();
-  if (jsonl && !pluck) printJson(data.rows.map((row) => rowToObject(data.columns, row)));
-  else printJson(trimQueryJsonEnvelope({ ok: true, data, meta: { ...meta, requestId } }));
+  printJson(trimQueryJsonEnvelope({ ok: true, data, meta: { ...meta, requestId } }));
 }
