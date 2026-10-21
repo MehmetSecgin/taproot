@@ -173,7 +173,7 @@ export function collectPredicateColumns(sql: string, dialect: SqlDialect): Predi
 
 export function isSchemaMetadataQuery(sql: string): boolean {
   const text = str(sql).trim().replace(/\s+/g, ' ').toLowerCase();
-  return /^(show\s+(create\s+table|tables\b|full\s+columns\b|index\b)|describe\b|desc\b|explain\b)/.test(text);
+  return /^(show\s+(create\s+(table|view)\b|tables\b|(full\s+)?(columns|fields)\b|(index(es)?|keys)\b)|describe\b|desc\b|explain\b)/.test(text);
 }
 
 function matchesTable(row: SchemaObservationEntry, table: string): boolean {

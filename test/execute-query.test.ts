@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
 import type { QueryPhase, QueryReport } from '../src/core/execute-query.js';
+import { DatasourceStore } from '../src/store/datasources.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { contextWith, queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
@@ -219,6 +220,73 @@ describe('executeQuery failure', () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).toContain('Datasource resolution failed');
+  });
+});
+
+describe('executeQuery datasource kind routing', () => {
+  function saveProfile(overrides: Partial<DatasourceProfile>): void {
+    new DatasourceStore(path.join(stateRoot, 'config', 'datasources.json')).save({
+      name: 'qa-svc-sql',
+      kind: 'mysql',
+      env: 'qa',
+      service: 'svc',
+      tags: [],
+      connection: { host: '127.0.0.1', port: 1, database: 'svc' },
+      credentialRef: 'qa:fake',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: new Date().toISOString(),
+      confidence: 0.5,
+      ...overrides,
+    } as DatasourceProfile);
+  }
+
+  function bothKinds() {
+    const ctx = contextWith(fakePlugin({ kind: 'grpc' }));
+    ctx.pluginRegistry.register(fakePlugin({ kind: 'mysql' }));
+    return ctx;
+  }
+
+  it('sends SQL text to the sql datasource when env and service also match a grpc one', async () => {
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 1 });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
+    const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
+      ctx: bothKinds(),
+      report: silentQueryReport,
+    });
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.datasource).toBe('qa-svc-sql');
+  });
+
+  it('sends Service/method text to the grpc datasource when env and service also match a sql one', async () => {
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 0.5 });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 1 });
+    const outcome = await executeQuery(
+      queryRequest({ datasource: undefined, service: 'svc', query: 'taproot.test.ProfileService/getProfile' }),
+      { ctx: bothKinds(), report: silentQueryReport },
+    );
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.datasource).toBe('qa-svc-grpc');
+  });
+
+  it('keeps the only matching datasource even when its kind does not fit the query', async () => {
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
+    const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
+      ctx: bothKinds(),
+      report: silentQueryReport,
+    });
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.datasource).toBe('qa-svc-grpc');
+  });
+
+  it('honours an explicit --datasource regardless of the query text', async () => {
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 1 });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
+    const outcome = await executeQuery(queryRequest({ datasource: 'qa-svc-grpc', service: 'svc', query: 'SELECT 1 AS ok' }), {
+      ctx: bothKinds(),
+      report: silentQueryReport,
+    });
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.datasource).toBe('qa-svc-grpc');
   });
 });
 

@@ -2,7 +2,7 @@ import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from './bootstrap.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from './discovery.js';
-import { AccessMethod } from '../types/core.js';
+import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
 
@@ -51,6 +51,17 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   return `${head} Profiles for service '${service}': ${shown} (envs: ${envs}).${missing}`;
 }
 
+const SQL_KINDS: DatasourceKind[] = [DatasourceKind.Mysql, DatasourceKind.Postgres, DatasourceKind.TeleportMysql];
+const GRPC_CALL_RE = /^[\w.]+\/\w+$/;
+const SQL_STATEMENT_RE = /^(select|show|with|describe|desc|explain|insert|update|delete|replace)\b/i;
+
+export function datasourceKindsForQuery(query: string): DatasourceKind[] {
+  const text = str(query).trim();
+  if (GRPC_CALL_RE.test(text)) return [DatasourceKind.Grpc];
+  if (SQL_STATEMENT_RE.test(text)) return SQL_KINDS;
+  return [];
+}
+
 export interface DatasourceResolution {
   datasource?: DatasourceProfile;
   source: ResolutionSource;
@@ -64,6 +75,7 @@ export interface ResolveWithFallbacksInput {
   env: string;
   namespace?: string;
   service: string;
+  query?: string;
   allowDiscovery: boolean;
   deterministicRequired: boolean;
   policy: EnvironmentPolicy;
@@ -98,16 +110,17 @@ function discoverTargets(input: { env: string; service: string; accessMethods: s
 export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacksInput): Promise<DatasourceResolution> {
   const { ctx, rawDs, optsEnv, env, namespace, service, allowDiscovery, deterministicRequired, policy } = input;
   const verboseLogs: string[] = [];
+  const preferKinds = datasourceKindsForQuery(str(input.query));
 
   let datasource = rawDs ? ctx.datasourceStore.get(rawDs) : undefined;
   let source: ResolutionSource = datasource ? 'explicit' : 'unknown';
 
   if (!datasource && optsEnv && service) {
-    datasource = ctx.datasourceStore.resolveByEnvService(optsEnv, service, namespace || undefined);
+    datasource = ctx.datasourceStore.resolveByEnvService(optsEnv, service, namespace || undefined, preferKinds);
     if (datasource) source = 'store';
   }
   if (!datasource && env && service) {
-    datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined);
+    datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined, preferKinds);
     if (datasource) source = 'store';
   }
   if (!datasource && env && service && (!deterministicRequired || allowDiscovery)) {

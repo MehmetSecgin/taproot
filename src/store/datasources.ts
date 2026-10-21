@@ -31,7 +31,7 @@ export class DatasourceStore {
     return true;
   }
 
-  resolveByEnvService(env: string, service: string, namespace?: string): DatasourceProfile | undefined {
+  resolveByEnvService(env: string, service: string, namespace?: string, preferKinds: readonly string[] = []): DatasourceProfile | undefined {
     const all = this.list();
     const tryMatch = (envValue: string, nsValue?: string): DatasourceProfile | undefined => {
       const filtered = all.filter((d) => {
@@ -40,7 +40,8 @@ export class DatasourceStore {
         return str(d.namespace) === nsValue;
       });
       if (!filtered.length) return undefined;
-      return filtered.sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
+      const ofKind = filtered.filter((d) => preferKinds.includes(d.kind));
+      return (ofKind.length ? ofKind : filtered).sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
     };
 
     const direct = tryMatch(env, namespace);

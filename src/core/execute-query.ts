@@ -163,6 +163,7 @@ async function resolveTargetDatasource(
     env,
     namespace: namespace || undefined,
     service,
+    query: request.query,
     allowDiscovery: request.allowDiscovery,
     deterministicRequired: deterministic,
     policy,

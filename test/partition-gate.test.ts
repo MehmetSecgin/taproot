@@ -110,6 +110,28 @@ describe('partition predicate gate', () => {
       expect(enforcePartitionPredicate({ sql, schemaContext, dialect: 'mysql' })).toEqual([]);
     }
   });
+
+  it('bypasses SHOW COLUMNS, FIELDS, INDEXES, KEYS and CREATE VIEW', () => {
+    const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
+    for (const sql of [
+      'SHOW COLUMNS FROM order_items',
+      'show   columns from order_items',
+      'SHOW FIELDS FROM order_items',
+      'SHOW FULL FIELDS FROM order_items',
+      'SHOW INDEXES FROM order_items',
+      'SHOW KEYS FROM order_items',
+      'SHOW CREATE VIEW order_items',
+    ]) {
+      expect(enforcePartitionPredicate({ sql, schemaContext, dialect: 'mysql' })).toEqual([]);
+    }
+  });
+
+  it('still throws for a plain SELECT on a RANGE partitioned table', () => {
+    const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
+    expect(() => enforcePartitionPredicate({ sql: 'SELECT * FROM order_items', schemaContext, dialect: 'mysql' })).toThrow(
+      /MISSING_PARTITION_PREDICATE/,
+    );
+  });
 });
 
 describe('range guard', () => {
