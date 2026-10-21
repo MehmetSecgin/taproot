@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
@@ -298,6 +299,38 @@ describe('executeQuery repeat guard', () => {
     if (outcome.ok) throw new Error('expected failure');
     expect(outcome.code).toBe('CONNECTIVITY');
     expect(outcome.message).toContain('datasource qa-fake');
+  });
+
+  it('runs again after a connectivity failure once the endpoint answers', async () => {
+    // arrange
+    const server = net.createServer((socket) => socket.destroy());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as net.AddressInfo).port;
+    stateRoot = await setupQueryState({ connection: { host: '127.0.0.1', port, database: 'fake' } });
+    const calls = { count: 0 };
+    const ctx = contextWith(countingPlugin('getaddrinfo ENOTFOUND example-svc.test-ns', calls));
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // act
+    await executeQuery(queryRequest({ query: 'SELECT 2 AS ok' }), { ctx, report: silentQueryReport });
+    server.close();
+
+    // assert
+    expect(calls.count).toBe(2);
+  });
+
+  it('runs again after a connectivity failure when the endpoint cannot be probed', async () => {
+    // arrange
+    stateRoot = await setupQueryState({ connection: { database: 'fake' } });
+    const calls = { count: 0 };
+    const ctx = contextWith(countingPlugin('teleport proxy path unavailable', calls));
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // act
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // assert
+    expect(calls.count).toBe(2);
   });
 
   it('runs a repeated query again when the prior failure is not deterministic', async () => {

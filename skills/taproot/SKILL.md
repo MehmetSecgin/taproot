@@ -52,7 +52,7 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `KB_MISSING`: the KB directory named in the message does not exist or lists no services. Ask the user for the KB path and run `taproot init --kb-dir <dir>`, or use `datasource add`.
 - `UNKNOWN_DATASOURCE`: no profile has that name. Use a name from the `Did you mean` list, or pass `--env` + `--service`.
 - `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
-- `error.details.shortCircuited`: the same query (or, for `CONNECTIVITY`, any query on that datasource) failed under a minute ago, so TapRoot returned that error without connecting. Fix the cause or wait `retryAfterMs`.
+- `error.details.shortCircuited`: the same query failed under a minute ago, so TapRoot returned that error without connecting. Fix the cause or wait `retryAfterMs`. For `CONNECTIVITY`, TapRoot first probes the datasource's host and port and only short-circuits while that probe fails (`probeError`); once the network is back, the next query runs immediately.
 - `REDUNDANT_INTROSPECTION`: read the cache via the `nextCommand` in `error.details`. Never retry the DDL query.
 - `ACCESS_DENIED` / `AUTH_EXPIRED`: fail fast. Tell the user to run `tsh login` or `taproot creds set` themselves. Never spawn an interactive `tsh login`.
 - `BAD_INPUT`: invalid arguments or missing params. Re-read the command signature; do not retry blindly.

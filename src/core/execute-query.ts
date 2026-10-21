@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { classifyError, environmentPolicy, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
@@ -156,6 +157,22 @@ function priorFailureMessage(runsDir: string, runId: string): string {
   }
 }
 
+function endpointProbeError(datasource: DatasourceProfile, timeoutMs: number): Promise<string | undefined> {
+  const host = str(datasource.connection?.host).trim();
+  const port = Number(datasource.connection?.port);
+  if (!host || !port) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    const finish = (error?: string) => {
+      socket.destroy();
+      resolve(error);
+    };
+    socket.once('connect', () => finish());
+    socket.once('error', (err) => finish(err.message));
+    socket.setTimeout(timeoutMs, () => finish(`no answer from ${host}:${port} within ${timeoutMs}ms`));
+  });
+}
+
 async function resolveTargetDatasource(
   request: QueryExecutionRequest,
   deps: QueryDeps,
@@ -260,14 +277,20 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   const referencedTables = collectReferencedTables(query, dialect);
   const windowMs = RUNTIME_CONSTANTS.query.repeatFailureWindowMs;
   const repeated = findRepeatFailure({ ledgerDir: ctx.paths.runsLedgerDir, datasource: datasource.name, sql: query, windowMs });
-  if (repeated?.errorClass) {
+  const connectivityRepeat = repeated?.errorClass === 'CONNECTIVITY';
+  const probeError = connectivityRepeat ? await endpointProbeError(datasource, RUNTIME_CONSTANTS.query.connectivityProbeTimeoutMs) : undefined;
+  if (repeated?.errorClass && (!connectivityRepeat || probeError)) {
     const ageMs = Date.now() - Date.parse(repeated.ts);
-    const scope = repeated.errorClass === 'CONNECTIVITY' ? `datasource ${datasource.name}` : 'this query';
+    const message = connectivityRepeat
+      ? `short-circuited without running the query: datasource ${datasource.name} failed with CONNECTIVITY ${Math.round(ageMs / 1000)}s ago (run ${repeated.runId}) and its endpoint is still unreachable (${probeError}). The next attempt runs as soon as the endpoint answers.`
+      : `short-circuited without connecting: this query failed with ${repeated.errorClass} ${Math.round(ageMs / 1000)}s ago (run ${repeated.runId}); the next attempt after ${Math.ceil((windowMs - ageMs) / 1000)}s runs for real. Prior error: ${priorFailureMessage(ctx.paths.runsDir, repeated.runId)}`;
     return {
       ok: false,
       code: repeated.errorClass,
-      message: `short-circuited without connecting: ${scope} failed with ${repeated.errorClass} ${Math.round(ageMs / 1000)}s ago (run ${repeated.runId}); the next attempt after ${Math.ceil((windowMs - ageMs) / 1000)}s runs for real. Prior error: ${priorFailureMessage(ctx.paths.runsDir, repeated.runId)}`,
-      details: { shortCircuited: true, priorRunId: repeated.runId, retryAfterMs: windowMs - ageMs },
+      message,
+      details: connectivityRepeat
+        ? { shortCircuited: true, priorRunId: repeated.runId, probeError }
+        : { shortCircuited: true, priorRunId: repeated.runId, retryAfterMs: windowMs - ageMs },
       meta: { schemaContext: buildSchemaContext(query, { service: datasource.service, datasource: datasource.name, dialect }, ctx.learningStore) },
     };
   }
