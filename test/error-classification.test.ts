@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyError } from '../src/core/app.js';
+import { classifyError, nextAction } from '../src/core/app.js';
 import { classifyExecutorDoctorCode } from '../src/core/error-classification.js';
 import { EXIT_CODES, exitCodeForClass } from '../src/core/exit-codes.js';
 
@@ -7,6 +7,30 @@ describe('error classification', () => {
   it('maps ECONNREFUSED to CONNECTIVITY', () => {
     expect(classifyError('connect ECONNREFUSED 127.0.0.1:4406')).toBe('CONNECTIVITY');
     expect(exitCodeForClass('CONNECTIVITY')).toBe(EXIT_CODES.CONNECTIVITY);
+  });
+
+  it('maps cluster DNS failures to CONNECTIVITY and public hosts to UNKNOWN_TARGET', () => {
+    expect(classifyError('getaddrinfo ENOTFOUND example-svc.test-ns')).toBe('CONNECTIVITY');
+    expect(classifyError('getaddrinfo ENOTFOUND qa-svc-grpc.test-ns.svc.cluster.local')).toBe('CONNECTIVITY');
+    expect(classifyError('getaddrinfo EAI_AGAIN db.example.com')).toBe('CONNECTIVITY');
+    expect(classifyError('getaddrinfo ENOTFOUND db.eu.example.com')).toBe('UNKNOWN_TARGET');
+    expect(nextAction('CONNECTIVITY')).toContain('cluster DNS');
+  });
+
+  it('splits SQL errors into actionable codes', () => {
+    expect(classifyError("Unknown column 'author_id' in 'field list'")).toBe('UNKNOWN_COLUMN');
+    expect(classifyError('column "author_id" does not exist')).toBe('UNKNOWN_COLUMN');
+    expect(classifyError("Table 'shop.orders' doesn't exist")).toBe('UNKNOWN_TABLE');
+    expect(classifyError('relation "orders" does not exist')).toBe('UNKNOWN_TABLE');
+    expect(classifyError("You have an error in your SQL syntax; check the manual near 'SELEC'")).toBe('SQL_SYNTAX');
+    expect(classifyError('syntax error at or near "SELEC"')).toBe('SQL_SYNTAX');
+    expect(nextAction('UNKNOWN_COLUMN')).toContain('meta.schemaContext');
+    expect(exitCodeForClass('SQL_SYNTAX')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
+  it('keeps the class named by a code prefix', () => {
+    expect(classifyError('CONNECTIVITY: short-circuited without connecting')).toBe('CONNECTIVITY');
+    expect(classifyError('ACCESS_DENIED: credential missing')).toBe('ACCESS_DENIED');
   });
 
   it('maps permission errors to ACCESS_DENIED', () => {

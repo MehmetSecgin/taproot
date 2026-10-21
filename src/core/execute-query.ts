@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { classifyError, environmentPolicy, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
 import { appendEvent, createRunArtifacts, writeRunSummary } from './artifacts.js';
@@ -10,7 +12,7 @@ import { buildQueryMemory, resolveReason } from './query-memory.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { liveColumnsFromSchemaContext } from './relations.js';
 import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
-import { appendRunsLedgerEntry, ledgerInputFromResult } from './runs-ledger.js';
+import { appendRunsLedgerEntry, findRepeatFailure, ledgerInputFromResult } from './runs-ledger.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate, enforceSchemaIntrospectionPolicy } from './safety.js';
 import { buildSchemaContext, collectReferencedTables } from './schema-context.js';
 import { ensureDatasourceCatalog, supportsSchemaRefresh } from './schema-refresh.js';
@@ -146,6 +148,14 @@ function failure(error: unknown, meta: QueryOutcomeMeta): QueryOutcome {
   };
 }
 
+function priorFailureMessage(runsDir: string, runId: string): string {
+  try {
+    return fs.readFileSync(path.join(runsDir, runId, 'events.log'), 'utf8').match(/query failed code=\S+ message=(.*)/)?.[1] || '';
+  } catch {
+    return '';
+  }
+}
+
 async function resolveTargetDatasource(
   request: QueryExecutionRequest,
   deps: QueryDeps,
@@ -246,6 +256,19 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   });
   const dialect = dialectFromKind(datasource.kind);
   const referencedTables = collectReferencedTables(query, dialect);
+  const windowMs = RUNTIME_CONSTANTS.query.repeatFailureWindowMs;
+  const repeated = findRepeatFailure({ ledgerDir: ctx.paths.runsLedgerDir, datasource: datasource.name, sql: query, windowMs });
+  if (repeated?.errorClass) {
+    const ageMs = Date.now() - Date.parse(repeated.ts);
+    const scope = repeated.errorClass === 'CONNECTIVITY' ? `datasource ${datasource.name}` : 'this query';
+    return {
+      ok: false,
+      code: repeated.errorClass,
+      message: `short-circuited without connecting: ${scope} failed with ${repeated.errorClass} ${Math.round(ageMs / 1000)}s ago (run ${repeated.runId}); the next attempt after ${Math.ceil((windowMs - ageMs) / 1000)}s runs for real. Prior error: ${priorFailureMessage(ctx.paths.runsDir, repeated.runId)}`,
+      details: { shortCircuited: true, priorRunId: repeated.runId, retryAfterMs: windowMs - ageMs },
+      meta: { schemaContext: buildSchemaContext(query, { service: datasource.service, datasource: datasource.name, dialect }, ctx.learningStore) },
+    };
+  }
   if (supportsSchemaRefresh(datasource) && !ctx.learningStore.schemaCatalog(datasource.name)) {
     report.notice(`first query against ${datasource.name}, caching its full schema catalog once`);
   }

@@ -98,12 +98,15 @@ export function nextAction(errorCode: string): string {
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
     UNKNOWN_TARGET: 'Verify host/target in datasource profile and connector module.',
-    CONNECTIVITY: 'Check VPN/network and endpoint reachability.',
+    CONNECTIVITY: "The endpoint is unreachable or cluster DNS is not resolving its hostname. Check the cluster network connection (VPN, telepresence or port-forward), then run 'taproot doctor'.",
     AUTH_EXPIRED: 'Refresh credentials/session and retry.',
     OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
     DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
+    UNKNOWN_COLUMN: 'Check column names against meta.schemaContext.tables in this envelope (the cached schema), fix the query, then retry.',
+    UNKNOWN_TABLE: 'Check table names against meta.schemaContext.tables in this envelope, or read the cached schema with "taproot --json learn ensure-schema --service <svc>", then fix the query.',
+    SQL_SYNTAX: 'Fix the SQL syntax near the position the error names. The same SQL fails the same way, so do not retry it unchanged.',
     GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };
   return mapping[errorCode] || mapping.GENERIC;

@@ -223,6 +223,66 @@ describe('executeQuery failure', () => {
   });
 });
 
+function countingPlugin(failWith: string, calls: { count: number }): TapRootPlugin {
+  const plugin = fakePlugin({ failWith });
+  const inner = plugin.execute!;
+  plugin.execute = async (request, creds): Promise<QueryResult> => {
+    calls.count += 1;
+    return inner(request, creds);
+  };
+  return plugin;
+}
+
+describe('executeQuery repeat guard', () => {
+  it('short-circuits the same query after a syntax error and returns the prior error', async () => {
+    // arrange
+    const calls = { count: 0 };
+    const ctx = contextWith(countingPlugin("You have an error in your SQL syntax; check the manual near 'SELEC'", calls));
+    await executeQuery(queryRequest({ query: 'SELEC 1' }), { ctx, report: silentQueryReport });
+
+    // act
+    const outcome = await executeQuery(queryRequest({ query: 'SELEC 1' }), { ctx, report: silentQueryReport });
+
+    // assert
+    expect(calls.count).toBe(1);
+    if (outcome.ok) throw new Error('expected failure');
+    expect(outcome.code).toBe('SQL_SYNTAX');
+    expect(outcome.message).toContain('short-circuited');
+    expect(outcome.message).toContain("near 'SELEC'");
+    expect(outcome.details).toMatchObject({ shortCircuited: true });
+    expect(ledgerEntries().length).toBe(1);
+  });
+
+  it('short-circuits any query on a datasource after a connectivity failure', async () => {
+    // arrange
+    const calls = { count: 0 };
+    const ctx = contextWith(countingPlugin('getaddrinfo ENOTFOUND example-svc.test-ns', calls));
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // act
+    const outcome = await executeQuery(queryRequest({ query: 'SELECT 2 AS ok' }), { ctx, report: silentQueryReport });
+
+    // assert
+    expect(calls.count).toBe(1);
+    if (outcome.ok) throw new Error('expected failure');
+    expect(outcome.code).toBe('CONNECTIVITY');
+    expect(outcome.message).toContain('datasource qa-fake');
+  });
+
+  it('runs a repeated query again when the prior failure is not deterministic', async () => {
+    // arrange
+    const calls = { count: 0 };
+    const ctx = contextWith(countingPlugin('access denied for user', calls));
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // act
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // assert
+    expect(calls.count).toBe(2);
+  });
+});
+
 describe('executeQuery datasource kind routing', () => {
   function saveProfile(overrides: Partial<DatasourceProfile>): void {
     new DatasourceStore(path.join(stateRoot, 'config', 'datasources.json')).save({

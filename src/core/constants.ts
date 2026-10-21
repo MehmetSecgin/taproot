@@ -31,6 +31,7 @@ export const RUNTIME_CONSTANTS = {
     maxRangeDays: intFromEnv('TAPROOT_MAX_RANGE_DAYS', 90),
     catalogTtlHours: intFromEnv('TAPROOT_CATALOG_TTL_HOURS', 24),
     catalogTimeoutMs: intFromEnv('TAPROOT_CATALOG_TIMEOUT_MS', 20 * 1000),
+    repeatFailureWindowMs: 60 * 1000,
   },
   connector: {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),

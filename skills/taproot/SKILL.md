@@ -47,7 +47,10 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 ## Error codes
 One recovery action each. Do not loop. If it does not resolve, return the error plus `nextActionDetails` and stop.
 
-- `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop.
+- `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop. `getaddrinfo ENOTFOUND` on an in-cluster hostname means the cluster network (VPN, telepresence, port-forward) is down.
+- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables`, fix the query, then retry.
+- `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
+- `error.details.shortCircuited`: the same query (or, for `CONNECTIVITY`, any query on that datasource) failed under a minute ago, so TapRoot returned that error without connecting. Fix the cause or wait `retryAfterMs`.
 - `REDUNDANT_INTROSPECTION`: read the cache via the `nextCommand` in `error.details`. Never retry the DDL query.
 - `ACCESS_DENIED` / `AUTH_EXPIRED`: fail fast. Tell the user to run `tsh login` or `taproot creds set` themselves. Never spawn an interactive `tsh login`.
 - `BAD_INPUT`: invalid arguments or missing params. Re-read the command signature; do not retry blindly.

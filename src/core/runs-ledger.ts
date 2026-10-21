@@ -167,6 +167,22 @@ export function readRunsLedgerEntries(ledgerDir: string, limit = 500): RunsLedge
   return rows.sort((a, b) => String(b.ts).localeCompare(String(a.ts))).slice(0, limit);
 }
 
+const REPEAT_GUARDED_CODES = new Set(['UNKNOWN_COLUMN', 'UNKNOWN_TABLE', 'SQL_SYNTAX']);
+
+export function findRepeatFailure(input: {
+  ledgerDir: string;
+  datasource: string;
+  sql: string;
+  windowMs: number;
+}): RunsLedgerEntry | undefined {
+  const fingerprint = queryFingerprint({ datasource: input.datasource, normalizedSql: normalizeSqlForLedger(input.sql) });
+  const cutoff = Date.now() - input.windowMs;
+  const recent = readRunsLedgerEntries(input.ledgerDir).filter((row) => row.datasource === input.datasource && Date.parse(row.ts) >= cutoff);
+  if (recent[0]?.errorClass === 'CONNECTIVITY') return recent[0];
+  const last = recent.find((row) => row.fingerprint === fingerprint);
+  return last && REPEAT_GUARDED_CODES.has(str(last.errorClass)) ? last : undefined;
+}
+
 export function ledgerInputFromResult(input: {
   ledgerDir: string;
   result: QueryResult;

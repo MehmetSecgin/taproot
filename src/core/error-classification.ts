@@ -28,6 +28,9 @@ const ERROR_CLASS_DEFS = {
   },
   DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
   DISCOVERY_UNAVAILABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /discovery_unavailable/ },
+  UNKNOWN_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /unknown column|column \S+ does not exist/ },
+  UNKNOWN_TABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/ },
+  SQL_SYNTAX: { exitCode: EXIT_CODES.BAD_INPUT, match: /error in your sql syntax|syntax error at or near|syntax error at end of input/ },
   OVERLOADED: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /overloaded|queue limit/ },
   SESSION_BUSY: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /session_busy|session .*active leases/ },
   ACCESS_DENIED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /access denied|permission denied/ },
@@ -35,7 +38,7 @@ const ERROR_CLASS_DEFS = {
   UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
   CONNECTIVITY: {
     exitCode: EXIT_CODES.CONNECTIVITY,
-    match: /teleport proxy path unavailable|spawn tsh enoent|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
+    match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|spawn tsh enoent|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
   },
   AUTH_EXPIRED: { exitCode: EXIT_CODES.AUTH, match: /auth|login|expired|unauthorized/ },
   GENERIC: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /.*/ },
@@ -53,16 +56,21 @@ const CLASSIFY_ORDER: ErrorClass[] = [
   'MISCONFIGURED_DATASOURCE',
   'DETERMINISTIC_REQUIRED',
   'DISCOVERY_UNAVAILABLE',
+  'UNKNOWN_COLUMN',
+  'UNKNOWN_TABLE',
+  'SQL_SYNTAX',
   'OVERLOADED',
   'SESSION_BUSY',
   'ACCESS_DENIED',
   'UNKNOWN_DATABASE',
-  'UNKNOWN_TARGET',
   'CONNECTIVITY',
+  'UNKNOWN_TARGET',
   'AUTH_EXPIRED',
 ];
 
 export function classifyError(message: string): ErrorClass {
+  const prefix = message.match(/^([A-Z_]+):/)?.[1];
+  if (prefix && prefix in ERROR_CLASSES) return prefix as ErrorClass;
   const text = message.toLowerCase();
   for (const cls of CLASSIFY_ORDER) {
     if (ERROR_CLASSES[cls].match.test(text)) return cls;
