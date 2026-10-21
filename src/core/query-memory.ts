@@ -87,7 +87,7 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   const distinctSessions = new Set(sameFingerprintSuccesses.map((row) => row.sessionId || row.runId));
   if (distinctSessions.size >= 5) {
     hints.push(
-      `recurring_shape: this query has succeeded in ${distinctSessions.size} distinct sessions; reuse the run with "taproot --json run show --run-id <id>" instead of rewriting it`,
+      `recurring_shape: this query has succeeded in ${distinctSessions.size} distinct sessions; reuse the run with "taproot run show --run-id <id>" instead of rewriting it`,
     );
   }
   hints.push(...recurringFailureHints(rows, tables));
@@ -97,21 +97,4 @@ export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   if (similarPastRuns.length) out.similarPastRuns = similarPastRuns;
   if (dedupedHints.length) out.hints = dedupedHints;
   return out;
-}
-
-export function renderQueryMemoryTty(memory?: QueryMemory): string {
-  if (!memory) return '';
-  const lines: string[] = [];
-  const similarPastRuns = memory.similarPastRuns || [];
-  const hints = memory.hints || [];
-  if (similarPastRuns.length) {
-    lines.push(
-      `similar runs: ${similarPastRuns
-        .slice(0, 3)
-        .map((run) => `${run.outcomeCode}${run.reason ? ` (${run.reason})` : ''}`)
-        .join(' | ')}`,
-    );
-  }
-  if (hints.length) lines.push(`hints: ${hints.join(' | ')}`);
-  return lines.length ? `queryMemory:\n${lines.map((line) => `  ${line}`).join('\n')}` : '';
 }

@@ -30,7 +30,7 @@ export function isTargetedRequest(opts: LearnTargetOpts): boolean {
 
 export function unresolvedNextCommand(opts: LearnTargetOpts, ctx?: AppContext): string | null {
   const datasource = str(opts.datasource).trim();
-  if (datasource) return `taproot --json datasource show ${datasource}`;
+  if (datasource) return `taproot datasource show ${datasource}`;
   const env = str(opts.env).trim();
   const namespace = normalizeNamespace(str(opts.namespace));
   const service = str(opts.service).trim();
@@ -40,10 +40,10 @@ export function unresolvedNextCommand(opts: LearnTargetOpts, ctx?: AppContext): 
     if (candidates.length) {
       const tagged = candidates.map((d) => `${d.name} (env=${d.env}${d.namespace ? ` ns=${d.namespace}` : ''})`).slice(0, 4).join(', ');
       const first = candidates[0];
-      return `taproot --json learn ensure-schema --datasource ${first.name}  # available: ${tagged}`;
+      return `taproot learn ensure-schema --datasource ${first.name}  # available: ${tagged}`;
     }
   }
-  return `taproot --json init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}`;
+  return `taproot init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}`;
 }
 
 export function scopedRows<T>(input: { datasource?: DatasourceProfile; targeted: boolean; load: (key?: string) => T[]; keyKind?: 'service' | 'datasource' }): T[] {
@@ -71,12 +71,6 @@ export function emptyState(input: {
   }
   return {
     emptyReason: 'schema_refresh_required',
-    suggestedNextCommand: `taproot --json learn refresh-schema --datasource ${input.datasource.name}`,
+    suggestedNextCommand: `taproot learn refresh-schema --datasource ${input.datasource.name}`,
   };
-}
-
-export function printEmptyState(kind: 'tables' | 'joins', state: { emptyReason: string | null; suggestedNextCommand: string | null }): void {
-  if (!state.emptyReason) return;
-  console.log(`No learned schema ${kind} found (${state.emptyReason}).`);
-  if (state.suggestedNextCommand) console.log(`next: ${state.suggestedNextCommand}`);
 }

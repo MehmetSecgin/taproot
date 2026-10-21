@@ -1,6 +1,5 @@
 import type { AppContext } from '../core/app.js';
 import { refreshGrpcSchemaForDatasource, supportsGrpcSchema } from '../core/schema-refresh.js';
-import { renderRecord, renderTable } from '../core/output.js';
 import { EnsuredBy } from '../types/core.js';
 import type { DatasourceProfile, RpcEnumShape, RpcMessageShape } from '../types/core.js';
 import type { GrpcServiceSchemaEntry } from '../store/learning.js';
@@ -104,7 +103,7 @@ export async function ensureGrpcSchemaSnapshot(
     return emptyGrpcSnapshot({
       datasource,
       emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
-      suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
+      suggestedNextCommand: refreshable ? `taproot learn refresh-schema --datasource ${datasource.name}` : null,
       ensuredBy: EnsuredBy.Empty,
     });
   }
@@ -131,30 +130,9 @@ export function readGrpcSchemaSnapshot(
     return emptyGrpcSnapshot({
       datasource,
       emptyReason: refreshable ? 'grpc_schema_refresh_required' : 'learning_unsupported',
-      suggestedNextCommand: refreshable ? `taproot --json learn refresh-schema --datasource ${datasource.name}` : null,
+      suggestedNextCommand: refreshable ? `taproot learn refresh-schema --datasource ${datasource.name}` : null,
       ensuredBy: EnsuredBy.Empty,
     });
   }
   return buildGrpcSnapshot(entry, Boolean(opts.detailed), EnsuredBy.CachedLearning);
-}
-
-export function renderGrpcSnapshotTty(snapshot: GrpcSchemaSnapshot): void {
-  if (!snapshot.methods.length) {
-    if (snapshot.emptyReason) {
-      console.log(`No learned grpc schema found (${snapshot.emptyReason}).`);
-      if (snapshot.suggestedNextCommand) console.log(`next: ${snapshot.suggestedNextCommand}`);
-    }
-    return;
-  }
-  console.log(renderRecord({
-    datasource: snapshot.datasource || '',
-    service: snapshot.service || '',
-    ensuredBy: snapshot.ensuredBy,
-    services: snapshot.serviceCount,
-    methods: snapshot.methodCount,
-    messages: snapshot.messageCount,
-    enums: snapshot.enumCount,
-    protoRoot: snapshot.protoRoot || '',
-  }));
-  console.log(renderTable(snapshot.methods));
 }

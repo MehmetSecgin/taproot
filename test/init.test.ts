@@ -58,7 +58,7 @@ describe('init command', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
-    const out = runCli(['--json', 'init'], {
+    const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -81,8 +81,8 @@ describe('init command', () => {
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' };
 
     // act
-    const init = runCli(['--json', 'init', '--kb-dir', kbDir], env);
-    const list = runCli(['--json', 'kb', 'list-services'], env);
+    const init = runCli(['init', '--kb-dir', kbDir], env);
+    const list = runCli(['kb', 'list-services'], env);
 
     // assert
     expect(init.status).toBe(0);
@@ -96,10 +96,10 @@ describe('init command', () => {
     const stateRoot = makeStateRoot();
     const savedKbDir = makeKbDir();
     setupKb(savedKbDir);
-    runCli(['--json', 'init', '--kb-dir', savedKbDir], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' });
+    runCli(['init', '--kb-dir', savedKbDir], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' });
 
     // act
-    const out = runCli(['--json', 'init'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: makeKbDir() });
+    const out = runCli(['init'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: makeKbDir() });
 
     // assert
     expect(out.status).toBe(0);
@@ -114,8 +114,8 @@ describe('init command', () => {
     const expectedDir = path.join(stateRoot, 'kb');
 
     // act
-    const resolve = runCli(['--json', 'kb', 'resolve', '--env', 'qa', '--service', 'orders'], env);
-    const initDatasource = runCli(['--json', 'init', 'datasource', '--env', 'qa', '--service', 'orders'], env);
+    const resolve = runCli(['kb', 'resolve', '--env', 'qa', '--service', 'orders'], env);
+    const initDatasource = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], env);
 
     // assert
     for (const out of [resolve, initDatasource]) {
@@ -136,11 +136,11 @@ describe('init command', () => {
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
     };
-    const first = runCli(['--json', 'init'], env);
+    const first = runCli(['init'], env);
     expect(first.status).toBe(0);
     const configFile = path.join(stateRoot, 'config', 'deterministic-config.json');
     const before = fs.readFileSync(configFile, 'utf8');
-    const second = runCli(['--json', 'init'], env);
+    const second = runCli(['init'], env);
     expect(second.status).toBe(0);
     expect(fs.readFileSync(configFile, 'utf8')).toBe(before);
   });
@@ -148,7 +148,7 @@ describe('init command', () => {
   it('reports missing KB deterministically', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
-    const out = runCli(['--json', 'init'], {
+    const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -167,7 +167,7 @@ describe('init command', () => {
     setupKb(kbDir);
 
     // act
-    const out = runCli(['--json', 'init'], {
+    const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -206,7 +206,7 @@ describe('init command', () => {
     expect(added.status).toBe(0);
 
     // act
-    const out = runCli(['--json', 'init'], env);
+    const out = runCli(['init'], env);
 
     // assert
     expect(out.status).toBe(0);
@@ -222,7 +222,7 @@ describe('init command', () => {
     setupKb(kbDir);
 
     // act
-    const out = runCli(['--json', 'init', '--kind', 'grpc'], {
+    const out = runCli(['init', '--kind', 'grpc'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -248,7 +248,7 @@ describe('init command', () => {
     setupKb(kbDir);
 
     // act
-    const out = runCli(['--json', 'init', '--kind', 'redis'], {
+    const out = runCli(['init', '--kind', 'redis'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -288,10 +288,8 @@ describe('init command', () => {
 
     // assert
     expect(out.status).toBe(0);
-    const credentialsLine = out.stdout.split('\n').find((line) => line.includes(' credentials:'));
-    expect(credentialsLine).toMatch(/^OK credentials:/);
-    expect(credentialsLine).toMatch(/optional/i);
-    expect(credentialsLine).toContain('redis');
+    const credentials = JSON.parse(out.stdout).checks.find((c: { check: string }) => c.check === 'credentials');
+    expect(credentials.status).toBe('ok');
   });
 
   it('does not ask for credentials when every datasource kind is auth-free', () => {
@@ -312,7 +310,7 @@ describe('init command', () => {
     expect(added.status).toBe(0);
 
     // act
-    const out = runCli(['--json', 'init'], env);
+    const out = runCli(['init'], env);
 
     // assert
     expect(out.status).toBe(0);
@@ -327,7 +325,7 @@ describe('init command', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
-    const out = runCli(['--json', 'init'], {
+    const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_KB_DIR: kbDir,
     });
@@ -341,7 +339,7 @@ describe('init command', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
-    const out = runCli(['--json', 'init'], {
+    const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -364,7 +362,7 @@ describe('init command', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
-    const out = runCli(['--json', 'init', 'datasource', '--env', 'qa', '--service', 'orders'], {
+    const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -406,7 +404,7 @@ describe('init command', () => {
         },
       ]),
     );
-    const out = runCli(['--json', 'init', 'datasource', '--env', 'qa', '--service', 'orders'], {
+    const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -449,7 +447,7 @@ describe('init command', () => {
         ],
       },
     ]);
-    const out = runCli(['--json', 'init', 'datasource', '--env', 'qa', '--namespace', 'develop', '--service', 'orders'], {
+    const out = runCli(['init', 'datasource', '--env', 'qa', '--namespace', 'develop', '--service', 'orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -513,7 +511,7 @@ describe('init command', () => {
     });
     expect(seed.status).toBe(0);
 
-    const out = runCli(['--json', 'init', 'datasource', '--env', 'prod', '--service', 'orders'], {
+    const out = runCli(['init', 'datasource', '--env', 'prod', '--service', 'orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -530,7 +528,7 @@ describe('init command', () => {
     expect(datasources).toHaveLength(1);
     expect(datasources[0].kind).toBe('teleport-mysql');
 
-    const creds = runCli(['--json', 'creds', 'show', '--ref', 'prod'], {
+    const creds = runCli(['creds', 'show', '--ref', 'prod'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -566,7 +564,7 @@ describe('init command', () => {
     );
     fs.writeFileSync(path.join(configDir, 'credentials.json.enc'), JSON.stringify({ bad: 'shape' }));
     setupKb(kbDir);
-    const out = runCli(['--json', 'self-check', '--agent'], {
+    const out = runCli(['self-check', '--agent'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -612,7 +610,7 @@ describe('init command', () => {
     });
     expect(seed.status).toBe(0);
 
-    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+    const out = runCli(['self-check', '--agent', '--datasource', 'qa-orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -672,7 +670,7 @@ describe('init command', () => {
     });
     expect(seedConnector.status).toBe(0);
 
-    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+    const out = runCli(['self-check', '--agent', '--datasource', 'qa-orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -729,7 +727,7 @@ describe('init command', () => {
     });
     expect(seedConnector.status).toBe(0);
 
-    const out = runCli(['--json', 'self-check', '--agent', '--datasource', 'qa-orders'], {
+    const out = runCli(['self-check', '--agent', '--datasource', 'qa-orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,
@@ -743,7 +741,7 @@ describe('init command', () => {
   it('exits 7 when self-check --agent is not ready', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
-    const out = runCli(['--json', 'self-check', '--agent'], {
+    const out = runCli(['self-check', '--agent'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,

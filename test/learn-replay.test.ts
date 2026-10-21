@@ -33,7 +33,7 @@ describe('learn replay', () => {
     );
     fs.writeFileSync(path.join(runDir, 'events.log'), '2026-03-03T00:00:00Z started\n2026-03-03T00:00:01Z done\n');
 
-    const out = runCli(['--json', 'learn', 'replay', '--run-id', runId], {
+    const out = runCli(['learn', 'replay', '--run-id', runId], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-master-key',
     });

@@ -22,52 +22,48 @@ function expectBadInput(args: string[], fragment: string) {
 }
 
 describe('CLI argument guards classify as BAD_INPUT', () => {
-  it('rejects an unknown --datetime-format', () => {
-    expectBadInput(['--json', '--datetime-format', 'rfc2822', 'datasource', 'list'], 'Invalid --datetime-format');
-  });
-
   it('rejects a malformed --hint', () => {
     expectBadInput(
-      ['--json', 'datasource', 'add', '--name', 'x', '--kind', 'mysql', '--credential-ref', 'qa:x', '--hint', 'brokenpair'],
+      ['datasource', 'add', '--name', 'x', '--kind', 'mysql', '--credential-ref', 'qa:x', '--hint', 'brokenpair'],
       "Invalid --hint 'brokenpair'",
     );
   });
 
   it('rejects a malformed --connector-ref', () => {
     expectBadInput(
-      ['--json', 'datasource', 'add', '--name', 'x', '--kind', 'mysql', '--credential-ref', 'qa:x', '--connector-ref', 'brokenpair'],
+      ['datasource', 'add', '--name', 'x', '--kind', 'mysql', '--credential-ref', 'qa:x', '--connector-ref', 'brokenpair'],
       "Invalid --connector-ref 'brokenpair'",
     );
   });
 
   it('rejects datasource import without --file', () => {
-    expectBadInput(['--json', 'datasource', 'import'], 'Specify --file <path>');
+    expectBadInput(['datasource', 'import'], 'Specify --file <path>');
   });
 
   it('rejects a malformed --kv', () => {
-    expectBadInput(['--json', 'creds', 'set', '--ref', 'qa:orders', '--kv', 'brokenpair'], "Invalid --kv 'brokenpair'");
+    expectBadInput(['creds', 'set', '--ref', 'qa:orders', '--kv', 'brokenpair'], "Invalid --kv 'brokenpair'");
   });
 
   it('rejects config restore without a selector', () => {
-    expectBadInput(['--json', 'config', 'restore'], 'Specify one of --id');
+    expectBadInput(['config', 'restore'], 'Specify one of --id');
   });
 
   it('rejects a non-integer --keep', () => {
-    expectBadInput(['--json', 'config', 'prune', '--keep', 'many'], "Invalid --keep 'many'");
+    expectBadInput(['config', 'prune', '--keep', 'many'], "Invalid --keep 'many'");
   });
 
   it('rejects grpc describe without a proto root or datasource', () => {
-    expectBadInput(['--json', 'grpc', 'describe'], '--proto-root or --datasource required');
+    expectBadInput(['grpc', 'describe'], '--proto-root or --datasource required');
   });
 
   it('points a positional query argument at --sql and --datasource', () => {
     expectBadInput(
-      ['--json', 'query', 'demo-db', 'SELECT 1'],
+      ['query', 'demo-db', 'SELECT 1'],
       'Pass the query text with --sql "<query>" and the datasource with --datasource <name>',
     );
   });
 
   it('rejects an unsupported completion shell', () => {
-    expectBadInput(['--json', 'completion', 'tcsh'], "Unsupported shell 'tcsh'");
+    expectBadInput(['completion', 'tcsh'], "Unsupported shell 'tcsh'");
   });
 });

@@ -22,8 +22,7 @@ import { registerBench } from './commands/bench.js';
 import { registerDiscover } from './commands/discover.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
-import { badInput, classifyError } from './core/error-classification.js';
-import { cleanupProgress } from './core/progress.js';
+import { classifyError } from './core/error-classification.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from './core/version.js';
 import { str } from './core/strings.js';
 
@@ -33,36 +32,19 @@ program
   .name('taproot')
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
   .version(TAPROOT_VERSION)
-  .option('--json', 'Output machine-readable JSON envelope', false)
   .option('--jsonl', 'Output JSON lines: query rows as one object per line, other arrays one item per line; errors as one CODE: message line on stderr', false)
-  .option('--pluck <path>', 'Implies --json. Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). On failure, print only the error object to stderr.')
-  .option('--no-color', 'Disable ANSI colors')
-  .option('--no-animations', 'Disable animations')
+  .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). On failure, print only the error object to stderr.')
   .option('--profile <name>', 'Runtime profile name')
   .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')
-  .option('--verbose', 'Verbose progress and diagnostics', false)
-  .option('--datetime-format <fmt>', 'Render Date columns as iso|js|epoch (default iso)')
+  .option('--verbose', 'Diagnostics on stderr', false)
   .option('--skill-version', 'Print skill version and exit', false);
-
-function jsonOutputRequested(): boolean {
-  const opts = program.opts();
-  return Boolean(opts.json || opts.jsonl || opts.pluck);
-}
 
 function applyOutputOptions(): void {
   const opts = program.opts();
   setOutputOptions({ pluck: opts.pluck ? String(opts.pluck) : undefined, jsonl: Boolean(opts.jsonl) });
 }
 
-program.hook('preAction', () => {
-  applyOutputOptions();
-  const fmt = str(program.opts().datetimeFormat).trim().toLowerCase();
-  if (fmt === 'iso' || fmt === 'js' || fmt === 'epoch') {
-    process.env.TAPROOT_DATETIME_FORMAT = fmt;
-  } else if (fmt) {
-    throw badInput(`Invalid --datetime-format '${fmt}'. Expected iso|js|epoch.`);
-  }
-});
+program.hook('preAction', applyOutputOptions);
 
 program.exitOverride((error) => {
   throw error;
@@ -77,9 +59,6 @@ function context() {
   const opts = program.opts();
   return buildContext({
     kbDir: opts.kbDir ? String(opts.kbDir) : undefined,
-    jsonMode: jsonOutputRequested(),
-    noColor: Boolean(opts.noColor),
-    noAnimations: Boolean(opts.noAnimations),
     verbose: Boolean(opts.verbose),
   });
 }
@@ -96,11 +75,11 @@ registerCreds(program, context);
 registerConnector(program, context);
 registerCompletion(program, context);
 registerSanitize(program, context);
-registerDaemon(program, context);
-registerSession(program, context);
+registerDaemon(program);
+registerSession(program);
 registerInit(program, context);
 registerRun(program, context);
-registerBench(program, context);
+registerBench(program);
 registerDiscover(program, context);
 registerGrpc(program, context);
 
@@ -118,26 +97,18 @@ function hasCredsTopologyMisuseHint(input: string): boolean {
 }
 
 function emitError(error: unknown, code: string): void {
-  cleanupProgress();
   const message = (error as Error)?.message || String(error || 'Unknown error');
   const classifiedCode = code === 'UNHANDLED' || code === 'UNCAUGHT_EXCEPTION' || code === 'UNHANDLED_REJECTION'
     ? classifyError(message)
     : code;
   applyOutputOptions();
-  if (jsonOutputRequested()) {
-    const priorDetails = (error as Error & { details?: Record<string, unknown> })?.details;
-    const details =
-      priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
-        ? priorDetails
-        : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
-    const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
-    printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
-    return;
-  }
-  console.error(message);
-  if (hasCredsTopologyMisuseHint(message)) {
-    console.error("Hint: connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'.");
-  }
+  const priorDetails = (error as Error & { details?: Record<string, unknown> })?.details;
+  const details =
+    priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
+      ? priorDetails
+      : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
+  const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
+  printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
 }
 
 process.on('unhandledRejection', (reason) => {
@@ -157,14 +128,12 @@ program.parseAsync(process.argv).catch((error) => {
     return;
   }
   if (commanderCode.startsWith('commander.')) {
-    cleanupProgress();
     const message = (error as Error)?.message || '';
-    if (hasCredsTopologyMisuseHint(message)) {
-      console.error("Hint: connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'.");
-    } else if (jsonOutputRequested()) {
-      applyOutputOptions();
-      printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
-    }
+    const details = hasCredsTopologyMisuseHint(message)
+      ? { nextAction: "Connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'." }
+      : undefined;
+    applyOutputOptions();
+    printEnvelope(false, undefined, { code: 'CLI_ERROR', message, details });
     process.exit(classifyExitCode(error));
     return;
   }

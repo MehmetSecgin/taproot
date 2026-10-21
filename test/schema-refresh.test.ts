@@ -74,9 +74,6 @@ function makeContext(): AppContext {
     learningStore: new LearningStore(learningDir),
     runtimeConfigStore: {} as any,
     pluginRegistry: registry,
-    jsonMode: true,
-    noColor: true,
-    noAnimations: true,
     verbose: false,
   };
 }

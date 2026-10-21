@@ -63,7 +63,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
 
   const sessions = new SessionRegistry(runDir);
   const queryLimiter = new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries);
-  const ctx = buildContext({ jsonMode: true });
+  const ctx = buildContext({});
   opts.configurePlugins?.(ctx.pluginRegistry);
   const startedAt = Date.now();
 

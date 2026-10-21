@@ -97,9 +97,9 @@ describe('teleport mysql execution', () => {
       },
     );
     expect(out.status).toBe(3);
-    expect(out.stderr).toContain('teleport proxy path unavailable');
-    expect(out.stderr).not.toContain('tsh db exec');
-    expect(out.stderr).not.toContain('fallback');
+    expect(out.stdout).toContain('teleport proxy path unavailable');
+    expect(out.stdout).not.toContain('tsh db exec');
+    expect(out.stdout).not.toContain('fallback');
   });
 
   it('resolves dbUser from datasource resolverHints when credentials lack one', () => {
@@ -130,8 +130,8 @@ describe('teleport mysql execution', () => {
       ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok'],
       { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: '' },
     );
-    expect(out.stderr).toContain('teleport proxy path unavailable');
-    expect(out.stderr).not.toMatch(/missing .*dbUser/);
+    expect(out.stdout).toContain('teleport proxy path unavailable');
+    expect(out.stdout).not.toMatch(/missing .*dbUser/);
   });
 
   it('names a remedy when dbUser is missing everywhere', () => {
@@ -160,7 +160,7 @@ describe('teleport mysql execution', () => {
     fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
     const out = runQuery(stateRoot, stubTsh([]));
     expect(out.status).not.toBe(0);
-    expect(out.stderr).toMatch(/creds set --ref prod:orders --db-user|datasource resolve/);
+    expect(out.stdout).toMatch(/creds set --ref prod:orders --db-user|datasource resolve/);
   });
 
   it('takes the db user from tsh db ls when exactly one is allowed', () => {
@@ -172,8 +172,8 @@ describe('teleport mysql execution', () => {
     const out = runQuery(stateRoot, pathEnv);
 
     // assert
-    expect(out.stderr).toContain('--db-user reader');
-    expect(out.stderr).not.toMatch(/missing .*dbUser/);
+    expect(out.stdout).toContain('--db-user reader');
+    expect(out.stdout).not.toMatch(/missing .*dbUser/);
   });
 
   it('lists the allowed users when tsh db ls offers several', () => {
@@ -186,10 +186,10 @@ describe('teleport mysql execution', () => {
 
     // assert
     expect(out.status).not.toBe(0);
-    expect(out.stderr).toContain('reader, writer');
-    expect(out.stderr).toContain('creds set --ref prod:orders --db-user <user>');
-    expect(out.stderr).toContain('--hint dbUser=<user>');
-    expect(out.stderr).not.toContain('proxy args');
+    expect(out.stdout).toContain('reader, writer');
+    expect(out.stdout).toContain('creds set --ref prod:orders --db-user <user>');
+    expect(out.stdout).toContain('--hint dbUser=<user>');
+    expect(out.stdout).not.toContain('proxy args');
   });
 
   it('prefers an explicit dbUser hint over the tsh db ls user', () => {
@@ -201,6 +201,6 @@ describe('teleport mysql execution', () => {
     const out = runQuery(stateRoot, pathEnv);
 
     // assert
-    expect(out.stderr).toContain('--db-user writer');
+    expect(out.stdout).toContain('--db-user writer');
   });
 });

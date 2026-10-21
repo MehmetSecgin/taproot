@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, renderTable, respondOk } from '../core/output.js';
+import { printJson, respondOk } from '../core/output.js';
 import { loadProtobufRoot } from '../core/proto-loader.js';
 import {
   buildRequestSkeleton,
@@ -9,7 +9,6 @@ import {
   listServices,
   resolveName,
   searchMethods,
-  type ProtoDescriptor,
 } from '../core/grpc-introspect.js';
 import { str } from '../core/strings.js';
 
@@ -39,60 +38,6 @@ function resolveOrThrow(query: string, names: string[], label: string): string {
   throw new Error(`${label} '${query}' is ambiguous or unknown. Candidates: ${list}${more}.`);
 }
 
-function callHint(datasource: string | undefined, service: string, method: string, skeleton: unknown): string {
-  const ds = datasource || '<datasource>';
-  const body = JSON.stringify(skeleton ?? {});
-  return [
-    'call:',
-    `  taproot --json query --datasource ${ds} \\`,
-    `    --sql "${service}/${method}" \\`,
-    `    --request-json '${body}'`,
-  ].join('\n');
-}
-
-function renderHumanDescribe(descriptor: ProtoDescriptor, opts: { service?: string; method?: string }): string {
-  const lines: string[] = [];
-  if (!descriptor.services.length) {
-    lines.push(opts.service ? `No service named '${opts.service}' found.` : 'No services found in proto root.');
-    return lines.join('\n');
-  }
-  for (const svc of descriptor.services) {
-    lines.push(`service ${svc.name}`);
-    for (const m of svc.methods) {
-      if (opts.method && m.name !== opts.method) continue;
-      const reqStream = m.requestStream ? 'stream ' : '';
-      const respStream = m.responseStream ? 'stream ' : '';
-      lines.push(`  rpc ${m.name}(${reqStream}${m.requestType}) returns (${respStream}${m.responseType})`);
-    }
-  }
-  if (Object.keys(descriptor.messages).length) {
-    lines.push('');
-    lines.push('messages:');
-    for (const name of Object.keys(descriptor.messages).sort()) {
-      const msg = descriptor.messages[name];
-      lines.push(`  ${name}`);
-      for (const f of msg.fields) {
-        const flags: string[] = [];
-        if (f.repeated) flags.push('repeated');
-        if (f.optional) flags.push('optional');
-        if (f.oneof) flags.push(`oneof:${f.oneof}`);
-        const tag = flags.length ? ` [${flags.join(', ')}]` : '';
-        lines.push(`    ${f.name}: ${f.type}${tag}`);
-      }
-    }
-  }
-  if (Object.keys(descriptor.enums).length) {
-    lines.push('');
-    lines.push('enums:');
-    for (const name of Object.keys(descriptor.enums).sort()) {
-      const en = descriptor.enums[name];
-      const values = Object.entries(en.values).map(([k, v]) => `${k}=${v}`).join(', ');
-      lines.push(`  ${name}: ${values}`);
-    }
-  }
-  return lines.join('\n');
-}
-
 export function registerGrpc(program: Command, getCtx: () => AppContext): void {
   const grpc = program.command('grpc').description('gRPC datasource introspection');
 
@@ -107,7 +52,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--max-depth <n>', 'message expansion depth cap (default 4)', '4')
     .action(async (opts) => {
       const ctx = getCtx();
-      const { root, source, datasource } = resolveProtoRoot(ctx, opts);
+      const { root, source } = resolveProtoRoot(ctx, opts);
       const maxDepth = Math.max(0, parseInt(String(opts.maxDepth || '4'), 10) || 4);
       const { protobufRoot } = await loadProtobufRoot(root);
 
@@ -143,32 +88,11 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         }
       }
 
-      if (ctx.jsonMode) {
-        printJson({
-          ok: true,
-          data: opts.skeleton ? { ...descriptor, requestSkeletons: skeletons } : descriptor,
-          meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName, resolvedMethod: methodName },
-        });
-        return;
-      }
-      const summary = renderTable([
-        {
-          services: descriptor.services.length,
-          methods: descriptor.services.reduce((acc, s) => acc + s.methods.length, 0),
-          messages: Object.keys(descriptor.messages).length,
-          enums: Object.keys(descriptor.enums).length,
-          protoRoot: root,
-        },
-      ]);
-      console.log(summary);
-      console.log(renderHumanDescribe(descriptor, { service: serviceName, method: methodName }));
-      for (const s of skeletons) {
-        console.log('');
-        console.log(`request skeleton (${s.request}):`);
-        console.log(JSON.stringify(s.skeleton, null, 2));
-        console.log('');
-        console.log(callHint(datasource, s.service, s.method, s.skeleton));
-      }
+      printJson({
+        ok: true,
+        data: opts.skeleton ? { ...descriptor, requestSkeletons: skeletons } : descriptor,
+        meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName, resolvedMethod: methodName },
+      });
     });
 
   grpc
@@ -201,11 +125,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         const p = String(pattern).toLowerCase();
         flat = flat.filter((r) => `${r.service} ${r.method} ${r.request} ${r.response}`.toLowerCase().includes(p));
       }
-      if (ctx.jsonMode) {
-        respondOk({ methods: flat }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
-        return;
-      }
-      console.log(renderTable(flat));
+      respondOk({ methods: flat }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
     });
 
   grpc
@@ -219,14 +139,6 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
       const { root, source } = resolveProtoRoot(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));
-      if (ctx.jsonMode) {
-        respondOk({ matches }, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
-        return;
-      }
-      if (!matches.length) {
-        console.log(`No service/method matches '${pattern}'.`);
-        return;
-      }
-      console.log(renderTable(matches));
+      respondOk({ matches }, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
     });
 }

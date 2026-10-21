@@ -93,7 +93,7 @@ describe('cli contract', () => {
   });
 
   it('self-check json includes checks', () => {
-    const out = runCli(['--json', 'self-check']);
+    const out = runCli(['self-check']);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.checks)).toBe(true);
@@ -120,7 +120,7 @@ describe('cli contract', () => {
       { TAPROOT_FORCE_DIRECT: '1', TAPROOT_STATE_ROOT: stateRoot },
     );
     expect(out.status).toBe(2);
-    expect((out.stderr || '').toLowerCase()).toContain('deterministic_required');
+    expect(out.stdout.toLowerCase()).toContain('deterministic_required');
   });
 
   it('resolves service aliases from runtime config in cache and kb commands', () => {
@@ -161,7 +161,7 @@ describe('cli contract', () => {
         },
       ]),
     );
-    const kbOut = runCli(['--json', 'kb', 'resolve', '--service', 'legacyservice', '--env', 'sandbox'], {
+    const kbOut = runCli(['kb', 'resolve', '--service', 'legacyservice', '--env', 'sandbox'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
       TAPROOT_KB_DIR: kbDir,

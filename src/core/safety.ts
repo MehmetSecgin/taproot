@@ -77,11 +77,11 @@ export function enforceSchemaIntrospectionPolicy(input: {
   }
 
   throw redundantIntrospection(
-    `service ${input.service} schema is already cached; use 'taproot --json learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
+    `service ${input.service} schema is already cached; use 'taproot learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
     {
       service: input.service,
-      nextAction: `taproot --json learn ensure-schema --service ${input.service}`,
-      nextCommand: `taproot --json learn ensure-schema --service ${input.service}`,
+      nextAction: `taproot learn ensure-schema --service ${input.service}`,
+      nextCommand: `taproot learn ensure-schema --service ${input.service}`,
     },
   );
 }

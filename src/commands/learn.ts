@@ -4,15 +4,15 @@ import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { connectivity } from '../core/error-classification.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
 import { describeResolutionFailure } from '../core/resolve-datasource.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import { str } from '../core/strings.js';
-import { emptyState, isTargetedRequest, printEmptyState, resolveDatasource, scopedRows, unresolvedNextCommand } from './learn-common.js';
+import { emptyState, isTargetedRequest, resolveDatasource, scopedRows, unresolvedNextCommand } from './learn-common.js';
 import { buildSchemaSnapshot, ensureSchemaSnapshot, trimIndex } from './learn-sql.js';
-import { ensureGrpcSchemaSnapshot, readGrpcSchemaSnapshot, renderGrpcSnapshotTty } from './learn-grpc.js';
+import { ensureGrpcSchemaSnapshot, readGrpcSchemaSnapshot } from './learn-grpc.js';
 
 export { ensureSchemaSnapshot } from './learn-sql.js';
 export type { EnsureSchemaResult } from './learn-sql.js';
@@ -25,24 +25,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
   l.command('status').action(() => {
     const ctx = getCtx();
     const status = ctx.learningStore.status();
-    if (ctx.jsonMode) printJson(status);
-    else {
-      console.log(renderRecord({ latest: status.latest || '' }));
-      console.log(renderTable([
-        { metric: 'resolution entries', value: status.files.resolution },
-        { metric: 'schema observation entries', value: status.files.schemaObservations },
-        { metric: 'schema join entries', value: status.files.schemaJoins },
-        { metric: 'schema catalog entries', value: status.files.schemaCatalog },
-        { metric: 'grpc schema entries', value: status.files.grpcSchemas },
-      ]));
-    }
+    printJson(status);
   });
 
   l.command('compact').action(() => {
     const ctx = getCtx();
     const out = ctx.learningStore.compact();
-    if (ctx.jsonMode) printJson(out);
-    else console.log(`compacted: before=${out.before} after=${out.after}`);
+    printJson(out);
   });
 
   l.command('replay').requiredOption('--run-id <id>').action((opts) => {
@@ -64,23 +53,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       summary,
       events,
     };
-    if (ctx.jsonMode) printJson(out);
-    else {
-      console.log(renderRecord({
-        runId,
-        datasource: summary.datasource || '',
-        plugin: summary.plugin || '',
-        capability: summary.capability || '',
-        classification: summary.classification || '',
-        durationMs: summary.timings?.durationMs || '',
-        rowCount: summary.result?.rowCount ?? (Array.isArray(summary.result?.rows) ? summary.result.rows.length : ''),
-        eventCount: events.length,
-      }));
-      const tail = events.slice(-5).map((line, idx) => ({ idx: events.length - Math.min(5, events.length) + idx + 1, event: line }));
-      if (tail.length) {
-        console.log(renderTable(tail));
-      }
-    }
+    printJson(out);
   });
 
   l.command('refresh-schema')
@@ -95,26 +68,15 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       if (datasource.kind === DatasourceKind.Grpc) {
         const refreshed = await refreshGrpcSchemaForDatasource(ctx, datasource);
         const methodCount = refreshed.services.reduce((acc, s) => acc + s.methods.length, 0);
-        if (ctx.jsonMode) {
-          printJson({
-            datasource: refreshed.datasource,
-            protoRoot: refreshed.protoRoot,
-            source: 'proto-introspection',
-            services: refreshed.services.length,
-            methods: methodCount,
-            messages: Object.keys(refreshed.messages).length,
-            enums: Object.keys(refreshed.enums).length,
-          });
-        } else {
-          console.log(renderRecord({
-            datasource: refreshed.datasource,
-            protoRoot: refreshed.protoRoot,
-            services: refreshed.services.length,
-            methods: methodCount,
-            messages: Object.keys(refreshed.messages).length,
-            enums: Object.keys(refreshed.enums).length,
-          }));
-        }
+        printJson({
+          datasource: refreshed.datasource,
+          protoRoot: refreshed.protoRoot,
+          source: 'proto-introspection',
+          services: refreshed.services.length,
+          methods: methodCount,
+          messages: Object.keys(refreshed.messages).length,
+          enums: Object.keys(refreshed.enums).length,
+        });
         return;
       }
       try {
@@ -129,7 +91,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
           const detail = failures.map((c) => `${c.check}: ${c.detail}`).join(' | ');
           throw connectivity(`${detail}; ensure VPN/teleport/telepresence are up before retrying`, {
             failures,
-            nextCommand: `taproot --json doctor --datasource ${datasource.name} --connect`,
+            nextCommand: `taproot doctor --datasource ${datasource.name} --connect`,
           });
         }
       } catch (error) {
@@ -142,29 +104,14 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         ? ctx.kbStore.typedRelations().filter((r) => r.from.service.toLowerCase() === service || r.to.service.toLowerCase() === service)
         : [];
       const staleRelations = validateRelations(serviceRelations, ctx.learningStore.schemaTables()).filter((r) => r.stale);
-      if (ctx.jsonMode) {
-        printJson({
-          datasource: datasource.name,
-          database: refreshed.database,
-          source: refreshed.source,
-          tables: refreshed.tables,
-          joins: refreshed.joins,
-          staleRelations,
-        });
-      } else {
-        console.log(renderRecord({
-          datasource: datasource.name,
-          database: refreshed.database,
-          source: refreshed.source,
-          tableCount: refreshed.tables.length,
-          joinCount: refreshed.joins.length,
-        }));
-        if (staleRelations.length) {
-          console.log(`\n⚠ ${staleRelations.length} curated relation(s) touching ${datasource.service} now reference a missing table/column:`);
-          for (const r of staleRelations) console.log(`  ${r.from} -> ${r.to} (${r.fromStatus}/${r.toStatus})`);
-          console.log('Re-verify against current schema, then edit/re-import relations.json. Run "taproot kb relations validate --service <svc>" for the full audit.');
-        }
-      }
+      printJson({
+        datasource: datasource.name,
+        database: refreshed.database,
+        source: refreshed.source,
+        tables: refreshed.tables,
+        joins: refreshed.joins,
+        staleRelations,
+      });
     });
 
   l.command('schema')
@@ -181,8 +128,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const targeted = isTargetedRequest(opts);
       if (datasource?.kind === DatasourceKind.Grpc) {
         const snapshot = readGrpcSchemaSnapshot(ctx, datasource, targeted, { ...opts, detailed: Boolean(opts.detailed) });
-        if (ctx.jsonMode) printJson(snapshot);
-        else renderGrpcSnapshotTty(snapshot);
+        printJson(snapshot);
         return;
       }
       const limit = Math.max(1, Number(opts.limit || 50));
@@ -197,53 +143,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         unresolved: Boolean(targeted && !datasource),
         suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
-      if (ctx.jsonMode) {
-        printJson({
-          datasource: datasource?.name || null,
-          tables: snapshot.tables,
-          joins: snapshot.joins,
-          emptyReason: state.emptyReason,
-          suggestedNextCommand: state.suggestedNextCommand,
-        });
-      } else {
-        if (!snapshot.tables.length) {
-          printEmptyState('tables', state);
-          return;
-        }
-        console.log(renderTable(snapshot.tables.map((row) => {
-          const out: Record<string, unknown> = {
-            datasource: row.datasource,
-            table: row.table,
-            columns: row.columns.length,
-            indexes: row.indexes.length,
-            primaryKey: row.primaryKey.join(','),
-          };
-          if (detailed) {
-            out.sightings = row.sightings ?? '';
-            out.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
-            out.source = (row.source || []).join(',');
-            out.lastSeenAt = row.lastSeenAt ?? '';
-          }
-          return out;
-        })));
-        if (snapshot.joins.length) {
-          console.log('');
-          console.log(renderTable(snapshot.joins.map((row) => {
-            const out: Record<string, unknown> = {
-              edge: `${row.leftTable} -> ${row.rightTable}`,
-              condition: row.condition,
-            };
-            if (detailed) {
-              out.datasource = row.datasource ?? '';
-              out.sightings = row.sightings ?? '';
-              out.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
-              out.source = (row.source || []).join(',');
-              out.lastSeenAt = row.lastSeenAt ?? '';
-            }
-            return out;
-          })));
-        }
-      }
+      printJson({
+        datasource: datasource?.name || null,
+        tables: snapshot.tables,
+        joins: snapshot.joins,
+        emptyReason: state.emptyReason,
+        suggestedNextCommand: state.suggestedNextCommand,
+      });
     });
 
   l.command('ensure-schema')
@@ -261,53 +167,11 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const preResolved = await resolveDatasource(ctx, opts);
       if (preResolved?.kind === DatasourceKind.Grpc) {
         const snapshot = await ensureGrpcSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
-        if (ctx.jsonMode) printJson(snapshot);
-        else renderGrpcSnapshotTty(snapshot);
+        printJson(snapshot);
         return;
       }
       const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
-      if (ctx.jsonMode) {
-        printJson(out);
-      } else {
-        if (!out.tables.length) {
-          printEmptyState('tables', { emptyReason: out.emptyReason, suggestedNextCommand: out.suggestedNextCommand });
-          return;
-        }
-        console.log(renderRecord({ datasource: out.datasource || '', ensuredBy: out.ensuredBy }));
-        console.log(renderTable(out.tables.map((row) => {
-          const o: Record<string, unknown> = {
-            datasource: row.datasource,
-            table: row.table,
-            columns: row.columns.length,
-            indexes: row.indexes.length,
-            primaryKey: row.primaryKey.join(','),
-          };
-          if (detailed) {
-            o.sightings = row.sightings ?? '';
-            o.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
-            o.source = (row.source || []).join(',');
-            o.lastSeenAt = row.lastSeenAt ?? '';
-          }
-          return o;
-        })));
-        if (out.joins.length) {
-          console.log('');
-          console.log(renderTable(out.joins.map((row) => {
-            const o: Record<string, unknown> = {
-              edge: `${row.leftTable} -> ${row.rightTable}`,
-              condition: row.condition,
-            };
-            if (detailed) {
-              o.datasource = row.datasource ?? '';
-              o.sightings = row.sightings ?? '';
-              o.confidence = row.confidence != null ? row.confidence.toFixed(2) : '';
-              o.source = (row.source || []).join(',');
-              o.lastSeenAt = row.lastSeenAt ?? '';
-            }
-            return o;
-          })));
-        }
-      }
+      printJson(out);
     });
 
   l.command('tables')
@@ -354,30 +218,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         }
         return out;
       });
-      if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
-      } else {
-        if (!sliced.length) {
-          printEmptyState('tables', state);
-          return;
-        }
-        console.log(renderTable(sliced.map((r) => {
-          const out: Record<string, unknown> = {
-            datasource: r.datasource,
-            table: r.table,
-            columns: r.columns.length,
-            indexes: (r.indexes || []).length,
-            primaryKey: (r.primaryKey || []).join(','),
-          };
-          if (detailed) {
-            out.sightings = r.sightings;
-            out.confidence = r.confidence.toFixed(2);
-            out.source = (r.sources || []).join(',');
-            out.lastSeenAt = r.lastSeenAt;
-          }
-          return out;
-        })));
-      }
+      printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
     });
 
   l.command('joins')
@@ -419,28 +260,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         }
         return out;
       });
-      if (ctx.jsonMode) {
-        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
-      } else {
-        if (!sliced.length) {
-          printEmptyState('joins', state);
-          return;
-        }
-        console.log(renderTable(sliced.map((r) => {
-          const out: Record<string, unknown> = {
-            edge: `${r.leftTable} -> ${r.rightTable}`,
-            condition: r.conditionNormalized,
-          };
-          if (detailed) {
-            out.datasource = r.datasource;
-            out.sightings = r.sightings;
-            out.confidence = r.confidence.toFixed(2);
-            out.source = (r.sources || []).join(',');
-            out.lastSeenAt = r.lastSeenAt;
-          }
-          return out;
-        })));
-      }
+      printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
     });
 
   l.command('relations')
@@ -464,24 +284,6 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       const limit = Math.max(1, Number(opts.limit || 100));
       candidates = candidates.slice(0, limit);
       const promoted = opts.promote && candidates.length ? ctx.kbStore.promoteRelations(candidates) : null;
-      if (ctx.jsonMode) {
-        printJson({ candidates, promoted });
-        return;
-      }
-      if (!candidates.length) {
-        console.log('No new candidate relations derived. Prime more services with "taproot learn ensure-schema --service <svc>" first, or pass --include-existing.');
-        return;
-      }
-      console.log(renderTable(candidates.map((c) => ({
-        from: `${c.from.service}.${c.from.table}.${c.from.column}`,
-        to: `${c.to.service}.${c.to.table}.${c.to.column}`,
-        cross: c.from.service.toLowerCase() !== c.to.service.toLowerCase() ? 'yes' : '',
-        confidence: (c.confidence || 0).toFixed(2),
-      }))));
-      if (promoted) {
-        console.log(`\nPromoted ${promoted.added} relation(s) into relations.json (total now ${promoted.total}).`);
-      } else {
-        console.log(`\n${candidates.length} candidate(s). Review, then re-run with --promote to write confirmed edges into relations.json.`);
-      }
+      printJson({ candidates, promoted });
     });
 }

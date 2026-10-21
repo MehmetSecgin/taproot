@@ -43,7 +43,6 @@ Edit, run `npm test`, commit. Tests should pass before every commit. If a test i
 Changes to these require a doc update in the same PR:
 
 - JSON envelope shape — `references/json-envelope-contract.md`
-- Porcelain vs plumbing matrix — `references/porcelain-plumbing-contract.md`
 - Plugin contract — `references/plugin-contract.md`
 - Learning store schema — `references/learning-contract.md`
 - Daemon RPC shape — `references/phase1-runtime-contract.md`
@@ -74,7 +73,7 @@ trufflehog filesystem . --only-verified
 For a quick repo-tree check using TapRoot's own scanner (catches common cred/topology patterns):
 
 ```bash
-taproot --json sanitize check-repo
+taproot sanitize check-repo
 ```
 
 If a finding is a false positive, document the exemption rather than disabling the scanner.

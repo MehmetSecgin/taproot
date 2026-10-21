@@ -31,7 +31,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - Environment safety and service aliases come from `~/.taproot/config/deterministic-config.json`, not hardcoded env names. Use the canonical service name when known; aliases resolve transparently but should not be stored.
 
 ## Everywhere invariants
-- Use `--json` for anything parsed or relayed. Envelope: `{ ok, data, meta, error }`.
+- Every command prints JSON. Envelope: `{ ok, data, meta, error }`.
 - `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form.
 - For rows, use `--jsonl`: one row object per line on stdout; on failure one `CODE: message` line on stderr and a non-zero exit. No python or jq post-processing needed.
 - `--pluck <dot.path>` projects a subtree in-process on any command; prefer it over piping to jq. On failure it writes only the error object to stderr and exits non-zero, so always gate on exit code.
@@ -48,7 +48,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 One recovery action each. Do not loop. If it does not resolve, return the error plus `nextActionDetails` and stop.
 
 - `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop. `getaddrinfo ENOTFOUND` on an in-cluster hostname means the cluster network (VPN, telepresence, port-forward) is down.
-- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables` (`--json`) or `learn tables --datasource <n>` (`--jsonl`), fix the query, then retry.
+- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables` or `learn tables --datasource <n>` (`--jsonl`), fix the query, then retry.
 - `KB_MISSING`: the KB directory named in the message does not exist or lists no services. Ask the user for the KB path and run `taproot init --kb-dir <dir>`, or use `datasource add`.
 - `UNKNOWN_DATASOURCE`: no profile has that name. Use a name from the `Did you mean` list, or pass `--env` + `--service`.
 - `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
@@ -58,7 +58,7 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `BAD_INPUT`: invalid arguments or missing params. Re-read the command signature; do not retry blindly.
 - `MISSING_PARTITION_PREDICATE`: add the partition column(s) to `WHERE`/`JOIN` and retry. `--allow-partition-scan` needs explicit authorization.
 - `UNKNOWN_TARGET`: verify the datasource name, then rerun resolution.
-- `MISCONFIGURED_DATASOURCE`: repair with `taproot --json init datasource --env <env> --service <service>`.
+- `MISCONFIGURED_DATASOURCE`: repair with `taproot init datasource --env <env> --service <service>`.
 - `DETERMINISTIC_REQUIRED` / `DISCOVERY_UNAVAILABLE`: populate deterministic routing via datasource profiles, KB, or prior learning. `--allow-discovery` is a last resort and needs explicit authorization.
 - `OVERLOADED`: daemon queue full. Wait and retry once, or set `TAPROOT_FORCE_DIRECT=1`.
 - `SESSION_BUSY`: concurrent-lease cap hit. Wait for in-flight queries or open a new session.

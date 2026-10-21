@@ -62,7 +62,7 @@ describe('bench argument guards', () => {
   }
 
   it('missing target fails as bad input', () => {
-    const out = runCli(['--json', 'bench', '--sql', 'SELECT 1']);
+    const out = runCli(['bench', '--sql', 'SELECT 1']);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -73,7 +73,7 @@ describe('bench argument guards', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
     const file = path.join(dir, 'scenarios.json');
     fs.writeFileSync(file, JSON.stringify({ iterations: 3 }));
-    const out = runCli(['--json', 'bench', '--scenario', file]);
+    const out = runCli(['bench', '--scenario', file]);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -82,7 +82,7 @@ describe('bench argument guards', () => {
 
   it('missing scenario file fails as bad input', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
-    const out = runCli(['--json', 'bench', '--scenario', path.join(dir, 'absent.json')]);
+    const out = runCli(['bench', '--scenario', path.join(dir, 'absent.json')]);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -93,7 +93,7 @@ describe('bench argument guards', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-bench-scenario-'));
     const file = path.join(dir, 'scenarios.json');
     fs.writeFileSync(file, '{ not json');
-    const out = runCli(['--json', 'bench', '--scenario', file]);
+    const out = runCli(['bench', '--scenario', file]);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -101,7 +101,7 @@ describe('bench argument guards', () => {
   });
 
   it('missing query fails as bad input', () => {
-    const out = runCli(['--json', 'bench', '--datasource', 'qa-orders']);
+    const out = runCli(['bench', '--datasource', 'qa-orders']);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');

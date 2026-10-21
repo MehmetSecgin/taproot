@@ -76,7 +76,7 @@ describe('doctor with an unresolved env/service target', () => {
     const { env } = setupState();
 
     // act
-    const out = runCli(['--json', 'doctor', '--env', 'prod', '--service', 'orders'], env);
+    const out = runCli(['doctor', '--env', 'prod', '--service', 'orders'], env);
 
     // assert
     expect(out.status).toBe(7);
@@ -88,7 +88,7 @@ describe('doctor with an unresolved env/service target', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
       status: 'ok',
     });
-    expect(parsed.nextActionDetails[0].command).toBe('taproot --json init datasource --env prod --service orders');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot init datasource --env prod --service orders');
   });
 
   it('falls back to datasource add when the KB has no connection for the target', () => {
@@ -96,7 +96,7 @@ describe('doctor with an unresolved env/service target', () => {
     const { env } = setupState();
 
     // act
-    const out = runCli(['--json', 'doctor', '--env', 'prod', '--service', 'payments'], env);
+    const out = runCli(['doctor', '--env', 'prod', '--service', 'payments'], env);
 
     // assert
     expect(out.status).toBe(7);

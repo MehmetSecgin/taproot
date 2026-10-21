@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 
 const DEFAULT_PATTERNS: Array<{ id: string; re: RegExp }> = [
   { id: 'github-token', re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g },
@@ -53,8 +53,7 @@ export function registerSanitize(program: Command, getCtx: () => AppContext): vo
         if (matches?.length) findings.push({ file, pattern: p.id, matches: matches.length });
       }
     }
-    if (ctx.jsonMode) printJson({ findings, count: findings.length });
-    else console.log(findings.length ? renderTable(findings) : 'No leak patterns found.');
+    printJson({ findings, count: findings.length });
     if (findings.length) process.exitCode = 1;
   });
 }

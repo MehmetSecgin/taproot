@@ -47,7 +47,7 @@ describe('credential lifecycle', () => {
   it('creds show redacts password in json mode', () => {
     const { env } = setupState();
     runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret123'], env);
-    const out = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], env);
+    const out = runCli(['creds', 'show', '--ref', 'qa:orders'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).values.password).toBe('[REDACTED]');
   });
@@ -90,7 +90,7 @@ describe('credential lifecycle', () => {
     expect(out.stdout).not.toContain('secret123');
     expect(out.stdout).not.toContain('mysecrettokenval');
 
-    const jsonOut = runCli(['--json', 'creds', 'list'], env);
+    const jsonOut = runCli(['creds', 'list'], env);
     expect(jsonOut.status).toBe(0);
     const parsed = JSON.parse(jsonOut.stdout) as Array<{ ref: string; keys: string[]; source: string }>;
     expect(parsed.map((e) => e.ref).sort()).toEqual(['prod:billing', 'qa:orders']);
@@ -122,8 +122,8 @@ describe('credential master key', () => {
     runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user'], { ...defaultKeyEnv, TAPROOT_MASTER_KEY: '' });
 
     // act
-    const withKey = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], env);
-    const withDefault = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], { ...defaultKeyEnv, TAPROOT_MASTER_KEY: '' });
+    const withKey = runCli(['creds', 'show', '--ref', 'qa:orders'], env);
+    const withDefault = runCli(['creds', 'show', '--ref', 'qa:orders'], { ...defaultKeyEnv, TAPROOT_MASTER_KEY: '' });
 
     // assert
     expect(withKey.status).toBe(0);
@@ -139,7 +139,7 @@ describe('credential master key', () => {
 
     // act
     const wrongKey = runCli(['creds', 'set', '--ref', 'qa:other', '--user', 'other'], { ...env, TAPROOT_MASTER_KEY: 'wrong-key' });
-    const rightKey = runCli(['--json', 'creds', 'show', '--ref', 'qa:orders'], env);
+    const rightKey = runCli(['creds', 'show', '--ref', 'qa:orders'], env);
 
     // assert
     expect(wrongKey.status).not.toBe(0);

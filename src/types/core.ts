@@ -97,9 +97,6 @@ export interface RuntimeConfig {
   kbDir?: string;
   defaults?: {
     profile?: string;
-    json?: boolean;
-    noColor?: boolean;
-    noAnimations?: boolean;
     query?: {
       timeoutMs?: number;
       timeZone?: string;

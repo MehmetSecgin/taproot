@@ -414,58 +414,8 @@ describe('executeQuery datasource kind routing', () => {
   });
 });
 
-describe('executeQuery password prompt', () => {
-  it('prompts once and retries when access is denied', async () => {
-    // arrange
-    stateRoot = await setupQueryState({ kind: 'mysql' });
-    let attempts = 0;
-    const plugin = fakePlugin({ kind: 'mysql' });
-    const catalogResult = (request: { datasource: { name: string }; capability: unknown; query: string }): QueryResult => ({
-      runId: '',
-      datasource: request.datasource.name,
-      plugin: 'mysql',
-      capability: request.capability as never,
-      query: { native: request.query },
-      result: { columns: [], rows: [] },
-      timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
-      warnings: [],
-      classification: 'success',
-    });
-    plugin.execute = async (request, creds): Promise<QueryResult> => {
-      if (request.query.includes('information_schema')) return catalogResult(request);
-      attempts += 1;
-      if (attempts === 1) throw new Error('access denied for user');
-      return {
-        runId: '',
-        datasource: request.datasource.name,
-        plugin: 'mysql',
-        capability: request.capability,
-        query: { native: request.query },
-        result: { columns: ['ok'], rows: [{ ok: creds.password }] },
-        timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
-        warnings: [],
-        classification: 'success',
-      };
-    };
-    const ctx = contextWith(plugin);
-    await ctx.credentialStore.set('qa:fake', { user: 'x' });
-    const promptPassword = vi.fn(async () => 'typed-secret');
-
-    // act
-    const outcome = await executeQuery(queryRequest({ datasource: 'qa-fake' }), {
-      ctx,
-      report: silentQueryReport,
-      promptPassword,
-    });
-
-    // assert
-    expect(promptPassword).toHaveBeenCalledTimes(1);
-    expect(attempts).toBe(2);
-    if (!outcome.ok) throw new Error('expected success after retry');
-    expect(outcome.data.rows).toEqual([['typed-secret']]);
-  });
-
-  it('does not retry when no prompt dependency is supplied', async () => {
+describe('executeQuery access denied', () => {
+  it('fails with ACCESS_DENIED without retrying', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
     await ctx.credentialStore.set('qa:fake', { user: 'x' });
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });

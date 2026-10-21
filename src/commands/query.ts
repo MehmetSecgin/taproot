@@ -5,11 +5,10 @@ import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
 import { deriveQueryTarget } from '../core/execute-query.js';
 import type { QueryExecutionRequest } from '../core/execute-query.js';
-import { createProgress } from '../core/progress.js';
 import { parseTimeoutMs } from '../core/query-timeout.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { runDaemonQuery } from './query-daemon.js';
-import { runDirectQuery } from './query-direct.js';
+import { runDirectQuery, verboseLog } from './query-direct.js';
 import { queryRoute } from './query-route.js';
 import type { QueryOpts } from './query-types.js';
 
@@ -30,7 +29,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
     .option('--allow-schema-introspection', 'allow SHOW CREATE/DESCRIBE/SHOW COLUMNS even when the service schema is already cached', false)
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
-    .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
@@ -65,13 +63,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const env = target.env;
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
-      const progress = createProgress({
-        enabled: !ctx.jsonMode && !ctx.verbose,
-        noAnimations: ctx.noAnimations,
-        noColor: ctx.noColor,
-        verbose: ctx.verbose,
-        plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
-      });
       if (opts.explain && !opts.sql) {
         throw badInput('--explain requires --sql.');
       }
@@ -100,18 +91,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         tz: opts.tz,
       };
       const route = queryRoute(request);
-      try {
-        if (allowDiscovery && !ctx.jsonMode) {
-          progress.update('discovery mode enabled, bypassing daemon');
-        }
-        progress.update(route === 'direct' ? 'running direct query mode' : 'attempting daemon query path');
-        if (route === 'daemon') {
-          const outcome = await runDaemonQuery({ request, ctx, opts, progress });
-          if (outcome === 'handled') return;
-        }
-        await runDirectQuery({ request, ctx, opts, progress });
-      } finally {
-        progress.stop();
-      }
+      verboseLog(ctx)(route === 'direct' ? 'running direct query mode' : 'attempting daemon query path');
+      if (route === 'daemon' && (await runDaemonQuery(request, ctx)) === 'handled') return;
+      await runDirectQuery(request, ctx);
     });
 }

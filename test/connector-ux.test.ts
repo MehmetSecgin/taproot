@@ -50,7 +50,6 @@ describe('connector UX', () => {
     const { env } = setupStateRoot();
     const setupOut = runCli(
       [
-        '--json',
         'connector',
         'setup',
         '--datasource',
@@ -88,7 +87,7 @@ describe('connector UX', () => {
       ],
       env,
     );
-    const statusOut = runCli(['--json', 'connector', 'status', '--datasource', 'qa-demo'], env);
+    const statusOut = runCli(['connector', 'status', '--datasource', 'qa-demo'], env);
     expect(statusOut.status).toBe(0);
     const parsed = JSON.parse(statusOut.stdout);
     expect(parsed.ok).toBe(true);
@@ -119,7 +118,7 @@ describe('connector UX', () => {
         },
       ]),
     );
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-kpf'], {
+    const out = runCli(['doctor', '--datasource', 'qa-kpf'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-master-key',
     });
@@ -155,7 +154,7 @@ describe('connector UX', () => {
       env,
     );
     expect(setupOut.status).toBe(0);
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
+    const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).not.toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');

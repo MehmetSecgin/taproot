@@ -22,17 +22,11 @@ export interface AppContext {
   learningStore: LearningStore;
   runtimeConfigStore: RuntimeConfigStore;
   pluginRegistry: PluginRegistry;
-  jsonMode: boolean;
-  noColor: boolean;
-  noAnimations: boolean;
   verbose: boolean;
 }
 
 export function buildContext(opts: {
   kbDir?: string;
-  jsonMode?: boolean;
-  noColor?: boolean;
-  noAnimations?: boolean;
   verbose?: boolean;
 }): AppContext {
   let paths = resolvePaths(opts.kbDir);
@@ -53,9 +47,6 @@ export function buildContext(opts: {
     learningStore: new LearningStore(paths.learningDir),
     runtimeConfigStore,
     pluginRegistry,
-    jsonMode: Boolean(opts.jsonMode),
-    noColor: Boolean(opts.noColor),
-    noAnimations: Boolean(opts.noAnimations),
     verbose: Boolean(opts.verbose),
   };
 }
@@ -93,7 +84,7 @@ export function nextAction(errorCode: string): string {
     BAD_INPUT: 'Fix the request payload to match the proto schema, or pass --skip-proto-validate to bypass local validation.',
     QUERY_TIMEOUT: 'Retry with a narrower query or raise --timeout if the longer runtime is intentional.',
     MISSING_PARTITION_PREDICATE: 'Add the table partition column to WHERE or JOIN predicates and retry through TapRoot.',
-    REDUNDANT_INTROSPECTION: 'Read the cached schema with "taproot --json learn ensure-schema --service <svc>" instead of re-issuing SHOW CREATE/DESCRIBE/SHOW COLUMNS. Pass --allow-schema-introspection to force re-introspection.',
+    REDUNDANT_INTROSPECTION: 'Read the cached schema with "taproot learn ensure-schema --service <svc>" instead of re-issuing SHOW CREATE/DESCRIBE/SHOW COLUMNS. Pass --allow-schema-introspection to force re-introspection.',
     MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
@@ -107,8 +98,8 @@ export function nextAction(errorCode: string): string {
     KB_MISSING: 'Point TapRoot at the KB directory with "taproot init --kb-dir <dir>" (saved in TapRoot config), or register the datasource with "taproot datasource add".',
     AMBIGUOUS_DB_USER: 'Ask the user which of the listed db users this datasource should use, then save it with the creds set or --hint dbUser= command in the message.',
     UNKNOWN_DATASOURCE: 'Use a datasource name suggested in the message, or pass --env and --service instead. List profiles with "taproot --jsonl datasource list".',
-    UNKNOWN_COLUMN: 'Check column names against the cached schema (meta.schemaContext.tables under --json, or "taproot --json learn ensure-schema --datasource <name>"), fix the query, then retry.',
-    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables under --json, or "taproot --jsonl learn tables --datasource <name>"), then fix the query.',
+    UNKNOWN_COLUMN: 'Check column names against the cached schema (meta.schemaContext.tables, or "taproot learn ensure-schema --datasource <name>"), fix the query, then retry.',
+    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables, or "taproot --jsonl learn tables --datasource <name>"), then fix the query.',
     SQL_SYNTAX: 'Fix the SQL syntax near the position the error names. The same SQL fails the same way, so do not retry it unchanged.',
     GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };

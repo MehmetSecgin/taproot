@@ -82,9 +82,6 @@ function makeContext(input?: { datasources?: any[]; aliasMap?: Record<string, st
     learningStore: new LearningStore(path.join(root, 'learning')),
     runtimeConfigStore: { serviceAliases: () => input?.aliasMap || {} } as any,
     pluginRegistry: registry,
-    jsonMode: true,
-    noColor: true,
-    noAnimations: true,
     verbose: false,
   };
 
@@ -158,7 +155,7 @@ describe('learn ensure-schema', () => {
       tables: [],
       joins: [],
       emptyReason: 'datasource_unresolved',
-      suggestedNextCommand: 'taproot --json init datasource --env develop --service order-processor',
+      suggestedNextCommand: 'taproot init datasource --env develop --service order-processor',
       ensuredBy: 'unresolved',
     });
     expect(getExecuteCount()).toBe(0);

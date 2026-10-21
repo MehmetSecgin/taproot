@@ -71,7 +71,7 @@ describe('datasource CRUD', () => {
   it('datasource show returns added profile', () => {
     const { env } = setupState();
     addProfile(env);
-    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
+    const out = runCli(['datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data).toMatchObject({ name: 'qa-svc', kind: 'mysql', env: 'qa' });
   });
@@ -79,7 +79,7 @@ describe('datasource CRUD', () => {
   it('datasource list includes profile', () => {
     const { env } = setupState();
     addProfile(env);
-    const out = runCli(['--json', 'datasource', 'list'], env);
+    const out = runCli(['datasource', 'list'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data.some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
   });
@@ -91,7 +91,7 @@ describe('datasource CRUD', () => {
     // act
     const out = runCli(
       [
-        '--json', 'datasource', 'add',
+        'datasource', 'add',
         '--name', 'qa-probe',
         '--kind', 'mysql',
         '--credential-ref', 'qa:probe',
@@ -116,7 +116,7 @@ describe('datasource CRUD', () => {
     const { env } = setupState();
 
     // act
-    const out = runCli(['--json', 'datasource', 'add', '--name', 'qa-default', '--kind', 'mysql', '--env', 'qa', '--service', 'svc'], env);
+    const out = runCli(['datasource', 'add', '--name', 'qa-default', '--kind', 'mysql', '--env', 'qa', '--service', 'svc'], env);
 
     // assert
     expect(out.status).toBe(0);
@@ -128,7 +128,7 @@ describe('datasource CRUD', () => {
     const { env } = setupState();
 
     // act
-    const out = runCli(['--json', 'datasource', 'add', '--name', 'bare', '--kind', 'mysql'], env);
+    const out = runCli(['datasource', 'add', '--name', 'bare', '--kind', 'mysql'], env);
 
     // assert
     expect(out.status).toBe(2);
@@ -142,7 +142,7 @@ describe('datasource CRUD', () => {
     runCli(['datasource', 'add', '--name', 'prod-billing', '--kind', 'mysql', '--credential-ref', 'prod:billing', '--env', 'prod', '--service', 'billing'], env);
     runCli(['datasource', 'add', '--name', 'qa-beta-dev', '--kind', 'mysql', '--credential-ref', 'qa:beta', '--env', 'qa', '--namespace', 'develop', '--service', 'beta'], env);
 
-    const out = runCli(['--json', 'datasource', 'list'], env);
+    const out = runCli(['datasource', 'list'], env);
     expect(out.status).toBe(0);
     const rows = JSON.parse(out.stdout).data as Array<{ name: string; env: string; namespace: string; service: string }>;
     expect(rows.map((r) => r.name)).toEqual(['prod-billing', 'qa-alpha', 'qa-zeta', 'qa-beta-dev']);
@@ -160,7 +160,7 @@ describe('datasource CRUD', () => {
   it('datasource resolve by env+service', () => {
     const { env } = setupState();
     addProfile(env);
-    const out = runCli(['--json', 'datasource', 'resolve', '--env', 'qa', '--service', 'svc'], env);
+    const out = runCli(['datasource', 'resolve', '--env', 'qa', '--service', 'svc'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('datasource-store');
@@ -195,7 +195,7 @@ describe('datasource CRUD', () => {
       ],
       env,
     );
-    const out = runCli(['--json', 'datasource', 'resolve', '--env', 'qa', '--namespace', 'develop', '--service', 'svc'], env);
+    const out = runCli(['datasource', 'resolve', '--env', 'qa', '--namespace', 'develop', '--service', 'svc'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.profile).toMatchObject({ name: 'qa-svc', namespace: 'develop' });
@@ -224,7 +224,7 @@ describe('datasource CRUD', () => {
       ]),
     );
 
-    const out = runCli(['--json', 'datasource', 'resolve', '--env', 'prod', '--service', 'orders'], env);
+    const out = runCli(['datasource', 'resolve', '--env', 'prod', '--service', 'orders'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('kb');
@@ -258,7 +258,7 @@ describe('datasource CRUD', () => {
   it('datasource add with connectors', () => {
     const { env } = setupState();
     addProfile(env, ['--connector', 'openvpn', '--connector-ref', 'openvpn=openvpn:qa:svc']);
-    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
+    const out = runCli(['datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.connectors).toEqual(['openvpn']);
@@ -268,7 +268,7 @@ describe('datasource CRUD', () => {
   it('datasource add with confidence', () => {
     const { env } = setupState();
     addProfile(env, ['--confidence', '0.5']);
-    const out = runCli(['--json', 'datasource', 'show', 'qa-svc'], env);
+    const out = runCli(['datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data.confidence).toBe(0.5);
   });

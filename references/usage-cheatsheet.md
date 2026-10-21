@@ -2,7 +2,7 @@
 
 ## Boot
 - `taproot self-check`
-- `taproot --json self-check`
+- `taproot self-check`
 
 ## Credentials
 - `taproot creds set --ref production:sample --user sample_reader --password '***'`

@@ -48,20 +48,12 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
           checks: trimmedChecks,
           ...(snapshot.target ? { target: snapshot.target } : {}),
         };
-        if (ctx.jsonMode) printJson(data);
-        else {
-          console.log(`readiness: ${data.readiness}`);
-          if (data.missing) console.log(`missing: ${data.missing}`);
-          if (data.nextCommand) console.log(`nextCommand: ${data.nextCommand}`);
-          if (data.target) console.log(`target: ${data.target.datasource || '(unresolved)'}`);
-          snapshot.checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
-        }
+        printJson(data);
         if (snapshot.readiness !== 'ready') process.exitCode = EXIT_CODES.NOT_READY;
         return;
       }
 
       const data = { cliVersion: TAPROOT_VERSION, skillVersion: TAPROOT_SKILL_VERSION, checks: snapshot.checks };
-      if (ctx.jsonMode) printJson(data);
-      else snapshot.checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
+      printJson(data);
     });
 }

@@ -3,18 +3,12 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
-import { renderTable, printJson } from '../core/output.js';
-import { createProgress } from '../core/progress.js';
+import { printJson } from '../core/output.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
+import { verboseLog } from './query-direct.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, DoctorCheckCode, DoctorNextAction } from '../types/core.js';
 import { str } from '../core/strings.js';
-
-function compactDetail(detail: string, max = 160): string {
-  const oneLine = detail.replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max - 1)}...`;
-}
 
 interface PrioritizedAction {
   action: string;
@@ -124,14 +118,14 @@ function isMissingConnectorConfigCode(code?: DoctorCheckCode): boolean {
 
 function credentialRepairHint(datasource: DatasourceProfile): string {
   if (datasource.kind === DatasourceKind.TeleportMysql) {
-    return `taproot --json creds set --ref ${datasource.credentialRef} --db-user <user> --password <password>`;
+    return `taproot creds set --ref ${datasource.credentialRef} --db-user <user> --password <password>`;
   }
-  return `taproot --json creds set --ref ${datasource.credentialRef} --user <user> --password <password>`;
+  return `taproot creds set --ref ${datasource.credentialRef} --user <user> --password <password>`;
 }
 
 function datasourceRepairHint(datasource: DatasourceProfile): string {
   if (datasource.env && datasource.service) {
-    return `taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`;
+    return `taproot init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`;
   }
   return `taproot datasource show ${datasource.name}`;
 }
@@ -158,7 +152,7 @@ function addExecutorNextActions(
     case 'executor_access_denied':
       addActionForCheck(
         actions,
-        `taproot --json creds show --ref ${datasource.credentialRef}`,
+        `taproot creds show --ref ${datasource.credentialRef}`,
         ACTION_PRIORITIES.credsShow,
         orderRef,
         check,
@@ -327,7 +321,7 @@ function doctorNextActions(datasource: DatasourceProfile, checks: DoctorCheck[])
 function misconfiguredDatasourceNextActions(datasource: DatasourceProfile): DoctorNextAction[] {
   return [
     {
-      command: `taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`,
+      command: `taproot init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`,
       priority: ACTION_PRIORITIES.datasourceRepair,
       reasons: ['The datasource routing conflicts with KB-backed resolution and must be repaired before doctor can continue.'],
       checks: ['kb routing consistency'],
@@ -373,7 +367,7 @@ function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
 function unresolvedTargetNextActions(target: UnresolvedTarget): DoctorNextAction[] {
   const namespaceFlag = target.namespace ? ` --namespace ${target.namespace}` : '';
   const command = target.kbAvailable
-    ? `taproot --json init datasource --env ${target.env}${namespaceFlag} --service ${target.service}`
+    ? `taproot init datasource --env ${target.env}${namespaceFlag} --service ${target.service}`
     : `taproot datasource add --name ${defaultDatasourceName(target.env, target.service, target.namespace)} --kind <kind> --env ${target.env}${namespaceFlag} --service ${target.service} --host <host> --port <port> --credential-ref <ref>`;
   return [
     {
@@ -399,179 +393,116 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--connect', 'run connector connect steps during doctor', false)
-    .option('--verbose-detail', 'print full check details in table mode', false)
-    .option('--all', 'print all checks in table mode (default: warnings/failures only)', false)
     .action(async (opts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
-      const progress = createProgress({
-        enabled: !ctx.jsonMode && !ctx.verbose,
-        noAnimations: ctx.noAnimations,
-        noColor: ctx.noColor,
-        verbose: ctx.verbose,
-        plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
-      });
-      const logVerbose = (msg: string): void => {
-        if (!ctx.jsonMode && ctx.verbose) process.stderr.write(`[taproot] ${msg}\n`);
-      };
-
-      try {
-        progress.update('resolving datasource');
-        let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-        const warnings: string[] = [];
-        if (!datasource && opts.env && opts.service) {
-          const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-          const namespace = normalizeNamespace(opts.namespace);
-          datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
-          if (!datasource) {
-            const target: UnresolvedTarget = {
-              env: opts.env,
-              service,
-              namespace: namespace || undefined,
-              kbAvailable: Boolean(ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined)),
-            };
-            logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
-            const checks = unresolvedTargetChecks(target);
-            const nextActionDetails = unresolvedTargetNextActions(target);
-            progress.fail(`no datasource profile for ${unresolvedTargetLabel(target)}`);
-            if (ctx.jsonMode) {
-              printJson({
-                datasource: null,
-                plugin: null,
-                warnings,
-                checks,
-                nextActionDetails,
-                summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
-              });
-            } else {
-              console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
-              console.log('Next actions:');
-              for (const action of nextActionDetails) console.log(`- ${action.command}`);
-            }
-            process.exitCode = EXIT_CODES.NOT_READY;
-            return;
-          }
-        }
+      const logVerbose = verboseLog(ctx);
+      let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
+      const warnings: string[] = [];
+      if (!datasource && opts.env && opts.service) {
+        const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
+        const namespace = normalizeNamespace(opts.namespace);
+        datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
         if (!datasource) {
-          progress.fail('could not resolve datasource');
-          throw new Error('Could not resolve datasource. Use --datasource or --env+--service.');
-        }
-        progress.update(`checking plugin for ${datasource.name}`);
-        const plugin = ctx.pluginRegistry.get(datasource.kind);
-        if (!plugin || !plugin.doctor) {
-          progress.fail('doctor capability unavailable');
-          throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
-        }
-        if (datasource.env && datasource.service) {
-          const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
-          if (kb) {
-            const critical = criticalDatasourceKbConflicts(datasource, kb);
-            if (critical.length) {
-              const checks: DoctorCheck[] = [
-                {
-                  check: 'kb routing consistency',
-                  status: DoctorStatus.Fail,
-                  detail: `MISCONFIGURED_DATASOURCE: ${critical.join('; ')}`,
-                },
-              ];
-              checks.push({
-                check: 'doctor blocked',
-                status: DoctorStatus.Warn,
-                detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
-              });
-              const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
-              if (ctx.jsonMode) {
-                printJson({
-                  datasource: datasource.name,
-                  plugin: plugin.manifest.name,
-                  warnings,
-                  checks,
-                  nextActionDetails,
-                  summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
-                });
-              } else {
-                console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
-                console.log('Next actions:');
-                console.log(`- taproot --json init datasource --env ${datasource.env}${datasource.namespace ? ` --namespace ${datasource.namespace}` : ''} --service ${datasource.service}`);
-              }
-              process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
-              return;
-            }
-            const conflicts = datasourceKbConflicts(datasource, kb);
-            if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
-          }
-        }
-        const creds = await ctx.credentialStore.get(datasource.credentialRef);
-        progress.update('running connector checks');
-        const connectorChecks = await runDatasourceConnectors({
-          datasource,
-          credentialStore: ctx.credentialStore,
-          pluginRegistry: ctx.pluginRegistry,
-          mode: 'doctor',
-        });
-        const checks = [...connectorChecks];
-        if (opts.connect) {
-          progress.update('running connector connect step');
-          checks.push(
-            ...(await runDatasourceConnectors({
-              datasource,
-              credentialStore: ctx.credentialStore,
-              pluginRegistry: ctx.pluginRegistry,
-              mode: 'connect',
-            })),
-          );
-        }
-        progress.update(`running plugin doctor (${plugin.manifest.name})`);
-        checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
-
-        const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
-        const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
-        const okCount = checks.filter((c) => c.status === DoctorStatus.Ok).length;
-        const tableRows = checks.map((c) => ({
-          check: c.check,
-          status: c.status,
-          detail: opts.verboseDetail || ctx.verbose ? c.detail : compactDetail(c.detail),
-        }));
-        const visibleRows = opts.all || ctx.verbose ? tableRows : tableRows.filter((r) => r.status !== DoctorStatus.Ok);
-        const nextActionDetails = doctorNextActions(datasource, checks);
-
-        if (ctx.jsonMode) {
+          const target: UnresolvedTarget = {
+            env: opts.env,
+            service,
+            namespace: namespace || undefined,
+            kbAvailable: Boolean(ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined)),
+          };
+          logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
+          const checks = unresolvedTargetChecks(target);
+          const nextActionDetails = unresolvedTargetNextActions(target);
           printJson({
-            datasource: datasource.name,
-            plugin: plugin.manifest.name,
+            datasource: null,
+            plugin: null,
             warnings,
             checks,
             nextActionDetails,
-            summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
+            summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
           });
-        } else {
-          if (warnings.length) progress.warn(`warnings: ${warnings.join(' | ')}`);
-          const summary = `doctor summary: ok=${okCount} warn=${warnCount} fail=${failCount} total=${checks.length}`;
-          if (ctx.verbose) {
-            console.log(summary);
-          } else if (!failCount && !warnCount) {
-            progress.succeed(summary);
-          } else {
-            progress.warn(summary);
-          }
-          if (visibleRows.length) {
-            console.log(renderTable(visibleRows));
-          } else if (opts.all || ctx.verbose) {
-            console.log('No checks to display.');
-          }
-          if (nextActionDetails.length) {
-            console.log('Next actions:');
-            for (const action of nextActionDetails) console.log(`- ${action.command}`);
-          }
+          process.exitCode = EXIT_CODES.NOT_READY;
+          return;
         }
+      }
+      if (!datasource) {
+        throw new Error('Could not resolve datasource. Use --datasource or --env+--service.');
+      }
+      const plugin = ctx.pluginRegistry.get(datasource.kind);
+      if (!plugin || !plugin.doctor) {
+        throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
+      }
+      if (datasource.env && datasource.service) {
+        const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
+        if (kb) {
+          const critical = criticalDatasourceKbConflicts(datasource, kb);
+          if (critical.length) {
+            const checks: DoctorCheck[] = [
+              {
+                check: 'kb routing consistency',
+                status: DoctorStatus.Fail,
+                detail: `MISCONFIGURED_DATASOURCE: ${critical.join('; ')}`,
+              },
+            ];
+            checks.push({
+              check: 'doctor blocked',
+              status: DoctorStatus.Warn,
+              detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
+            });
+            const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
+            printJson({
+              datasource: datasource.name,
+              plugin: plugin.manifest.name,
+              warnings,
+              checks,
+              nextActionDetails,
+              summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
+            });
+            process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
+            return;
+          }
+          const conflicts = datasourceKbConflicts(datasource, kb);
+          if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
+        }
+      }
+      const creds = await ctx.credentialStore.get(datasource.credentialRef);
+      const connectorChecks = await runDatasourceConnectors({
+        datasource,
+        credentialStore: ctx.credentialStore,
+        pluginRegistry: ctx.pluginRegistry,
+        mode: 'doctor',
+      });
+      const checks = [...connectorChecks];
+      if (opts.connect) {
+        checks.push(
+          ...(await runDatasourceConnectors({
+            datasource,
+            credentialStore: ctx.credentialStore,
+            pluginRegistry: ctx.pluginRegistry,
+            mode: 'connect',
+          })),
+        );
+      }
+      checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
 
-        if (checks.some((c) => c.status === DoctorStatus.Fail)) {
-          const firstFailure = checks.find((c) => c.status === DoctorStatus.Fail);
-          const code = classifyError(firstFailure?.detail || '');
-          process.exitCode = exitCodeForClass(code);
-        }
-      } finally {
-        progress.stop();
+      const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
+      const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
+      const okCount = checks.filter((c) => c.status === DoctorStatus.Ok).length;
+      const nextActionDetails = doctorNextActions(datasource, checks);
+
+      printJson({
+        datasource: datasource.name,
+        plugin: plugin.manifest.name,
+        warnings,
+        checks,
+        nextActionDetails,
+        summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
+      });
+
+      if (checks.some((c) => c.status === DoctorStatus.Fail)) {
+        const firstFailure = checks.find((c) => c.status === DoctorStatus.Fail);
+        const code = classifyError(firstFailure?.detail || '');
+        process.exitCode = exitCodeForClass(code);
       }
     });
 }

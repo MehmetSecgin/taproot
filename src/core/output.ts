@@ -1,26 +1,5 @@
 import type { CliOutputEnvelope } from '../types/core.js';
-import Table from 'cli-table3';
 import { str } from './strings.js';
-
-export type DatetimeFormat = 'iso' | 'js' | 'epoch';
-
-function datetimeFormat(): DatetimeFormat {
-  const raw = str(process.env.TAPROOT_DATETIME_FORMAT).trim().toLowerCase();
-  if (raw === 'js' || raw === 'epoch') return raw;
-  return 'iso';
-}
-
-function formatDate(value: Date): string {
-  switch (datetimeFormat()) {
-    case 'js':
-      return value.toString();
-    case 'epoch':
-      return String(value.getTime());
-    case 'iso':
-    default:
-      return Number.isNaN(value.getTime()) ? '' : value.toISOString();
-  }
-}
 
 export function rowToObject(columns: string[], row: unknown): Record<string, unknown> {
   if (Array.isArray(row)) {
@@ -34,24 +13,6 @@ export function rowToObject(columns: string[], row: unknown): Record<string, unk
   const out: Record<string, unknown> = {};
   for (const c of columns) out[c] = source[c];
   return out;
-}
-
-export function renderSchemaContextFooter(schemaContext: unknown): string | null {
-  const sc = schemaContext as
-    | { tables?: Record<string, unknown>; services?: Record<string, unknown>; messages?: Record<string, unknown>; relations?: unknown[] }
-    | undefined;
-  if (!sc) return null;
-  const relations = Array.isArray(sc.relations) ? sc.relations.length : 0;
-  const relationSuffix = relations ? `, ${relations} relation${relations === 1 ? '' : 's'}` : '';
-  const tables = Object.keys(sc.tables || {}).length;
-  if (tables) return `[schemaContext: ${tables} table${tables === 1 ? '' : 's'} cached${relationSuffix} — pass --json for full detail]`;
-  const services = Object.keys(sc.services || {}).length;
-  const messages = Object.keys(sc.messages || {}).length;
-  if (services || messages) {
-    return `[schemaContext: ${services} service${services === 1 ? '' : 's'}, ${messages} message${messages === 1 ? '' : 's'} — pass --json for full detail]`;
-  }
-  if (relations) return `[schemaContext: ${relations} relation${relations === 1 ? '' : 's'} — pass --json for full detail]`;
-  return null;
 }
 
 export interface OutputOptions {
@@ -181,77 +142,4 @@ export function respondErr(
   meta?: Record<string, unknown>,
 ): void {
   printJson({ ok: false, error: { code, message, details }, meta: meta || {} });
-}
-
-function formatValue(value: unknown): string {
-  if (value == null) return '';
-  if (value instanceof Date) return formatDate(value);
-  if (Buffer.isBuffer(value)) return value.toString('base64');
-  if (typeof value === 'bigint') return value.toString();
-  if (Array.isArray(value)) return value.map((v) => formatValue(v)).join(', ');
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
-}
-
-export function renderTable(rows: ReadonlyArray<object>): string {
-  if (!rows.length) return 'Rows: 0\n(no rows)';
-  const columns = Object.keys(rows[0] as Record<string, unknown>);
-  const table = new Table({
-    head: columns,
-    wordWrap: true,
-  });
-  for (const row of rows) {
-    table.push(columns.map((column) => formatValue((row as Record<string, unknown>)[column])));
-  }
-  return `Rows: ${rows.length}\n\n${table.toString()}`;
-}
-
-export const DEFAULT_BIG_RESULT_THRESHOLD_BYTES = 32 * 1024;
-export const DEFAULT_BIG_RESULT_SAMPLE_SIZE = 10;
-
-export interface RenderTableSmartOptions {
-  full?: boolean;
-  thresholdBytes?: number;
-  sampleSize?: number;
-}
-
-export function renderTableSummary(
-  rows: Array<Record<string, unknown>>,
-  options: { sampleSize?: number } = {},
-): string {
-  const sampleSize = options.sampleSize ?? DEFAULT_BIG_RESULT_SAMPLE_SIZE;
-  if (!rows.length) return 'Rows: 0\n(no rows)';
-  const columns = Object.keys(rows[0]);
-  const distinctRows = columns.map((column) => {
-    const seen = new Set<string>();
-    for (const row of rows) seen.add(formatValue(row[column]));
-    return { column, distinct: seen.size };
-  });
-  const sample = rows.slice(0, sampleSize);
-  const header = `Rows: ${rows.length} (large result, summarized — pass --full to dump everything)`;
-  const distinctBlock = `Distinct values per column:\n${renderTable(distinctRows)}`;
-  const sampleBlock = `First ${sample.length} rows:\n${renderTable(sample)}`;
-  return `${header}\n\n${distinctBlock}\n\n${sampleBlock}`;
-}
-
-export function renderTableSmart(
-  rows: Array<Record<string, unknown>>,
-  options: RenderTableSmartOptions = {},
-): string {
-  const full = options.full ?? false;
-  const threshold = options.thresholdBytes ?? DEFAULT_BIG_RESULT_THRESHOLD_BYTES;
-  const rendered = renderTable(rows);
-  if (full || Buffer.byteLength(rendered, 'utf8') <= threshold) return rendered;
-  return renderTableSummary(rows, { sampleSize: options.sampleSize });
-}
-
-export function renderRecord(record: Record<string, unknown>): string {
-  const rows = Object.entries(record).map(([key, value]) => ({ key, value: formatValue(value) }));
-  return renderTable(rows);
 }

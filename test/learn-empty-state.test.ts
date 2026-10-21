@@ -37,7 +37,7 @@ describe('learn empty states', () => {
         },
       ]),
     );
-    const out = runCli(['--json', 'learn', 'tables', '--datasource', 'qa-orders'], {
+    const out = runCli(['learn', 'tables', '--datasource', 'qa-orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
     });
@@ -46,7 +46,7 @@ describe('learn empty states', () => {
       datasource: 'qa-orders',
       rows: [],
       emptyReason: 'schema_refresh_required',
-      suggestedNextCommand: 'taproot --json learn refresh-schema --datasource qa-orders',
+      suggestedNextCommand: 'taproot learn refresh-schema --datasource qa-orders',
     });
   });
 
@@ -73,7 +73,7 @@ describe('learn empty states', () => {
         },
       ]),
     );
-    const out = runCli(['--json', 'learn', 'schema', '--datasource', 'qa-orders'], {
+    const out = runCli(['learn', 'schema', '--datasource', 'qa-orders'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
     });
@@ -83,7 +83,7 @@ describe('learn empty states', () => {
       tables: [],
       joins: [],
       emptyReason: 'schema_refresh_required',
-      suggestedNextCommand: 'taproot --json learn refresh-schema --datasource qa-orders',
+      suggestedNextCommand: 'taproot learn refresh-schema --datasource qa-orders',
     });
   });
 
@@ -124,7 +124,7 @@ describe('learn empty states', () => {
     );
     fs.writeFileSync(path.join(learningDir, 'schema-joins.json'), '[]');
 
-    const out = runCli(['--json', 'learn', 'schema', '--env', 'develop', '--service', 'order-processor'], {
+    const out = runCli(['learn', 'schema', '--env', 'develop', '--service', 'order-processor'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
     });
@@ -134,7 +134,7 @@ describe('learn empty states', () => {
       tables: [],
       joins: [],
       emptyReason: 'datasource_unresolved',
-      suggestedNextCommand: 'taproot --json init datasource --env develop --service order-processor',
+      suggestedNextCommand: 'taproot init datasource --env develop --service order-processor',
     });
   });
 
@@ -165,7 +165,7 @@ describe('learn empty states', () => {
       ]),
     );
 
-    const out = runCli(['--json', 'learn', 'tables', '--env', 'develop', '--service', 'order-processor'], {
+    const out = runCli(['learn', 'tables', '--env', 'develop', '--service', 'order-processor'], {
       TAPROOT_STATE_ROOT: stateRoot,
       TAPROOT_MASTER_KEY: 'test-key',
     });
@@ -174,7 +174,7 @@ describe('learn empty states', () => {
       datasource: null,
       rows: [],
       emptyReason: 'datasource_unresolved',
-      suggestedNextCommand: 'taproot --json init datasource --env develop --service order-processor',
+      suggestedNextCommand: 'taproot init datasource --env develop --service order-processor',
     });
   });
 });

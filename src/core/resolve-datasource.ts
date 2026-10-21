@@ -40,7 +40,7 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   if (!matches.length) {
     const close = rawDs ? suggestNames(rawDs, profiles.map((p) => p.name), 3) : [];
     const hint = close.length ? ` Did you mean ${close.join(', ')}?` : '';
-    return `${head}${hint} Use --datasource or --env+--service; list profiles with taproot --json datasource list.`;
+    return `${head}${hint} Use --datasource or --env+--service; list profiles with taproot datasource list.`;
   }
   const names = matches.map((p) => p.name).sort();
   const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` (+${names.length - 6})` : '');

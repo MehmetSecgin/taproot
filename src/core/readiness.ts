@@ -290,7 +290,7 @@ export function nextActionDetailsForReadiness(
     case 'missing_config':
       add(
         actionForReadiness({
-          command: 'taproot --json init',
+          command: 'taproot init',
           priority: READINESS_ACTION_PRIORITIES.init,
           reason: 'Runtime config is missing, so init needs to create the starter configuration first.',
           checks: ['config_file'],
@@ -301,7 +301,7 @@ export function nextActionDetailsForReadiness(
       if (input?.target?.env && input?.target?.service) {
         add(
           actionForReadiness({
-            command: `taproot --json init datasource --env ${input.target.env}${input.target.namespace ? ` --namespace ${input.target.namespace}` : ''} --service ${input.target.service}`,
+            command: `taproot init datasource --env ${input.target.env}${input.target.namespace ? ` --namespace ${input.target.namespace}` : ''} --service ${input.target.service}`,
             priority: READINESS_ACTION_PRIORITIES.datasourceRepair,
             reason: 'The target datasource does not exist yet, so KB-backed datasource creation/repair is the next step.',
             checks: ['target_datasource'],
@@ -322,7 +322,7 @@ export function nextActionDetailsForReadiness(
       if (input?.datasource) {
         add(
           actionForReadiness({
-            command: `taproot --json creds set --ref ${input.datasource.credentialRef} --user <user> --password <password>`,
+            command: `taproot creds set --ref ${input.datasource.credentialRef} --user <user> --password <password>`,
             priority: READINESS_ACTION_PRIORITIES.credsRepair,
             reason: 'The target datasource has no stored credentials yet, so credentials need to be added first.',
             checks: ['target_credentials'],
@@ -464,7 +464,7 @@ function withSupplementalReadinessActions(
     dedupeAction(
       merged,
       actionForReadiness({
-        command: 'taproot --json daemon start',
+        command: 'taproot daemon start',
         priority: READINESS_ACTION_PRIORITIES.daemonStart,
         reason: 'The daemon is not reachable, so start it before session-backed or daemon-assisted workflows.',
         checks: ['daemon'],

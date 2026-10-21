@@ -12,7 +12,6 @@ export interface QueryOpts {
   allowPartitionScan?: boolean;
   allowSchemaIntrospection?: boolean;
   explain?: boolean;
-  full?: boolean;
   rowsObject?: boolean;
   proto?: string;
   protoRoot?: string;

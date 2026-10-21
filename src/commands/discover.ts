@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 import {
   applyKbProposals,
   applyProposals,
@@ -11,39 +11,6 @@ import {
   fetchTshDatabases,
   type DiscoveryProposal,
 } from '../core/discover-datasources.js';
-
-function renderProposals(proposals: DiscoveryProposal[]): string {
-  if (!proposals.length) return '(no proposals)';
-  return renderTable(
-    proposals.map((p) => ({
-      name: p.name,
-      kind: p.kind,
-      env: p.env,
-      service: p.service,
-      namespace: p.namespace || '',
-      host: p.connection.host || '',
-      port: p.connection.port ?? '',
-      target: p.connection.target || '',
-      credentialRef: p.credentialRef,
-      connectors: p.connectors.join(',') || '',
-      conf: p.confidence.toFixed(2),
-      reason: p.reason,
-    })),
-  );
-}
-
-function nextStepHints(proposals: DiscoveryProposal[]): void {
-  if (!proposals.length) return;
-  const refs = new Set<string>();
-  for (const p of proposals) {
-    refs.add(p.credentialRef);
-    for (const [key, value] of Object.entries(p.resolverHints)) if (key.endsWith('CredentialRef')) refs.add(value);
-  }
-  console.log('\nCredentials to set after applying:');
-  for (const ref of [...refs].sort()) {
-    console.log(`  taproot creds set --ref ${ref} --user <user> --password '<***>'`);
-  }
-}
 
 export function registerDiscover(program: Command, getCtx: () => AppContext): void {
   const discover = program
@@ -63,59 +30,19 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
       const kbOpts = { env: opts.env, namespace: opts.namespace, service: opts.service };
       if (!opts.apply) {
         const { proposals, skipped } = buildKbProposals(ctx, kbOpts);
-        if (ctx.jsonMode) {
-          printJson({ ok: true, source: 'kb', applied: false, proposals, skipped });
-          return;
-        }
-        console.log(`Source: kb (env=${opts.env}${opts.namespace ? `, namespace=${opts.namespace}` : ''})`);
-        console.log(renderProposals(proposals));
-        if (skipped.length) {
-          console.log(`\nSkipped ${skipped.length} KB entries:`);
-          for (const s of skipped.slice(0, 5)) console.log(`  - ${s.service}: ${s.reason}`);
-        }
-        if (proposals.length) {
-          console.log('\nDry-run. Re-run with --apply to save. Add --force to overwrite existing names.');
-          nextStepHints(proposals);
-        }
+        printJson({ ok: true, source: 'kb', applied: false, proposals, skipped });
         return;
       }
       const result = await applyKbProposals(ctx, { ...kbOpts, force: Boolean(opts.force) });
-      if (ctx.jsonMode) {
-        printJson({
-          ok: true,
-          source: 'kb',
-          applied: true,
-          saved: result.saved.map((s) => s.name),
-          conflicts: result.conflicts.map((c) => ({ name: c.name, reason: 'already exists; re-run with --force' })),
-          skipped: result.skipped,
-          credentialDefaultsApplied: result.credentialDefaultsApplied,
-        });
-        return;
-      }
-      console.log(`Source: kb (env=${opts.env}${opts.namespace ? `, namespace=${opts.namespace}` : ''})`);
-      console.log(`Saved: ${result.saved.length}`);
-      for (const s of result.saved) console.log(`  + ${s.name}`);
-      if (result.conflicts.length) {
-        console.log(`Conflicts (skipped): ${result.conflicts.length}. Re-run with --force to overwrite.`);
-        for (const c of result.conflicts) console.log(`  ! ${c.name}`);
-      }
-      if (result.skipped.length) {
-        console.log(`Skipped (unsupported access_method): ${result.skipped.length}`);
-      }
-      nextStepHints(result.saved.map((s) => ({
-        name: s.name,
-        kind: s.kind as DiscoveryProposal['kind'],
-        env: s.env || opts.env,
-        service: s.service || '',
-        namespace: s.namespace,
-        connection: s.connection || {},
-        credentialRef: s.credentialRef,
-        connectors: s.connectors || [],
-        resolverHints: s.resolverHints || {},
+      printJson({
+        ok: true,
         source: 'kb',
-        confidence: s.confidence ?? 0.9,
-        reason: '',
-      })));
+        applied: true,
+        saved: result.saved.map((s) => s.name),
+        conflicts: result.conflicts.map((c) => ({ name: c.name, reason: 'already exists; re-run with --force' })),
+        skipped: result.skipped,
+        credentialDefaultsApplied: result.credentialDefaultsApplied,
+      });
     });
 
   discover
@@ -133,8 +60,7 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
       const ctx = getCtx();
       const fetched = fetchKubeServices({ namespace: opts.namespace, context: opts.context });
       if (!fetched.ok) {
-        if (ctx.jsonMode) printJson({ ok: false, source: 'kubectl', error: fetched.detail });
-        else console.error(`kubectl scan failed: ${fetched.detail}`);
+        printJson({ ok: false, source: 'kubectl', error: fetched.detail });
         process.exitCode = 1;
         return;
       }
@@ -163,8 +89,7 @@ export function registerDiscover(program: Command, getCtx: () => AppContext): vo
       const ctx = getCtx();
       const fetched = fetchTshDatabases();
       if (!fetched.ok) {
-        if (ctx.jsonMode) printJson({ ok: false, source: 'teleport', error: fetched.detail });
-        else console.error(`tsh scan failed: ${fetched.detail}`);
+        printJson({ ok: false, source: 'teleport', error: fetched.detail });
         process.exitCode = 1;
         return;
       }
@@ -182,37 +107,17 @@ function runApplyOrPrint(
   opts: { apply: boolean; force: boolean; source: string; detail: string },
 ): void {
   if (!opts.apply) {
-    if (ctx.jsonMode) {
-      printJson({ ok: true, source: opts.source, detail: opts.detail, applied: false, proposals });
-    } else {
-      console.log(`Source: ${opts.source} (${opts.detail})`);
-      console.log(renderProposals(proposals));
-      if (proposals.length) {
-        console.log('\nDry-run. Re-run with --apply to save. Add --force to overwrite existing names.');
-        nextStepHints(proposals);
-      }
-    }
+    printJson({ ok: true, source: opts.source, detail: opts.detail, applied: false, proposals });
     return;
   }
   const result = applyProposals(ctx, proposals, { force: opts.force });
-  if (ctx.jsonMode) {
-    printJson({
-      ok: true,
-      source: opts.source,
-      detail: opts.detail,
-      applied: true,
-      saved: result.saved.map((s) => s.name),
-      conflicts: result.conflicts.map((c) => ({ name: c.name, reason: 'already exists; re-run with --force to overwrite' })),
-      skipped: result.skipped,
-    });
-    return;
-  }
-  console.log(`Source: ${opts.source} (${opts.detail})`);
-  console.log(`Saved: ${result.saved.length}`);
-  for (const s of result.saved) console.log(`  + ${s.name}`);
-  if (result.conflicts.length) {
-    console.log(`Conflicts (skipped): ${result.conflicts.length}. Re-run with --force to overwrite.`);
-    for (const c of result.conflicts) console.log(`  ! ${c.name}`);
-  }
-  if (result.saved.length) nextStepHints(proposals);
+  printJson({
+    ok: true,
+    source: opts.source,
+    detail: opts.detail,
+    applied: true,
+    saved: result.saved.map((s) => s.name),
+    conflicts: result.conflicts.map((c) => ({ name: c.name, reason: 'already exists; re-run with --force to overwrite' })),
+    skipped: result.skipped,
+  });
 }

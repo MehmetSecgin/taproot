@@ -54,7 +54,7 @@ function setupState() {
 describe('runtime policy and KB state', () => {
   it('reports learning store counts without the removed manual cache stores', () => {
     const { env } = setupState();
-    const out = runCli(['--json', 'cache', 'show'], env);
+    const out = runCli(['cache', 'show'], env);
     expect(out.status).toBe(0);
     expect(Object.keys(JSON.parse(out.stdout).learning.files).sort()).toEqual([
       'grpcSchemas',
@@ -67,7 +67,7 @@ describe('runtime policy and KB state', () => {
 
   it('reports the same learning stores from learn status', () => {
     const { env } = setupState();
-    const out = runCli(['--json', 'learn', 'status'], env);
+    const out = runCli(['learn', 'status'], env);
     expect(out.status).toBe(0);
     expect(Object.keys(JSON.parse(out.stdout).files).sort()).toEqual([
       'grpcSchemas',
@@ -78,20 +78,9 @@ describe('runtime policy and KB state', () => {
     ]);
   });
 
-  it('renders a value for every learn status metric', () => {
-    const { env } = setupState();
-    const out = runCli(['learn', 'status'], env);
-    expect(out.status).toBe(0);
-    const rows = out.stdout.split('\n').filter((line) => line.includes('entries'));
-    expect(rows.length).toBe(5);
-    for (const row of rows) {
-      expect(row).toMatch(/entries\s*│\s*\d+/);
-    }
-  });
-
   it('lists KB services', () => {
     const { env } = setupState();
-    const out = runCli(['--json', 'kb', 'list-services'], env);
+    const out = runCli(['kb', 'list-services'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toEqual(['orders', 'sample-service']);
   });

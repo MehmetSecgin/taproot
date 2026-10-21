@@ -1,114 +1,40 @@
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
-import { printJson, renderRecord } from '../core/output.js';
-import { createProgress } from '../core/progress.js';
+import { printJson } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { daemonLogPath, spawnDaemon } from '../daemon/spawn.js';
 import { RpcMethod } from '../daemon/types.js';
 
-function shouldPrintPlainSuccess(ctx: AppContext): boolean {
-  if (ctx.jsonMode) return false;
-  if (ctx.verbose) return true;
-  return !process.stderr.isTTY;
+async function startOrThrow(): Promise<unknown> {
+  const res = await spawnDaemon();
+  if (!res) throw new Error(`taprootd did not become healthy within timeout. Check ${daemonLogPath()}`);
+  return res.data;
 }
 
-export function registerDaemon(program: Command, getCtx: () => AppContext): void {
+export function registerDaemon(program: Command): void {
   const d = program.command('daemon').description('taproot daemon operations');
 
   d.command('start').action(async () => {
-    const ctx = getCtx();
-    const progress = createProgress({
-      enabled: !ctx.jsonMode && !ctx.verbose,
-      noAnimations: ctx.noAnimations,
-      noColor: ctx.noColor,
-      verbose: ctx.verbose,
-      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
-    });
-    try {
-      progress.update('starting taprootd');
-      const res = await spawnDaemon();
-      if (res) {
-        if (ctx.jsonMode) printJson({ started: true, status: res.data });
-        else {
-          if (shouldPrintPlainSuccess(ctx)) console.log('taprootd started');
-          else progress.succeed('taprootd started');
-        }
-        return;
-      }
-      progress.fail('taprootd start timed out');
-      throw new Error(`taprootd did not become healthy within timeout. Check ${daemonLogPath()}`);
-    } finally {
-      progress.stop();
-    }
+    printJson({ started: true, status: await startOrThrow() });
   });
 
   d.command('status').action(async () => {
-    const ctx = getCtx();
     const res = await rpcCall({ method: RpcMethod.DaemonStatus });
     if (!res.ok) throw new Error(res.error?.message || 'daemon status failed');
-    if (ctx.jsonMode) {
-      printJson({
-        ok: true,
-        data: res.data || {},
-        meta: { ...(res.meta || {}), requestId: res.requestId },
-      });
-    }
-    else console.log(renderRecord((res.data || {}) as Record<string, unknown>));
+    printJson({ ok: true, data: res.data || {}, meta: { ...(res.meta || {}), requestId: res.requestId } });
   });
 
   d.command('stop').action(async () => {
-    const ctx = getCtx();
-    const progress = createProgress({
-      enabled: !ctx.jsonMode && !ctx.verbose,
-      noAnimations: ctx.noAnimations,
-      noColor: ctx.noColor,
-      verbose: ctx.verbose,
-      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
-    });
-    try {
-      progress.update('stopping taprootd');
-      const res = await rpcCall({ method: RpcMethod.DaemonStop });
-      if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
-      if (ctx.jsonMode) {
-        printJson({
-          ok: true,
-          data: res.data || {},
-          meta: { ...(res.meta || {}), requestId: res.requestId },
-        });
-      }
-      else {
-        if (shouldPrintPlainSuccess(ctx)) console.log('taprootd stopped');
-        else progress.succeed('taprootd stopped');
-      }
-    } finally {
-      progress.stop();
-    }
+    const res = await rpcCall({ method: RpcMethod.DaemonStop });
+    if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
+    printJson({ ok: true, data: res.data || {}, meta: { ...(res.meta || {}), requestId: res.requestId } });
   });
 
   d.command('restart').action(async () => {
-    const ctx = getCtx();
-    const progress = createProgress({
-      enabled: !ctx.jsonMode && !ctx.verbose,
-      noAnimations: ctx.noAnimations,
-      noColor: ctx.noColor,
-      verbose: ctx.verbose,
-      plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
-    });
     try {
-      progress.update('restarting taprootd');
-      try {
-        await rpcCall({ method: RpcMethod.DaemonStop });
-      } catch {
-        // ignore if not running
-      }
-      if (!(await spawnDaemon())) {
-        progress.fail('taprootd restart timed out');
-        throw new Error(`taprootd did not become healthy within timeout. Check ${daemonLogPath()}`);
-      }
-      if (shouldPrintPlainSuccess(ctx)) console.log('taprootd restarted');
-      else progress.succeed('taprootd restarted');
-    } finally {
-      progress.stop();
+      await rpcCall({ method: RpcMethod.DaemonStop });
+    } catch {
+      // ignore if not running
     }
+    printJson({ restarted: true, status: await startOrThrow() });
   });
 }

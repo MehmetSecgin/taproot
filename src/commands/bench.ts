@@ -1,9 +1,8 @@
 import fs from 'node:fs';
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
 
@@ -159,7 +158,7 @@ async function runScenario(scenario: BenchScenario, iterations: number, timeoutM
   return out;
 }
 
-export function registerBench(program: Command, getCtx: () => AppContext): void {
+export function registerBench(program: Command): void {
   program
     .command('bench')
     .description('Benchmark query latency with phase timing breakdown (resolve/connect/execute)')
@@ -177,7 +176,6 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
       String(RUNTIME_CONSTANTS.query.defaultTimeoutMs),
     )
     .action(async (opts) => {
-      const ctx = getCtx();
       const timeoutMs = Math.max(1, Number(opts.timeout) || RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const cliIterations = Math.max(1, Number(opts.iterations) || 10);
 
@@ -236,31 +234,7 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
         },
       };
 
-      if (ctx.jsonMode) {
-        printJson(payload);
-        if (totalFailures) process.exitCode = 1;
-        return;
-      }
-
-      console.log(`bench started=${startedAt} ended=${endedAt} iterations=${totalIterations} failures=${totalFailures}`);
-      const tableRows = scenarioSummaries.map((s) => ({
-        scenario: s.scenario,
-        iter: s.iterations,
-        ok: s.successes,
-        fail: s.failures,
-        total_p50: s.total.p50,
-        total_p95: s.total.p95,
-        resolve_p50: s.resolve.p50,
-        connect_p50: s.connect.p50,
-        execute_p50: s.execute.p50,
-      }));
-      console.log(renderTable(tableRows as unknown as Record<string, unknown>[]));
-      for (const s of scenarioSummaries) {
-        if (Object.keys(s.errors).length) {
-          const detail = Object.entries(s.errors).map(([code, count]) => `${code}=${count}`).join(' ');
-          console.log(`[${s.scenario}] errors: ${detail}`);
-        }
-      }
+      printJson(payload);
       if (totalFailures) process.exitCode = 1;
     });
 }

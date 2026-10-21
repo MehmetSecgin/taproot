@@ -9,15 +9,6 @@ import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { str } from '../core/strings.js';
 import { DoctorStatus } from '../types/core.js';
 
-function printHumanInit(checks: Array<{ check: string; status: string; detail: string }>, readiness: string, nextActions: string[]): void {
-  checks.forEach((check) => console.log(`${check.status.toUpperCase()} ${check.check}: ${check.detail}`));
-  console.log(`readiness: ${readiness}`);
-  if (nextActions.length) {
-    console.log('next actions:');
-    for (const action of nextActions) console.log(`- ${action}`);
-  }
-}
-
 export function registerInit(program: Command, getCtx: () => AppContext): void {
   const init = program.command('init').description('Initialize local TapRoot runtime state for first use');
 
@@ -38,8 +29,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       nextActionDetails: snapshot.nextActionDetails,
       ...(kbDirToSave ? { savedKbDir: path.resolve(kbDirToSave) } : {}),
     };
-    if (ctx.jsonMode) printJson(data);
-    else printHumanInit(snapshot.checks, snapshot.readiness, snapshot.nextActions);
+    printJson(data);
   });
 
   init.command('datasource')
@@ -65,23 +55,6 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
         connectors: result.connectors,
         warnings: result.warnings,
       };
-      if (ctx.jsonMode) {
-        printJson(data);
-        return;
-      }
-      console.log(
-        result.source === 'store-existing'
-          ? `Datasource already exists: ${result.profile.name}`
-          : result.source === 'kb-repaired'
-            ? `Repaired datasource: ${result.profile.name}`
-            : `Created datasource: ${result.profile.name}`,
-      );
-      console.log(`source: ${result.source}`);
-      console.log(`credentialRefs: ${result.credentialRefs.join(', ') || '(none)'}`);
-      console.log(`connectors: ${result.connectors.join(', ') || '(none)'}`);
-      if (result.warnings.length) {
-        console.log('warnings:');
-        for (const warning of result.warnings) console.log(`- ${warning}`);
-      }
+      printJson(data);
     });
 }

@@ -46,7 +46,7 @@ describe('doctor executor codes', () => {
     const seed = runCli(['creds', 'set', '--ref', 'qa:demo', '--user', 'reader', '--password', 'bad'], env);
     expect(seed.status).toBe(0);
 
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
+    const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
@@ -93,7 +93,7 @@ describe('doctor executor codes', () => {
     const seed = runCli(['creds', 'set', '--ref', 'prod:orders', '--db-user', 'reader'], env);
     expect(seed.status).toBe(0);
 
-    const out = runCli(['--json', 'doctor', '--datasource', 'prod-orders'], env);
+    const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
@@ -133,16 +133,16 @@ describe('doctor executor codes', () => {
       TAPROOT_MASTER_KEY: 'test-key',
     };
 
-    const out = runCli(['--json', 'doctor', '--datasource', 'prod-orders'], env);
+    const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(1);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql doctor')?.code).toBe(
       'executor_configuration_missing',
     );
-    expect(parsed.nextActionDetails[0].command).toBe('taproot --json init datasource --env prod --service orders');
-    expect(parsed.nextActionDetails[1].command).toBe('taproot --json creds set --ref prod:orders --db-user <user> --password <password>');
+    expect(parsed.nextActionDetails[0].command).toBe('taproot init datasource --env prod --service orders');
+    expect(parsed.nextActionDetails[1].command).toBe('taproot creds set --ref prod:orders --db-user <user> --password <password>');
     expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: 'taproot --json init datasource --env prod --service orders',
+      command: 'taproot init datasource --env prod --service orders',
       priority: 20,
       codes: ['executor_configuration_missing'],
     });
@@ -180,7 +180,7 @@ describe('doctor executor codes', () => {
     expect(runCli(['creds', 'set', '--ref', 'qa:demo', '--user', 'reader', '--password', 'bad'], env).status).toBe(0);
     expect(runCli(['creds', 'set', '--ref', 'vpn:work', '--status-command', 'false'], env).status).toBe(0);
 
-    const out = runCli(['--json', 'doctor', '--datasource', 'qa-demo'], env);
+    const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).toBe(3);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.nextActionDetails[0].command).toBe('taproot doctor --datasource qa-demo --connect');

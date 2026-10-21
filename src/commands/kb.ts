@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
+import { printJson, respondOk } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
 import { normalizeRelations, validateRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
@@ -20,7 +20,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .action((opts) => {
     const ctx = getCtx();
     const profile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-    if (opts.datasource && !profile) throw badInput(`Datasource not found: ${opts.datasource}. List profiles with taproot --json datasource list.`);
+    if (opts.datasource && !profile) throw badInput(`Datasource not found: ${opts.datasource}. List profiles with taproot datasource list.`);
     const env = str(opts.env || profile?.env).trim();
     const rawService = str(opts.service || profile?.service).trim();
     if (!env || !rawService) throw badInput(opts.datasource ? `Datasource ${opts.datasource} has no env or service; pass --env and --service.` : 'Specify --datasource <name>, or --env <env> and --service <service>.');
@@ -42,8 +42,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       );
     }
     const row = { service, ...out };
-    if (ctx.jsonMode) printJson(row);
-    else console.log(renderRecord(row));
+    printJson(row);
   });
 
   kb.command('tables')
@@ -62,30 +61,10 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         ...r,
         tables: matchText ? (r.tables || []).filter((t: string) => t.toLowerCase().includes(matchText.toLowerCase())) : r.tables,
       }));
-      if (ctx.jsonMode) {
-        const payload = opts.list
-          ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
-          : filtered;
-        printJson(payload);
-        return;
-      }
-      if (opts.list) {
-        const flat = filtered.flatMap((r) => (r.tables || []).map((t: string) => ({
-          service: str(r.service),
-          env: str(r.env),
-          database: str(r.database),
-          table: t,
-        })));
-        console.log(renderTable(flat));
-        return;
-      }
-      const tableRows = filtered.map((r) => ({
-        service: str(r.service),
-        env: str(r.env),
-        database: str(r.database),
-        tables: Array.isArray(r.tables) ? r.tables.length : 0,
-      }));
-      console.log(renderTable(tableRows));
+      const payload = opts.list
+        ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
+        : filtered;
+      printJson(payload);
     });
 
   kb.command('related')
@@ -99,20 +78,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         .typedRelations()
         .filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
-      if (ctx.jsonMode) {
-        printJson(rows);
-      } else if (!rows.length) {
-        console.log(`No curated relations for service '${opts.service}'. Derive candidates with "taproot learn relations --service ${opts.service}".`);
-      } else {
-        const tableRows = rows.map((r) => ({
-          from: `${r.from.service}.${r.from.table}.${r.from.column}`,
-          to: `${r.to.service}.${r.to.table}.${r.to.column}`,
-          relationship: r.relationship || '',
-          cross: r.from.service.toLowerCase() !== r.to.service.toLowerCase() ? 'yes' : '',
-          notes: r.notes || '',
-        }));
-        console.log(renderTable(tableRows));
-      }
+      printJson(rows);
     });
 
   const relations = kb.command('relations').description('Curated cross-service relation operations');
@@ -124,18 +90,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const ctx = getCtx();
       let rows = ctx.kbStore.typedRelations();
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
-      if (ctx.jsonMode) {
-        printJson(rows);
-      } else if (!rows.length) {
-        console.log('No curated relations. Import a map with "taproot kb relations import --file <path>".');
-      } else {
-        console.log(renderTable(rows.map((r) => ({
-          from: `${r.from.service}.${r.from.table}.${r.from.column}`,
-          to: `${r.to.service}.${r.to.table}.${r.to.column}`,
-          relationship: r.relationship || '',
-          cross: r.from.service.toLowerCase() !== r.to.service.toLowerCase() ? 'yes' : '',
-        }))));
-      }
+      printJson(rows);
     });
 
   relations.command('validate')
@@ -156,21 +111,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         stale: results.filter((r) => r.stale).length,
         unknown: results.filter((r) => !r.stale && (r.fromStatus === 'unknown_service' || r.toStatus === 'unknown_service')).length,
       };
-      if (ctx.jsonMode) {
-        printJson({ summary, results });
-      } else if (!results.length) {
-        console.log('No relations to validate.');
-      } else {
-        console.log(renderTable(results.map((r) => ({
-          from: r.from,
-          to: r.to,
-          fromStatus: r.fromStatus,
-          toStatus: r.toStatus,
-          stale: r.stale ? 'STALE' : '',
-        }))));
-        console.log(`\n${summary.total} relation(s): ${summary.stale} stale, ${summary.unknown} unverifiable (service not introspected).`);
-        if (summary.stale) console.log('Stale edges still inject (marked stale) — re-verify against current schema and re-import or edit relations.json.');
-      }
+      printJson({ summary, results });
     });
 
   relations.command('import')
@@ -190,18 +131,12 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const normalized = normalizeRelations(parsed);
       const skipped = parsed.length - normalized.length;
       const result = ctx.kbStore.promoteRelations(normalized);
-      if (ctx.jsonMode) {
-        respondOk({ added: result.added, total: result.total, skipped });
-      } else {
-        console.log(`Imported ${result.added} new relation(s) (${normalized.length} valid, ${skipped} skipped). relations.json now holds ${result.total}.`);
-      }
+      respondOk({ added: result.added, total: result.total, skipped });
     });
 
   kb.command('list-services')
-    .action((opts) => {
+    .action(() => {
       const ctx = getCtx();
-      const rows = ctx.kbStore.listServices();
-      if (ctx.jsonMode) printJson(rows);
-      else console.log(renderTable(rows.map((service) => ({ service }))));
+      printJson(ctx.kbStore.listServices());
     });
 }

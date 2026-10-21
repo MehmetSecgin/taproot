@@ -68,9 +68,6 @@ function makeContext(protoRoot: string) {
     learningStore: new LearningStore(path.join(root, 'learning')),
     runtimeConfigStore: { serviceAliases: () => ({}) } as any,
     pluginRegistry: new PluginRegistry(),
-    jsonMode: true,
-    noColor: true,
-    noAnimations: true,
     verbose: false,
   };
   return { ctx };

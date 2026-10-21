@@ -62,7 +62,7 @@ describe('query resolution', () => {
     const { env } = setupState();
     const out = runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
-    expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+    expect(out.stdout).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
   it('explicit --datasource with non-conventional name uses profile env/service for KB conflict checks', () => {
@@ -106,14 +106,14 @@ describe('query resolution', () => {
       ],
     });
     const out = runCli(['query', '--datasource', 'nudge-test', '--sql', 'SELECT 1'], env);
-    expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
+    expect(out.stdout).toContain('MISCONFIGURED_DATASOURCE');
   });
 
   it('resolves --env + --service from store', () => {
     const { env } = setupState();
     const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
-    expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+    expect(out.stdout).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
   it('DETERMINISTIC_REQUIRED when env policy enforces it', () => {
@@ -130,8 +130,8 @@ describe('query resolution', () => {
     });
     const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(2);
-    expect(out.stderr).toContain('DETERMINISTIC_REQUIRED');
-    expect(out.stderr).toContain(`KB directory ${env.TAPROOT_KB_DIR} has no services in services.json`);
+    expect(out.stdout).toContain('DETERMINISTIC_REQUIRED');
+    expect(out.stdout).toContain(`KB directory ${env.TAPROOT_KB_DIR} has no services in services.json`);
   });
 
   it('--allow-discovery overrides deterministic requirement', () => {
@@ -148,8 +148,8 @@ describe('query resolution', () => {
     });
     const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--sql', 'SELECT 1', '--allow-discovery'], env);
     expect(out.status).toBe(2);
-    expect(out.stderr).toContain('UNKNOWN_DATASOURCE');
-    expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+    expect(out.stdout).toContain('UNKNOWN_DATASOURCE');
+    expect(out.stdout).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
   it('allow-discovery reuses canonical bootstrap shape for KB-backed discovery targets', () => {
@@ -204,19 +204,19 @@ describe('query resolution', () => {
     const { env } = setupState();
     const out = runCli(['query', '--datasource', 'qa-orders', '--reason', 'latest orders'], env);
     expect(out.status).toBe(1);
-    expect(out.stderr).toContain('No query resolved. Provide --sql.');
+    expect(out.stdout).toContain('No query resolved. Provide --sql.');
   });
 
   it('malformed --param fails as bad input', () => {
     const { env } = setupState();
     const out = runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1', '--param', 'brokenpair'], env);
     expect(out.status).toBe(2);
-    expect(out.stderr).toContain("Invalid --param 'brokenpair'");
+    expect(out.stdout).toContain("Invalid --param 'brokenpair'");
   });
 
   it('--explain without a query fails as bad input', () => {
     const { env } = setupState();
-    const out = runCli(['--json', 'query', '--datasource', 'qa-orders', '--explain'], env);
+    const out = runCli(['query', '--datasource', 'qa-orders', '--explain'], env);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -233,7 +233,7 @@ describe('query resolution', () => {
     });
     const out = runCli(['query', '--env', 'qa', '--service', 'legacy', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
-    expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
+    expect(out.stdout).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
   it('fails with MISCONFIGURED_DATASOURCE when store conflicts with stronger KB routing', () => {
@@ -274,6 +274,6 @@ describe('query resolution', () => {
     });
     const out = runCli(['query', '--env', 'prod', '--service', 'orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(2);
-    expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
+    expect(out.stdout).toContain('MISCONFIGURED_DATASOURCE');
   });
 });

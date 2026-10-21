@@ -53,7 +53,7 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
 }
 
 async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => TapRootPlugin = () => fakePlugin()) {
-  const ctx = buildContext({ jsonMode: true });
+  const ctx = buildContext({});
   ctx.pluginRegistry.register(makePlugin());
   const direct = await executeQuery(request, { ctx, report: silentQueryReport });
 

@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 import { startDaemon } from './daemon/server.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
-import { cleanupProgress } from './core/progress.js';
 import { runRegisteredCleanup } from './core/cleanup.js';
 
 function fatal(error: unknown, code: string): void {
-  cleanupProgress();
   const message = (error as Error)?.message || String(error || 'Unknown error');
   void runRegisteredCleanup().finally(() => {
     process.stderr.write(`${code}: ${message}\n`);
@@ -22,7 +20,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  cleanupProgress();
   void runRegisteredCleanup().finally(() => {
     process.stderr.write(`${(error as Error).message}\n`);
     process.exit(classifyExitCode(error) || EXIT_CODES.GENERAL_ERROR);

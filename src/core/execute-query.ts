@@ -62,7 +62,6 @@ export interface QueryReport {
 export interface QueryDeps {
   ctx: AppContext;
   report: QueryReport;
-  promptPassword?: (credentialRef: string) => Promise<string>;
   openSession?: (datasource: DatasourceProfile) => string;
 }
 
@@ -414,25 +413,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
           ),
       });
 
-    let result: QueryResult;
-    try {
-      result = await runExecute();
-    } catch (err) {
-      const code = classifyError(str((err as Error).message));
-      const canPromptPassword =
-        code === 'ACCESS_DENIED' &&
-        !creds.password &&
-        Boolean(deps.promptPassword) &&
-        (datasource.kind === DatasourceKind.Mysql || datasource.kind === DatasourceKind.Postgres);
-      if (!canPromptPassword) throw err;
-      report.update(`password required for ${datasource.credentialRef}`);
-      const password = await deps.promptPassword!(datasource.credentialRef);
-      if (!password) throw err;
-      creds = { ...creds, password };
-      await ctx.credentialStore.set(datasource.credentialRef, creds);
-      report.update('retrying query');
-      result = await runExecute();
-    }
+    const result: QueryResult = await runExecute();
     phaseExecuteMs = Date.now() - executeStart;
     report.phase('execute', phaseExecuteMs);
     await catalogTask;

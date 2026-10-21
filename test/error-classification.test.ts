@@ -38,7 +38,7 @@ describe('error classification', () => {
     expect(exitCodeForClass('UNKNOWN_DATASOURCE')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
-  it('points schema errors at a cached-schema command that works without --json', () => {
+  it('points schema errors at a cached-schema command', () => {
     expect(nextAction('UNKNOWN_COLUMN')).not.toContain('this envelope');
     expect(nextAction('UNKNOWN_COLUMN')).toContain('learn ensure-schema --datasource');
     expect(nextAction('UNKNOWN_TABLE')).toContain('learn tables --datasource');

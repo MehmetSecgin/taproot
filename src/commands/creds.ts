@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, renderRecord, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 
 function parseKv(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -47,8 +47,7 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
       }
       await ctx.credentialStore.set(opts.ref, value);
       const out = { saved: true, ref: opts.ref, keys: Object.keys(value) };
-      if (ctx.jsonMode) printJson(out);
-      else console.log(`saved credential ref ${out.ref} (${out.keys.length} keys)`);
+      printJson(out);
     });
 
   c.command('show').requiredOption('--ref <ref>').action(async (opts) => {
@@ -58,26 +57,19 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     const redacted = { ...value };
     if (redacted.password) redacted.password = '[REDACTED]';
     if (redacted.token) redacted.token = '[REDACTED]';
-    if (ctx.jsonMode) printJson({ ref: opts.ref, values: redacted });
-    else console.log(renderRecord({ ref: opts.ref, ...redacted }));
+    printJson({ ref: opts.ref, values: redacted });
   });
 
   c.command('list').action(async () => {
     const ctx = getCtx();
     const entries = await ctx.credentialStore.list();
-    if (ctx.jsonMode) {
-      printJson(entries.map((e) => ({ ref: e.ref, keys: e.keys, source: e.source })));
-      return;
-    }
-    const rows = entries.map((e) => ({ ref: e.ref, source: e.source, keys: e.keys.join(',') }));
-    console.log(renderTable(rows));
+    printJson(entries.map((e) => ({ ref: e.ref, keys: e.keys, source: e.source })));
   });
 
   c.command('unset').requiredOption('--ref <ref>').action(async (opts) => {
     const ctx = getCtx();
     await ctx.credentialStore.remove(opts.ref);
-    if (ctx.jsonMode) printJson({ removed: true, ref: opts.ref });
-    else console.log(`removed credential ref ${opts.ref}`);
+    printJson({ removed: true, ref: opts.ref });
   });
 
   c.command('migrate-to-fallback')
@@ -98,15 +90,6 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
           'taproot creds list (verify all refs now show source=fallback)',
         ],
       };
-      if (ctx.jsonMode) printJson(summary);
-      else {
-        console.log(`migrated ${result.migrated.length} refs from keychain to fallback file`);
-        if (result.alreadyInFallback.length) console.log(`overlapped with existing fallback entries: ${result.alreadyInFallback.join(', ')}`);
-        if (result.failed.length) {
-          console.log('failures:');
-          for (const item of result.failed) console.log(`- ${item.ref}: ${item.reason}`);
-        }
-        console.log('next: export TAPROOT_NO_KEYCHAIN=1');
-      }
+      printJson(summary);
     });
 }

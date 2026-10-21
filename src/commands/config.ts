@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 import {
   createSnapshot,
   diffAgainst,
@@ -11,8 +11,6 @@ import {
   restoreSnapshot,
   statusAgainst,
 } from '../core/config-snapshots.js';
-
-const DEFAULT_DIFF_LINES = 200;
 
 export function registerConfig(program: Command, getCtx: () => AppContext): void {
   const c = program.command('config').description('Version, inspect, and restore taproot config snapshots');
@@ -28,8 +26,7 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
         message: opts.message,
       });
       const summary = { id: meta.id, createdAt: meta.createdAt, label: meta.label, message: meta.message, files: meta.files.length };
-      if (ctx.jsonMode) printJson({ snapshot: summary });
-      else console.log(`snapshot ${meta.id} (${meta.files.length} files)${meta.label ? ` [${meta.label}]` : ''}`);
+      printJson({ snapshot: summary });
     });
 
   c.command('list')
@@ -39,21 +36,11 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
       const snaps = listSnapshots(ctx.paths.configSnapshotsDir);
       const head = readHead(ctx.paths.configSnapshotsDir);
       const status = statusAgainst(ctx.paths.configDir, ctx.paths.configSnapshotsDir);
-      if (ctx.jsonMode) {
-        printJson({
-          head,
-          drifted: status.drifted,
-          snapshots: snaps.map((s) => ({ id: s.id, createdAt: s.createdAt, label: s.label, message: s.message, files: s.files.length, head: s.id === head })),
-        });
-        return;
-      }
-      if (!snaps.length) {
-        console.log('no config snapshots yet — run `taproot config snapshot`');
-        return;
-      }
-      const rows = snaps.map((s) => ({ '': s.id === head ? '*' : '', id: s.id, createdAt: s.createdAt, label: s.label || '', files: s.files.length, message: s.message || '' }));
-      console.log(renderTable(rows));
-      console.log(`\n* = baseline (HEAD). ${status.drifted ? `current config has drifted (${status.changes.length} file(s)) — see \`taproot config diff\`` : 'current config is clean.'}`);
+      printJson({
+        head,
+        drifted: status.drifted,
+        snapshots: snaps.map((s) => ({ id: s.id, createdAt: s.createdAt, label: s.label, message: s.message, files: s.files.length, head: s.id === head })),
+      });
     });
 
   c.command('status')
@@ -62,45 +49,16 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
     .action((opts) => {
       const ctx = getCtx();
       const report = statusAgainst(ctx.paths.configDir, ctx.paths.configSnapshotsDir, opts.id);
-      if (ctx.jsonMode) {
-        printJson(report);
-        return;
-      }
-      if (!report.baseline) {
-        console.log('no config snapshots yet — run `taproot config snapshot`');
-        return;
-      }
-      if (!report.drifted) {
-        console.log(`clean — config matches snapshot ${report.baseline}`);
-        return;
-      }
-      console.log(`drifted from snapshot ${report.baseline}:`);
-      for (const ch of report.changes) console.log(`  ${ch.status.padEnd(8)} ${ch.file}`);
+      printJson(report);
     });
 
   c.command('diff')
     .description('Show line-level differences between the current config and a snapshot (default: latest)')
     .option('--id <id>', 'diff against a specific snapshot instead of the latest')
-    .option('--max-lines <n>', 'cap diff lines printed per file', String(DEFAULT_DIFF_LINES))
     .action((opts) => {
       const ctx = getCtx();
       const result = diffAgainst(ctx.paths.configDir, ctx.paths.configSnapshotsDir, opts.id);
-      if (ctx.jsonMode) {
-        printJson(result);
-        return;
-      }
-      if (!result.files.length) {
-        console.log(`clean — config matches snapshot ${result.baseline}`);
-        return;
-      }
-      const cap = Number(opts.maxLines) || DEFAULT_DIFF_LINES;
-      console.log(`diff vs snapshot ${result.baseline}:`);
-      for (const f of result.files) {
-        console.log(`\n${f.file} (${f.status}, +${f.added} -${f.removed})`);
-        const shown = f.lines.slice(0, cap);
-        for (const line of shown) console.log(`  ${line}`);
-        if (f.lines.length > shown.length) console.log(`  … ${f.lines.length - shown.length} more line(s)`);
-      }
+      printJson(result);
     });
 
   c.command('restore')
@@ -120,12 +78,7 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
         { id: opts.id, label: opts.label, latest: opts.latest },
         { backup: opts.backup },
       );
-      if (ctx.jsonMode) printJson(result);
-      else {
-        console.log(`restored config from snapshot ${result.restored}`);
-        console.log(`  wrote ${result.written.length} file(s)${result.deleted.length ? `, removed ${result.deleted.length}` : ''}`);
-        if (result.backup) console.log(`  pre-restore backup: ${result.backup}`);
-      }
+      printJson(result);
     });
 
   c.command('prune')
@@ -136,7 +89,6 @@ export function registerConfig(program: Command, getCtx: () => AppContext): void
       const keep = Number(opts.keep);
       if (!Number.isInteger(keep) || keep < 0) throw badInput(`Invalid --keep '${opts.keep}'. Expected a non-negative integer.`);
       const removed = pruneSnapshots(ctx.paths.configSnapshotsDir, keep);
-      if (ctx.jsonMode) printJson({ removed, kept: keep });
-      else console.log(removed.length ? `pruned ${removed.length} snapshot(s), kept ${keep}` : `nothing to prune (keeping ${keep})`);
+      printJson({ removed, kept: keep });
     });
 }

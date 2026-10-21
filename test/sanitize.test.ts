@@ -72,7 +72,7 @@ describe('sanitize check-repo', () => {
     const { repoDir, env } = setupRepo({ 'README.md': 'safe content only' });
     const out = runCli(['sanitize', 'check-repo'], { cwd: repoDir, env });
     expect(out.status).toBe(0);
-    expect(out.stdout).toContain('No leak patterns found.');
+    expect(JSON.parse(out.stdout).count).toBe(0);
   });
 
   it('respects custom deny patterns', () => {

@@ -41,17 +41,16 @@ Error envelope:
 ```
 
 ## Command-Specific Requirements
-- `query --json`
+- `query`
   - Success must include `data.columns`, `data.rows`, `data.datasource`, `data.plugin`, `data.classification`
   - Success/failure via daemon must include `meta.requestId`
   - Successful daemon execution should include `meta.runId` and `meta.sessionId`
-- `daemon status --json`
+- `daemon status`
   - Must use shared envelope with `meta.requestId`
   - `data` includes daemon runtime status payload
-- `session * --json` (`open`, `ls`, `inspect`, `close`, `close-all`)
+- `session *` (`open`, `ls`, `inspect`, `close`, `close-all`)
   - Must use shared envelope with `meta.requestId`
   - `open`/`inspect` should include `meta.sessionId` when available
 
 ## Output Discipline
-- `--json` mode: stdout contains only one JSON payload.
-- Human mode: no raw JSON blobs by default.
+- stdout contains only one JSON payload, or one JSON value per line under `--jsonl`.

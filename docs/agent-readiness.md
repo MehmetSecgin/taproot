@@ -71,7 +71,7 @@ For a user or agent to succeed on day one, the current setup is usually:
 - `init datasource` can now repair critically stale datasource profiles instead of forcing delete-and-recreate.
 - Runtime config has safe neutral defaults when an env policy is missing.
 - `self-check` gives a lightweight runtime sanity check.
-- `doctor` provides ranked next steps for connector and executor failures, and `doctor --json` now exposes structured `nextActionDetails`.
+- `doctor` provides ranked next steps for connector and executor failures, and `doctor` now exposes structured `nextActionDetails`.
 
 ### What Still Feels Heavy
 
@@ -140,18 +140,18 @@ The remaining improvement area is guided setup when KB is incomplete:
 
 It also supports target-aware runs with `--datasource` or `--env` + `--service`, which is the preferred contract for agents checking a real query path.
 
-The main remaining gap is no longer action structure. `init --json`, `self-check --agent --json`, and `doctor --json` now all expose structured remediation metadata. The remaining gap is making that contract fully consistent across every setup/readiness path.
+The main remaining gap is no longer action structure. `init`, `self-check --agent`, and `doctor` now all expose structured remediation metadata. The remaining gap is making that contract fully consistent across every setup/readiness path.
 
 ### 4. Add An Agent-Facing Readiness Mode
 
 The current agent-facing readiness mode is:
 
-- `taproot --json self-check --agent`
+- `taproot self-check --agent`
 
 For target-aware readiness, use:
 
-- `taproot --json self-check --agent --datasource <name>`
-- `taproot --json self-check --agent --env <env> --service <service>`
+- `taproot self-check --agent --datasource <name>`
+- `taproot self-check --agent --env <env> --service <service>`
 
 This should answer:
 
@@ -188,13 +188,13 @@ Recommended behavior:
 The simplest successful path for an agent should be one command:
 
 ```bash
-taproot --json self-check --agent
+taproot self-check --agent
 ```
 
 or:
 
 ```bash
-taproot --json init --check
+taproot init --check
 ```
 
 That command should say whether the environment is ready, what is missing, and what exact command to run next.

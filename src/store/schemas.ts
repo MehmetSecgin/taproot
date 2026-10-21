@@ -42,9 +42,6 @@ export const RuntimeConfigSchema = z.object({
   kbDir: z.string().optional(),
   defaults: z.object({
     profile: z.string().optional(),
-    json: z.boolean().optional(),
-    noColor: z.boolean().optional(),
-    noAnimations: z.boolean().optional(),
     query: z.object({
       timeoutMs: z.number().int().positive().optional(),
       timeZone: z.string().optional(),

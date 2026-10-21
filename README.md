@@ -109,9 +109,9 @@ taproot creds set --ref qa:redis:cache --user default --password '***'
 taproot doctor --datasource qa-cache-redis
 
 # read query: pass any Redis read command as the query string
-taproot --json query --datasource qa-cache-redis --sql "DBSIZE"
-taproot --json query --datasource qa-cache-redis --sql "GET user:session:abc123"
-taproot --json query --datasource qa-cache-redis --sql "SCAN 0 COUNT 10"
+taproot query --datasource qa-cache-redis --sql "DBSIZE"
+taproot query --datasource qa-cache-redis --sql "GET user:session:abc123"
+taproot query --datasource qa-cache-redis --sql "SCAN 0 COUNT 10"
 ```
 
 Redis plugin notes:
@@ -141,18 +141,18 @@ taproot datasource add \
   --allow-mutate
 
 # 2) write requires --allow-mutate at query time too
-taproot --json query --datasource qa-cache-redis --sql "SET taproot:test:key hello" --allow-mutate
-taproot --json query --datasource qa-cache-redis --sql "DEL taproot:test:key" --allow-mutate
+taproot query --datasource qa-cache-redis --sql "SET taproot:test:key hello" --allow-mutate
+taproot query --datasource qa-cache-redis --sql "DEL taproot:test:key" --allow-mutate
 
 # 3) FLUSHDB requires --allow-flush AS WELL AS --allow-mutate
-taproot --json query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
+taproot query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
 ```
 
 Proto-decoding example:
 
 ```bash
 # Per-query
-taproot --json query --datasource qa-order-cache \
+taproot query --datasource qa-order-cache \
   --sql "GET order:v2:1001" \
   --proto OrderProto \
   --proto-root ~/proto/order-cache
@@ -167,7 +167,7 @@ taproot datasource add \
   --hint protoRoot=$HOME/proto/order-cache \
   --hint protoMessage=OrderProto
 
-taproot --json query --datasource qa-order-cache \
+taproot query --datasource qa-order-cache \
   --sql "MGET order:v2:1001 order:v2:1002"
 # rows: [[{order_id:"1001", status:"OPEN"}], [{order_id:"1002", status:"OPEN"}]]
 ```
@@ -206,14 +206,14 @@ taproot datasource add \
 taproot doctor --datasource qa-catalog-grpc
 
 # introspect what's callable before composing a request:
-taproot --json grpc list --datasource qa-catalog-grpc            # services + methods only
-taproot --json grpc list --datasource qa-catalog-grpc items      # filter methods by substring
+taproot grpc list --datasource qa-catalog-grpc            # services + methods only
+taproot grpc list --datasource qa-catalog-grpc items      # filter methods by substring
 
 # don't know the exact name? search across all services:
-taproot --json grpc find --datasource qa-catalog-grpc items      # matches service/method/request/response
+taproot grpc find --datasource qa-catalog-grpc items      # matches service/method/request/response
 
 # --service and --method accept partial names (short name or unambiguous substring):
-taproot --json grpc describe --datasource qa-catalog-grpc \
+taproot grpc describe --datasource qa-catalog-grpc \
   --service CatalogService \
   --method getItemsByParent                                      # expands request + response messages
 
@@ -222,18 +222,18 @@ taproot grpc describe --datasource qa-catalog-grpc \
   --method getItemsByParent --skeleton
 
 # unary call: --sql is "<package.Service/Method>". Request body in JSON:
-taproot --json query --datasource qa-catalog-grpc \
+taproot query --datasource qa-catalog-grpc \
   --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}'
 
 # or build the request from --param key=value pairs (numbers/booleans coerced):
-taproot --json query --datasource qa-catalog-grpc \
+taproot query --datasource qa-catalog-grpc \
   --sql "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
   --param text=Widget
 
 # client-streaming or bidi call: one array element per request message.
 # Returns one row per response message (columns seq, value):
-taproot --json query --datasource qa-catalog-grpc \
+taproot query --datasource qa-catalog-grpc \
   --sql "com.example.catalog.v1.CatalogService/lookupItems" \
   --request-json '[{"id":1},{"id":2},{"id":3}]'
 ```
@@ -268,11 +268,11 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 
 ### Time zones (UTC by default)
 
-For MySQL/TiDB/Postgres datasources TapRoot runs `SET time_zone = '+00:00'` (Postgres: `TimeZone = UTC`) on every connection. This means **`WHERE` timestamp literals are interpreted as UTC** and `TIMESTAMP`/`DATETIME` columns render as UTC (matching the default `--datetime-format iso`). Literal interpretation and display therefore agree on the same absolute instant:
+For MySQL/TiDB/Postgres datasources TapRoot runs `SET time_zone = '+00:00'` (Postgres: `TimeZone = UTC`) on every connection. This means **`WHERE` timestamp literals are interpreted as UTC** and `TIMESTAMP`/`DATETIME` columns render as UTC (ISO-8601). Literal interpretation and display therefore agree on the same absolute instant:
 
 ```bash
 # both the literals and the rendered rows are UTC
-taproot --json query --datasource prod-orders \
+taproot query --datasource prod-orders \
   --sql "SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-06-24 17:00:00' AND '2026-06-24 17:05:00'"
 ```
 
@@ -287,7 +287,7 @@ Queries abort after `--timeout <ms>` (default `15000`; configurable via `default
 Prefer selecting raw JSON columns and extracting client-side with `--json-extract <column>:<dotpath>` (repeatable). It parses the raw JSON cell after fetching and adds a derived `<column>.<dotpath>` column, avoiding hand-written engine JSON functions:
 
 ```bash
-taproot --json query --datasource prod-orders \
+taproot query --datasource prod-orders \
   --sql "SELECT id, payload FROM orders LIMIT 5" \
   --json-extract payload:order.status --json-extract payload:order.total
 ```
@@ -304,7 +304,7 @@ taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orde
 ```
 
 - `--jsonl` prints query rows as one JSON object per line. Other commands print an array one item per line and anything else as one line. On failure stdout stays empty and stderr gets one `CODE: message` line, plus `nextAction: ...` when there is one.
-- `--pluck <dot.path>` implies `--json` and prints only that subtree of the envelope (`data.rows`, `meta.schemaContext`). On failure it prints only the `error` object to stderr.
+- `--pluck <dot.path>` prints only that subtree of the envelope (`data.rows`, `meta.schemaContext`). On failure it prints only the `error` object to stderr.
 - Both exit non-zero on failure, so empty stdout plus a non-zero exit is never mistaken for zero rows.
 
 ---
@@ -440,8 +440,8 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 Use targeted readiness before deeper troubleshooting:
 
 ```bash
-taproot --json self-check --agent --datasource <name>
-taproot --json self-check --agent --env <env> --service <service>
+taproot self-check --agent --datasource <name>
+taproot self-check --agent --env <env> --service <service>
 ```
 
 Targeted readiness returns:
@@ -457,11 +457,11 @@ Targeted readiness returns:
 For deeper diagnosis:
 
 ```bash
-taproot --json doctor --datasource <name>
-taproot --json doctor --datasource <name> --connect
+taproot doctor --datasource <name>
+taproot doctor --datasource <name> --connect
 ```
 
-`doctor --json` returns both `nextActions` (ordered command strings) and `nextActionDetails` (structured remediation with `command`, `priority`, `checks`, `codes`, `reasons`). `init --json` and `self-check --agent --json` expose the same `nextActionDetails` shape.
+`doctor` returns both `nextActions` (ordered command strings) and `nextActionDetails` (structured remediation with `command`, `priority`, `checks`, `codes`, `reasons`). `init` and `self-check --agent` expose the same `nextActionDetails` shape.
 
 ---
 
@@ -542,7 +542,6 @@ Structure:
 - Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`
-- Porcelain vs plumbing contract: `references/porcelain-plumbing-contract.md`
 - JSON envelope contract: `references/json-envelope-contract.md`
 
 ---

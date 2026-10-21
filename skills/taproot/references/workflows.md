@@ -18,29 +18,29 @@ taproot init --kind mysql|postgres|redis
 
 # whole-install health. `doctor` alone is NOT a health check: it needs a target and
 # exits non-zero without --datasource or --env+--service.
-taproot --json self-check --agent
+taproot self-check --agent
 ```
 
 ## First Successful Query (Happy Path)
 ```bash
-taproot --json init
-taproot --json init datasource --env qa --service orders
-taproot --json creds set --ref qa:orders --user reader --password <password>
-taproot --json self-check --agent --datasource qa-orders
-taproot --json doctor --datasource qa-orders --connect
-taproot --json query --datasource qa-orders --sql "SELECT 1 AS ok"
+taproot init
+taproot init datasource --env qa --service orders
+taproot creds set --ref qa:orders --user reader --password <password>
+taproot self-check --agent --datasource qa-orders
+taproot doctor --datasource qa-orders --connect
+taproot query --datasource qa-orders --sql "SELECT 1 AS ok"
 ```
 
 ## Setup And Credentials
 - Runtime self-check:
 ```bash
-taproot --json self-check
-taproot --json self-check --agent
-taproot --json self-check --agent --datasource <name>
-taproot --json self-check --agent --env <env> --service <service>
+taproot self-check
+taproot self-check --agent
+taproot self-check --agent --datasource <name>
+taproot self-check --agent --env <env> --service <service>
 ```
 
-- For `init --json` and `self-check --agent --json`, read the structured records. There is no `nextActions` string array on these payloads.
+- For `init` and `self-check --agent`, read the structured records. There is no `nextActions` string array on these payloads.
 ```bash
 # structured records with command, priority, checks, codes, reasons; sorted by ascending priority
 nextActionDetails
@@ -52,47 +52,47 @@ nextCommand
 
 - KB-backed datasource create/repair:
 ```bash
-taproot --json init datasource --env <env> --service <service>
+taproot init datasource --env <env> --service <service>
 ```
 
 - Store and inspect credentials:
 ```bash
-taproot --json creds set --ref <ref> --user <user> --password <password>
-taproot --json creds show --ref <ref>
-taproot --json creds unset --ref <ref>
+taproot creds set --ref <ref> --user <user> --password <password>
+taproot creds show --ref <ref>
+taproot creds unset --ref <ref>
 ```
 
 - Configure and inspect connectors:
 ```bash
-taproot --json connector setup --datasource <name> --connector <name> --ref <ref>
-taproot --json connector status --datasource <name>
-taproot --json connector status --datasource <name> --connector teleport --all --verbose-detail
+taproot connector setup --datasource <name> --connector <name> --ref <ref>
+taproot connector status --datasource <name>
+taproot connector status --datasource <name> --connector teleport
 ```
 
 ## Common Commands
 - Preferred order for routine query tasks:
 ```bash
 # known datasource + explicit SQL. --reason is a ledger note, not a query source.
-taproot --json query --datasource <name> --sql "<sql>" --reason "<why>"
+taproot query --datasource <name> --sql "<sql>" --reason "<why>"
 ```
 
 - Avoid this by default:
 ```bash
 # don't start routine reads with doctor
-taproot --json doctor --datasource <name> --connect
+taproot doctor --datasource <name> --connect
 
 # don't rediscover routing if datasource is already known
-taproot --json datasource resolve --env <env> --service <service>
-taproot --json kb resolve --service <service> --env <env>
+taproot datasource resolve --env <env> --service <service>
+taproot kb resolve --service <service> --env <env>
 ```
 
 - Doctor known datasource:
 ```bash
-taproot --json doctor --datasource <name> --connect
-taproot --json doctor --datasource <name> --connect --all --verbose-detail
+taproot doctor --datasource <name> --connect
+taproot doctor --datasource <name> --connect
 ```
 
-- If `doctor --json` fails, read the structured records (`doctor` emits no `nextActions` array and no `nextCommand`):
+- If `doctor` fails, read the structured records (`doctor` emits no `nextActions` array and no `nextCommand`):
 ```bash
 # structured records with command, priority, checks, codes, reasons
 nextActionDetails
@@ -101,29 +101,29 @@ nextActionDetails[0].command
 
 - Resolve from env/service:
 ```bash
-taproot --json datasource resolve --env <env> --service <service>
-taproot --json kb resolve --service <service> --env <env>
-taproot --json kb list-services
+taproot datasource resolve --env <env> --service <service>
+taproot kb resolve --service <service> --env <env>
+taproot kb list-services
 ```
 
 - Query explicit SQL:
 ```bash
-taproot --json query --datasource <name> --sql "SELECT 1 AS ok"
-taproot --json query --env <env> --service <service> --sql "SELECT 1 AS ok"
-taproot --json query --env <env> --service <service> --allow-discovery --sql "SELECT 1 AS ok"
+taproot query --datasource <name> --sql "SELECT 1 AS ok"
+taproot query --env <env> --service <service> --sql "SELECT 1 AS ok"
+taproot query --env <env> --service <service> --allow-discovery --sql "SELECT 1 AS ok"
 ```
 
 - Query timeout:
 ```bash
 # default is 15000ms; raise only when a slower query is intentional
-taproot --json query --datasource <name> --timeout 30000 --sql "SELECT 1 AS ok"
+taproot query --datasource <name> --timeout 30000 --sql "SELECT 1 AS ok"
 ```
 
 - Redis / Dragonfly read commands:
 ```bash
 # register (one-time). No auth example; for AUTH add `taproot creds set --ref ... --password ...`.
 # Bake proto defaults via --hint so future queries auto-decode.
-taproot --json datasource add \
+taproot datasource add \
   --name qa-cache-redis --kind redis \
   --env qa --namespace develop --service cache-redis \
   --host my-redis.develop --port 6379 --database 0 \
@@ -133,19 +133,19 @@ taproot --json datasource add \
   --hint protoMessage=<MessageName>
 
 # health check (PING -> PONG)
-taproot --json doctor --datasource qa-cache-redis
+taproot doctor --datasource qa-cache-redis
 
 # basic reads. Pass the raw Redis command verbatim.
-taproot --json query --datasource qa-cache-redis --sql "DBSIZE"
-taproot --json query --datasource qa-cache-redis --sql "INFO keyspace"
-taproot --json query --datasource qa-cache-redis --sql "TYPE <key>"
-taproot --json query --datasource qa-cache-redis --sql "GET <key>"
-taproot --json query --datasource qa-cache-redis --sql "HGETALL <key>"
-taproot --json query --datasource qa-cache-redis --sql "LRANGE <key> 0 -1"
-taproot --json query --datasource qa-cache-redis --sql "SCAN 0 MATCH 'prefix:*' COUNT 100"
+taproot query --datasource qa-cache-redis --sql "DBSIZE"
+taproot query --datasource qa-cache-redis --sql "INFO keyspace"
+taproot query --datasource qa-cache-redis --sql "TYPE <key>"
+taproot query --datasource qa-cache-redis --sql "GET <key>"
+taproot query --datasource qa-cache-redis --sql "HGETALL <key>"
+taproot query --datasource qa-cache-redis --sql "LRANGE <key> 0 -1"
+taproot query --datasource qa-cache-redis --sql "SCAN 0 MATCH 'prefix:*' COUNT 100"
 
 # proto decode without baked defaults (per-query override)
-taproot --json query --datasource qa-cache-redis \
+taproot query --datasource qa-cache-redis \
   --sql "GET <key>" \
   --proto <MessageName> \
   --proto-root /path/to/proto/src
@@ -159,7 +159,7 @@ taproot --json query --datasource qa-cache-redis \
 ```bash
 # register. proto-root must contain the service .proto + transitive imports.
 # build/extracted-protos/main is the single-root option for Java services.
-taproot --json datasource add \
+taproot datasource add \
   --name qa-<svc>-grpc --kind grpc \
   --env qa --namespace develop --service <svc>-grpc \
   --host <svc>-grpc.develop --port 6565 \
@@ -167,14 +167,14 @@ taproot --json datasource add \
   --hint protoRoot=$HOME/proto/<svc>
 
 # doctor opens channel against the first service in the proto (or --hint probeService=<fq> to override)
-taproot --json doctor --datasource qa-<svc>-grpc
+taproot doctor --datasource qa-<svc>-grpc
 
 # discover what's callable before composing requests.
 # list / find / describe read the local proto root ONLY: no network, no VPN, no creds.
 # Run them before connectivity exists; only doctor and query open a channel.
-taproot --json grpc list --datasource qa-<svc>-grpc                  # services + methods only
-taproot --json grpc find --datasource qa-<svc>-grpc <text>            # search service/method/request/response
-taproot --json grpc describe --datasource qa-<svc>-grpc \
+taproot grpc list --datasource qa-<svc>-grpc                  # services + methods only
+taproot grpc find --datasource qa-<svc>-grpc <text>            # search service/method/request/response
+taproot grpc describe --datasource qa-<svc>-grpc \
   --service <package.Service> --method <Method>                       # expands request + response messages
 # --service/--method accept a short name or unambiguous substring.
 
@@ -186,21 +186,21 @@ taproot grpc describe --datasource qa-<svc>-grpc \
 # instead of re-running describe.
 
 # unary call. Either --request-json or --param.
-taproot --json query --datasource qa-<svc>-grpc \
+taproot query --datasource qa-<svc>-grpc \
   --sql "<package.Service/Method>" \
   --request-json '{"value":1}'
 
-taproot --json query --datasource qa-<svc>-grpc \
+taproot query --datasource qa-<svc>-grpc \
   --sql "<package.Service/Method>" \
   --param text=United
 
 # response shape: single row, value = full message. pluck nested with:
-taproot --json query --datasource qa-<svc>-grpc \
+taproot query --datasource qa-<svc>-grpc \
   --sql "..." --request-json '...' \
   --pluck data.rows.0.0.<field>
 
 # example call:
-taproot --json query --datasource qa-catalog-grpc \
+taproot query --datasource qa-catalog-grpc \
   --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}' --pluck data.rows.0.0.items
 ```
@@ -208,15 +208,15 @@ taproot --json query --datasource qa-catalog-grpc \
 - Redis writes + flushes (gated):
 ```bash
 # enable mutate on the profile (one-time, off by default)
-taproot --json datasource add --name qa-cache-redis ... --allow-mutate
+taproot datasource add --name qa-cache-redis ... --allow-mutate
 
 # write — needs --allow-mutate at query time too
-taproot --json query --datasource qa-cache-redis --sql "SET k v" --allow-mutate
-taproot --json query --datasource qa-cache-redis --sql "DEL k" --allow-mutate
-taproot --json query --datasource qa-cache-redis --sql "EXPIRE k 60" --allow-mutate
+taproot query --datasource qa-cache-redis --sql "SET k v" --allow-mutate
+taproot query --datasource qa-cache-redis --sql "DEL k" --allow-mutate
+taproot query --datasource qa-cache-redis --sql "EXPIRE k 60" --allow-mutate
 
 # FLUSH-tier requires --allow-flush IN ADDITION to --allow-mutate
-taproot --json query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
+taproot query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
 
 # default behaviour: writes blocked
 # - without --allow-mutate -> "redis command 'SET' is a mutate operation; re-run with --allow-mutate."
@@ -226,37 +226,37 @@ taproot --json query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate 
 
 - MySQL/TiDB schema discovery:
 ```bash
-taproot --json query --datasource <name> --sql "SHOW TABLES"
-taproot --json query --datasource <name> --sql "SHOW TABLES FROM <database>"
-taproot --json query --datasource <name> --sql "SHOW CREATE TABLE <table>"
-taproot --json query --datasource <name> --sql "SHOW FULL COLUMNS FROM <table>"
+taproot query --datasource <name> --sql "SHOW TABLES"
+taproot query --datasource <name> --sql "SHOW TABLES FROM <database>"
+taproot query --datasource <name> --sql "SHOW CREATE TABLE <table>"
+taproot query --datasource <name> --sql "SHOW FULL COLUMNS FROM <table>"
 ```
 
 - Cache maintenance:
 ```bash
-taproot --json cache show
-taproot --json cache prune --ttl-hours 168
+taproot cache show
+taproot cache prune --ttl-hours 168
 ```
 
 - Session-backed repeated access:
 ```bash
-taproot --json daemon start
-taproot --json session open --datasource <name>
-taproot --json session ls
+taproot daemon start
+taproot session open --datasource <name>
+taproot session ls
 ```
 
 - Learning inspection:
 ```bash
-taproot --json learn status
-taproot --json learn replay --run-id <id>
-taproot --json learn refresh-schema --datasource <name>
-taproot --json learn tables --datasource <name> --limit 50
-taproot --json learn joins --datasource <name> --limit 50
+taproot learn status
+taproot learn replay --run-id <id>
+taproot learn refresh-schema --datasource <name>
+taproot learn tables --datasource <name> --limit 50
+taproot learn joins --datasource <name> --limit 50
 ```
 
 - Repo safety and shell completion:
 ```bash
-taproot --json sanitize check-repo
+taproot sanitize check-repo
 taproot completion zsh
 taproot completion bash
 taproot completion fish
@@ -271,8 +271,8 @@ taproot completion fish
   - `meta.requestId`, `meta.sessionId`, `meta.runId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
   - `readiness`, `missing`, `nextCommand`, `target` from `self-check --agent`
-  - `nextActions`, `nextActionDetails` from `init --json` and `self-check --agent --json`
-  - `nextActions`, `nextActionDetails` from `doctor --json`
+  - `nextActions`, `nextActionDetails` from `init` and `self-check --agent`
+  - `nextActions`, `nextActionDetails` from `doctor`
 
 ## Safety
 - Keep DB operations read-only unless the user explicitly requests mutation and TapRoot policy allows it.

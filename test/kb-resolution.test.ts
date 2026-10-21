@@ -111,28 +111,28 @@ function setupKbState() {
 describe('kb resolution', () => {
   it('kb resolve returns active connection', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'qa-portforward' });
   });
 
   it('kb resolve prefers latest verified_at', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).verified_at_utc).toBe('2026-03-10T00:00:00Z');
   });
 
   it('kb resolve returns credential hints', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).db_user).toBe('orders_reader');
   });
 
   it('kb resolve returns database', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).database).toBe('orders');
   });
@@ -142,7 +142,7 @@ describe('kb resolution', () => {
     const { env } = setupKbState();
     runCli(['datasource', 'add', '--name', 'qa-orders', '--kind', 'mysql', '--credential-ref', 'qa:orders', '--env', 'qa', '--service', 'orders'], env);
     // act
-    const out = runCli(['--json', 'kb', 'resolve', '--datasource', 'qa-orders'], env);
+    const out = runCli(['kb', 'resolve', '--datasource', 'qa-orders'], env);
     // assert
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ service: 'orders', database: 'orders', db_user: 'orders_reader' });
@@ -160,7 +160,7 @@ describe('kb resolution', () => {
 
   it('kb tables lists table catalog', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'tables', '--service', 'orders'], env);
+    const out = runCli(['kb', 'tables', '--service', 'orders'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(parsed[0].tables).toEqual(['orders', 'order_items']);
@@ -188,14 +188,14 @@ describe('kb resolution', () => {
 
   it('kb tables --match alias filters table names', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'tables', '--service', 'orders', '--match', 'item'], env);
+    const out = runCli(['kb', 'tables', '--service', 'orders', '--match', 'item'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)[0].tables).toEqual(['order_items']);
   });
 
   it('kb tables --list returns flat table-name rows', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'tables', '--service', 'orders', '--list'], env);
+    const out = runCli(['kb', 'tables', '--service', 'orders', '--list'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout) as Array<{ table: string }>;
     expect(parsed.map((r) => r.table).sort()).toEqual(['order_items', 'orders']);
@@ -203,7 +203,7 @@ describe('kb resolution', () => {
 
   it('kb related shows relationships', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'related', '--service', 'orders'], env);
+    const out = runCli(['kb', 'related', '--service', 'orders'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)[0]).toMatchObject({
       from: { service: 'orders', table: 'orders' },
@@ -213,14 +213,14 @@ describe('kb resolution', () => {
 
   it('kb list-services returns unique sorted names', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'list-services'], env);
+    const out = runCli(['kb', 'list-services'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toEqual(['orders', 'payments']);
   });
 
   it('service alias resolves in kb commands', () => {
     const { env } = setupKbState();
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'legacy', '--env', 'qa'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'legacy', '--env', 'qa'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ service: 'orders', database: 'orders' });
   });
@@ -245,7 +245,7 @@ describe('kb resolution', () => {
       ]),
     );
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir };
-    const out = runCli(['--json', 'kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
+    const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
   });

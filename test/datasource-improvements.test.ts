@@ -52,7 +52,7 @@ describe('self-check audits dangling credentialRefs', () => {
             '--host', '127.0.0.1', '--port', '3306', '--database', 'd'], env);
 
     // act
-    const before = JSON.parse(runCli(['--json', 'self-check', '--agent'], env).stdout);
+    const before = JSON.parse(runCli(['self-check', '--agent'], env).stdout);
     const check = before.checks.find((c: { check: string }) => c.check === 'credential_refs');
 
     // assert
@@ -61,7 +61,7 @@ describe('self-check audits dangling credentialRefs', () => {
 
     // act — set the ref, re-check
     runCli(['creds', 'set', '--ref', 'missing-ref', '--user', 'reader', '--password', 'p'], env);
-    const after = JSON.parse(runCli(['--json', 'self-check', '--agent'], env).stdout);
+    const after = JSON.parse(runCli(['self-check', '--agent'], env).stdout);
     const okCheck = after.checks.find((c: { check: string }) => c.check === 'credential_refs');
     expect(okCheck.status).toBe('ok');
   });
@@ -73,7 +73,7 @@ describe('datasource export / import', () => {
     const { stateRoot, env } = setupState();
     runCli(['datasource', 'add', '--name', 'svc-x', '--kind', 'mysql', '--credential-ref', 'db:x',
             '--env', 'qa', '--service', 'x', '--host', '127.0.0.1', '--port', '3306', '--database', 'xdb'], env);
-    const exported = runCli(['--json', 'datasource', 'export'], env);
+    const exported = runCli(['datasource', 'export'], env);
     expect(exported.status).toBe(0);
     expect(JSON.parse(exported.stdout).data).toHaveLength(1);
     const dumpFile = path.join(stateRoot, 'dump.json');
@@ -81,12 +81,12 @@ describe('datasource export / import', () => {
 
     // act — wipe and re-import from the exported envelope
     runCli(['datasource', 'remove', 'svc-x'], env);
-    const imported = runCli(['--json', 'datasource', 'import', '--file', dumpFile], env);
+    const imported = runCli(['datasource', 'import', '--file', dumpFile], env);
 
     // assert
     expect(imported.status).toBe(0);
     const result = JSON.parse(imported.stdout).data;
     expect(result.imported).toEqual(['svc-x']);
-    expect(runCli(['--json', 'datasource', 'show', 'svc-x'], env).status).toBe(0);
+    expect(runCli(['datasource', 'show', 'svc-x'], env).status).toBe(0);
   });
 });

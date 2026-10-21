@@ -7,7 +7,7 @@ query against safety policy, executes it through a plugin, and records the run.
 
 Terms below are the ones the query execution seam turns on. The wider vocabulary (datasource,
 credential ref, connector, executor, capability, access method, KB, learning cache, schema catalog,
-run artifacts, runs ledger, session, lease, porcelain, plumbing, envelope, readiness) is defined
+run artifacts, runs ledger, session, lease, envelope, readiness) is defined
 across `references/`. Terms move here when a decision depends on the definition.
 
 **Query execution request**
@@ -38,7 +38,7 @@ durations reach the caller as `meta.phases`. Phases are the unit the report depe
 
 **Report**
 The dependency through which the module emits progress, phase timings and verbose detail, as data
-rather than as terminal output. The CLI adapter turns it into a spinner or stderr lines. The daemon
+rather than as terminal output. The CLI adapter writes it to stderr under `--verbose`. The daemon
 passes a no op. It is required rather than optional so the module body has no conditional reporting.
 
 ## Decisions

@@ -345,8 +345,8 @@ Envelope (v1):
   - `timings?`
 
 Rules:
-- Human progress output never appears in `--json` mode.
-- Correlation IDs are mandatory in JSON mode.
+- Progress output goes to stderr, and only under `--verbose`.
+- Correlation IDs are mandatory.
 - Breaking shape changes require `envelopeVersion` bump.
 
 ## 6) Command Surface Impact (Structural)

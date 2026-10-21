@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, renderTable } from '../core/output.js';
+import { printJson } from '../core/output.js';
 import { str } from '../core/strings.js';
 
 function readSummary(runsDir: string, runId: string): Record<string, unknown> {
@@ -71,10 +71,6 @@ export function registerRun(program: Command, getCtx: () => AppContext): void {
       const ctx = getCtx();
       const limit = Math.max(1, Number(opts.limit || 20));
       const rows = listRuns(ctx.paths.runsDir, limit, opts.datasource ? String(opts.datasource) : undefined);
-      if (ctx.jsonMode) {
-        printJson(rows);
-      } else {
-        console.log(renderTable(rows));
-      }
+      printJson(rows);
     });
 }
