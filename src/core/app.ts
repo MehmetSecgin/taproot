@@ -104,8 +104,9 @@ export function nextAction(errorCode: string): string {
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
     DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
-    UNKNOWN_COLUMN: 'Check column names against meta.schemaContext.tables in this envelope (the cached schema), fix the query, then retry.',
-    UNKNOWN_TABLE: 'Check table names against meta.schemaContext.tables in this envelope, or read the cached schema with "taproot --json learn ensure-schema --service <svc>", then fix the query.',
+    UNKNOWN_DATASOURCE: 'Use a datasource name suggested in the message, or pass --env and --service instead. List profiles with "taproot --jsonl datasource list".',
+    UNKNOWN_COLUMN: 'Check column names against the cached schema (meta.schemaContext.tables under --json, or "taproot --json learn ensure-schema --datasource <name>"), fix the query, then retry.',
+    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables under --json, or "taproot --jsonl learn tables --datasource <name>"), then fix the query.',
     SQL_SYNTAX: 'Fix the SQL syntax near the position the error names. The same SQL fails the same way, so do not retry it unchanged.',
     GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };

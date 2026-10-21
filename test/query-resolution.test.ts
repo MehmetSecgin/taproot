@@ -147,7 +147,8 @@ describe('query resolution', () => {
       },
     });
     const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--sql', 'SELECT 1', '--allow-discovery'], env);
-    expect(out.status).toBe(1);
+    expect(out.status).toBe(2);
+    expect(out.stderr).toContain('UNKNOWN_DATASOURCE');
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
 

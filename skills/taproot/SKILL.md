@@ -48,7 +48,8 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 One recovery action each. Do not loop. If it does not resolve, return the error plus `nextActionDetails` and stop.
 
 - `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop. `getaddrinfo ENOTFOUND` on an in-cluster hostname means the cluster network (VPN, telepresence, port-forward) is down.
-- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables`, fix the query, then retry.
+- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables` (`--json`) or `learn tables --datasource <n>` (`--jsonl`), fix the query, then retry.
+- `UNKNOWN_DATASOURCE`: no profile has that name. Use a name from the `Did you mean` list, or pass `--env` + `--service`.
 - `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
 - `error.details.shortCircuited`: the same query (or, for `CONNECTIVITY`, any query on that datasource) failed under a minute ago, so TapRoot returned that error without connecting. Fix the cause or wait `retryAfterMs`.
 - `REDUNDANT_INTROSPECTION`: read the cache via the `nextCommand` in `error.details`. Never retry the DDL query.

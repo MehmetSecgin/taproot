@@ -28,6 +28,17 @@ describe('error classification', () => {
     expect(exitCodeForClass('SQL_SYNTAX')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
+  it('maps unknown datasource names to UNKNOWN_DATASOURCE', () => {
+    expect(classifyError("Datasource resolution failed: no profile for datasource 'qa-shop-develp'. Did you mean qa-shop-develop?")).toBe('UNKNOWN_DATASOURCE');
+    expect(exitCodeForClass('UNKNOWN_DATASOURCE')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
+  it('points schema errors at a cached-schema command that works without --json', () => {
+    expect(nextAction('UNKNOWN_COLUMN')).not.toContain('this envelope');
+    expect(nextAction('UNKNOWN_COLUMN')).toContain('learn ensure-schema --datasource');
+    expect(nextAction('UNKNOWN_TABLE')).toContain('learn tables --datasource');
+  });
+
   it('keeps the class named by a code prefix', () => {
     expect(classifyError('CONNECTIVITY: short-circuited without connecting')).toBe('CONNECTIVITY');
     expect(classifyError('ACCESS_DENIED: credential missing')).toBe('ACCESS_DENIED');
