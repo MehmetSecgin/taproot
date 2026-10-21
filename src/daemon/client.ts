@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { connectivity } from '../core/error-classification.js';
+import { TAPROOT_VERSION } from '../core/version.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 
 export function defaultSocketPath(stateRoot?: string): string {
@@ -21,6 +22,7 @@ export async function rpcCall(input: {
   const timeoutMs = input.timeoutMs ?? RUNTIME_CONSTANTS.rpc.requestTimeoutMs;
   const req: RpcRequest = {
     protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
+    clientVersion: TAPROOT_VERSION,
     requestId: randomUUID(),
     method: input.method,
     params: input.params || {},

@@ -5,7 +5,7 @@ import type { ProgressReporter } from '../core/progress.js';
 import { str } from '../core/strings.js';
 import { rpcCall } from '../daemon/client.js';
 import { spawnDaemon } from '../daemon/spawn.js';
-import { RpcMethod } from '../daemon/types.js';
+import { DAEMON_VERSION_MISMATCH, RpcMethod } from '../daemon/types.js';
 import type { RpcResponse } from '../daemon/types.js';
 import { presentQueryOutcome, queryFailureError } from './query-present.js';
 import type { QueryOpts } from './query-types.js';
@@ -24,11 +24,14 @@ export async function runDaemonQuery(input: {
   };
   const callDaemon = async (): Promise<RpcResponse | undefined> => {
     try {
-      return await rpcCall({
+      const res = await rpcCall({
         timeoutMs: Math.max(RUNTIME_CONSTANTS.rpc.requestTimeoutMs, request.timeoutMs + 1000),
         method: RpcMethod.QueryExecute,
         params: { ...request },
       });
+      if (res.error?.code !== DAEMON_VERSION_MISMATCH) return res;
+      logVerbose(res.error.message);
+      return undefined;
     } catch (error) {
       const msg = str((error as Error).message);
       if (!/(ENOENT|ECONNREFUSED|EINVAL|ENAMETOOLONG|EPIPE|socket hang up)/i.test(msg)) {

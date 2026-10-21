@@ -12,8 +12,11 @@ export const RpcMethod = {
 } as const;
 export type RpcMethod = (typeof RpcMethod)[keyof typeof RpcMethod];
 
+export const DAEMON_VERSION_MISMATCH = 'DAEMON_VERSION_MISMATCH';
+
 export interface RpcRequest {
   protocolVersion: number;
+  clientVersion: string;
   requestId: string;
   method: string;
   params: Record<string, unknown>;

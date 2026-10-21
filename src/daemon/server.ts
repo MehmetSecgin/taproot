@@ -13,8 +13,10 @@ import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
 import { closeAllMysqlPools } from '../plugins-builtins/_shared/db-conn.js';
 import { rpcCall } from './client.js';
+import { handleVersionMismatch } from './handlers/daemon-status.js';
 import { HANDLERS, type HandlerDeps } from './handlers/index.js';
 import { RpcMethod } from './types.js';
+import { TAPROOT_VERSION } from '../core/version.js';
 
 export interface DaemonOptions {
   stateRoot?: string;
@@ -53,7 +55,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   fs.mkdirSync(runDir, { recursive: true });
 
   if (fs.existsSync(socketPath)) {
-    const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then(() => true, () => false);
+    const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then((res) => res.ok, () => false);
     if (alive) throw new Error(`taprootd already running on ${socketPath}`);
     fs.rmSync(socketPath, { force: true });
   }
@@ -111,7 +113,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
           const base = responseBase(req);
           let postWrite: 'stopSocket' | undefined;
           try {
-            const handler = HANDLERS.get(req.method);
+            const handler =
+              req.method === RpcMethod.DaemonStop || req.clientVersion === TAPROOT_VERSION ? HANDLERS.get(req.method) : handleVersionMismatch;
             if (!handler) {
               base.ok = false;
               base.error = { code: 'UNKNOWN_METHOD', message: `Unknown RPC method: ${req.method}` };
@@ -131,6 +134,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
           }
 
           base.meta = { ...base.meta, timings: { durationMs: Date.now() - begin } };
+          if (postWrite === 'stopSocket') releaseSocket();
           write(base);
           inFlight -= 1;
           lastActivityAt = Date.now();
@@ -166,6 +170,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) onSignal();
   }, RUNTIME_CONSTANTS.sweeper.tickMs);
 
+  let released = false;
+  const releaseSocket = (): void => {
+    if (released) return;
+    released = true;
+    fs.rmSync(socketPath, { force: true });
+    fs.rmSync(lockFile, { force: true });
+  };
+
   let stopped = false;
   const stop = async (): Promise<void> => {
     if (stopped) return;
@@ -174,8 +186,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await closeAllTeleportMysqlProxies();
     await closeAllMysqlPools();
-    if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
-    if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
+    releaseSocket();
   };
   const unregisterStop = registerCleanup(`daemon-stop:${socketPath}`, stop);
 
