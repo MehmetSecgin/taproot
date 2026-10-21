@@ -27,7 +27,6 @@ export interface QueryExecutionRequest {
   env: string;
   namespace: string;
   service: string;
-  intent?: string;
   reason?: string;
   query: string;
   params: string[];
@@ -234,7 +233,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   try {
     params = parseParamPairs(request.params || []);
     jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
-    if (!query) throw new Error('No query resolved. Provide --query/--sql.');
+    if (!query) throw new Error('No query resolved. Provide --sql.');
   } catch (error) {
     return failure(error, {});
   }
@@ -266,13 +265,11 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   );
   if (relationEdges.length) schemaContext.relations = relationEdges;
   const reason = resolveReason(request.reason);
-  const effectiveIntent = request.intent || '';
   const queryMemory = buildQueryMemory({
     ledgerDir: ctx.paths.runsLedgerDir,
     datasource: datasource.name,
     env: request.env,
     service: request.service,
-    intent: effectiveIntent,
     reason,
     sql: query,
     tables: referencedTables,
@@ -411,7 +408,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
         ledgerDir: ctx.paths.runsLedgerDir,
         result,
         datasource,
-        intent: effectiveIntent,
         reason,
         sql: query,
         tables: referencedTables,
@@ -460,7 +456,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       runId: artifacts.runId,
       sessionId,
       datasource,
-      intent: effectiveIntent,
       reason,
       sql: query,
       tables: referencedTables,

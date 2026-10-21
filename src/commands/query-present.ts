@@ -1,6 +1,6 @@
 import type { AppContext } from '../core/app.js';
 import type { QueryOutcome } from '../core/execute-query.js';
-import { printJsonPluck, renderSchemaContextFooter, renderTableSmart, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
+import { getOutputOptions, printJson, renderSchemaContextFooter, renderTableSmart, rowToObject, trimQueryJsonEnvelope } from '../core/output.js';
 import type { ProgressReporter } from '../core/progress.js';
 import { renderQueryMemoryTty } from '../core/query-memory.js';
 import { str } from '../core/strings.js';
@@ -8,7 +8,6 @@ import { str } from '../core/strings.js';
 export interface PresentOptions {
   full?: boolean;
   rowsObject?: boolean;
-  pluck?: string;
   verbose?: boolean;
 }
 
@@ -37,8 +36,9 @@ export function presentQueryOutcome(input: {
 
   const { data, meta } = outcome;
   if (ctx.jsonMode) {
-    const envelope = trimQueryJsonEnvelope({ ok: true, data, meta: { ...meta, requestId } });
-    printJsonPluck(envelope, opts.pluck ? String(opts.pluck) : undefined);
+    const { jsonl, pluck } = getOutputOptions();
+    if (jsonl && !pluck) printJson(data.rows.map((row) => rowToObject(data.columns, row)));
+    else printJson(trimQueryJsonEnvelope({ ok: true, data, meta: { ...meta, requestId } }));
     return;
   }
 

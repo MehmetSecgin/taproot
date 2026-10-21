@@ -66,8 +66,15 @@ describe('describeResolutionFailure', () => {
     expect(message).toContain("No profile in env 'qa' namespace 'test'");
   });
 
-  it('points at the list command when nothing matches', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'missing' });
-    expect(message).toBe("Datasource resolution failed: no profile for datasource 'missing'. Use --datasource or --env+--service; list profiles with taproot --json datasource list.");
+  it('suggests the closest profile names when nothing matches', () => {
+    // act
+    const message = describeResolutionFailure(profiles, { rawDs: 'qa-ordres' });
+    // assert
+    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders, stg-orders, prod-orders? Use --datasource or --env+--service; list profiles with taproot --json datasource list.");
+  });
+
+  it('points at the list command without suggestions when no name is asked', () => {
+    const message = describeResolutionFailure(profiles, { env: 'qa', service: 'missing' });
+    expect(message).toBe('Datasource resolution failed: no profile for env=qa service=missing. Use --datasource or --env+--service; list profiles with taproot --json datasource list.');
   });
 });

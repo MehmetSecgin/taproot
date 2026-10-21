@@ -13,7 +13,6 @@ export interface RunsLedgerEntry {
   env?: string;
   namespace?: string;
   service?: string;
-  intent?: string;
   reason?: string;
   fingerprint: string;
   sql: string;
@@ -34,7 +33,6 @@ export interface LedgerWriteInput {
   runId: string;
   sessionId?: string;
   datasource: DatasourceProfile;
-  intent?: string;
   reason?: string;
   sql: string;
   tables?: string[];
@@ -80,9 +78,8 @@ export function normalizeSqlForLedger(sql: string): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
-export function queryFingerprint(input: { datasource: string; intent?: string; normalizedSql: string }): string {
-  const intent = String(input.intent || 'auto').trim().toLowerCase().replace(/\s+/g, ' ');
-  return `fp_${stableHash(`${input.datasource}|${intent}|${input.normalizedSql}`)}`;
+export function queryFingerprint(input: { datasource: string; normalizedSql: string }): string {
+  return `fp_${stableHash(`${input.datasource}|auto|${input.normalizedSql}`)}`;
 }
 
 export function redactSqlForLedger(sql: string, tier: LedgerRedactionTier): string {
@@ -123,9 +120,8 @@ export function makeRunsLedgerEntry(input: LedgerWriteInput): RunsLedgerEntry {
     env: input.datasource.env || undefined,
     namespace: input.datasource.namespace || undefined,
     service: input.datasource.service || undefined,
-    intent: str(input.intent).trim() || undefined,
     reason: str(input.reason).trim() || undefined,
-    fingerprint: queryFingerprint({ datasource: input.datasource.name, intent: input.intent, normalizedSql }),
+    fingerprint: queryFingerprint({ datasource: input.datasource.name, normalizedSql }),
     sql: redactSqlForLedger(input.sql, input.redactionTier),
     normalizedSql,
     tables,
@@ -175,7 +171,6 @@ export function ledgerInputFromResult(input: {
   ledgerDir: string;
   result: QueryResult;
   datasource: DatasourceProfile;
-  intent?: string;
   reason?: string;
   sql: string;
   tables?: string[];
@@ -187,7 +182,6 @@ export function ledgerInputFromResult(input: {
     runId: input.result.runId,
     sessionId: input.sessionId,
     datasource: input.datasource,
-    intent: input.intent,
     reason: input.reason,
     sql: input.sql,
     tables: input.tables,

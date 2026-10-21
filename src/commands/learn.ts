@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { connectivity } from '../core/error-classification.js';
-import { printJson, printJsonPluck, renderRecord, renderTable } from '../core/output.js';
+import { printJson, renderRecord, renderTable } from '../core/output.js';
 import { refreshGrpcSchemaForDatasource, refreshSchemaForDatasource } from '../core/schema-refresh.js';
 import { deriveRelationCandidates, validateRelations } from '../core/relations.js';
 import { describeResolutionFailure } from '../core/resolve-datasource.js';
@@ -175,14 +175,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max tables/joins', '50')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
       const targeted = isTargetedRequest(opts);
       if (datasource?.kind === DatasourceKind.Grpc) {
         const snapshot = readGrpcSchemaSnapshot(ctx, datasource, targeted, { ...opts, detailed: Boolean(opts.detailed) });
-        if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
+        if (ctx.jsonMode) printJson(snapshot);
         else renderGrpcSnapshotTty(snapshot);
         return;
       }
@@ -199,13 +198,13 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         suggestedNextCommand: unresolvedNextCommand(opts, ctx),
       });
       if (ctx.jsonMode) {
-        printJsonPluck({
+        printJson({
           datasource: datasource?.name || null,
           tables: snapshot.tables,
           joins: snapshot.joins,
           emptyReason: state.emptyReason,
           suggestedNextCommand: state.suggestedNextCommand,
-        }, opts.pluck ? String(opts.pluck) : undefined);
+        });
       } else {
         if (!snapshot.tables.length) {
           printEmptyState('tables', state);
@@ -256,20 +255,19 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--limit <n>', 'max tables/joins', '50')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
     .option('--refresh', 'force a fresh introspection even when the service schema cache is already populated (use after migrations that change columns or indexes)', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
       const preResolved = await resolveDatasource(ctx, opts);
       if (preResolved?.kind === DatasourceKind.Grpc) {
         const snapshot = await ensureGrpcSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
-        if (ctx.jsonMode) printJsonPluck(snapshot, opts.pluck ? String(opts.pluck) : undefined);
+        if (ctx.jsonMode) printJson(snapshot);
         else renderGrpcSnapshotTty(snapshot);
         return;
       }
       const out = await ensureSchemaSnapshot(ctx, { ...opts, detailed, refresh: Boolean(opts.refresh) });
       if (ctx.jsonMode) {
-        printJsonPluck(out, opts.pluck ? String(opts.pluck) : undefined);
+        printJson(out);
       } else {
         if (!out.tables.length) {
           printEmptyState('tables', { emptyReason: out.emptyReason, suggestedNextCommand: out.suggestedNextCommand });
@@ -319,7 +317,6 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--service <service>')
     .option('--limit <n>', 'max rows', '200')
     .option('--detailed', 'include columnStats, sightings, confidence, source, and lastSeenAt', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. tables, joins, tables[0].indexes)')
     .action(async (opts) => {
       const ctx = getCtx();
       const datasource = await resolveDatasource(ctx, opts);
@@ -358,7 +355,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         return out;
       });
       if (ctx.jsonMode) {
-        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
+        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
       } else {
         if (!sliced.length) {
           printEmptyState('tables', state);
@@ -423,7 +420,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         return out;
       });
       if (ctx.jsonMode) {
-        printJsonPluck({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand }, opts.pluck ? String(opts.pluck) : undefined);
+        printJson({ datasource: datasource?.name || null, rows: projected, emptyReason: state.emptyReason, suggestedNextCommand: state.suggestedNextCommand });
       } else {
         if (!sliced.length) {
           printEmptyState('joins', state);
@@ -453,7 +450,6 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
     .option('--include-existing', 'also include candidates already present in relations.json', false)
     .option('--promote', 'write the listed candidates into KB relations.json (marked source=derived)', false)
     .option('--limit <n>', 'max rows', '100')
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const existingIds = new Set(ctx.kbStore.typedRelations().map((rel) => rel.id));
@@ -469,7 +465,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
       candidates = candidates.slice(0, limit);
       const promoted = opts.promote && candidates.length ? ctx.kbStore.promoteRelations(candidates) : null;
       if (ctx.jsonMode) {
-        printJsonPluck({ candidates, promoted }, opts.pluck ? String(opts.pluck) : undefined);
+        printJson({ candidates, promoted });
         return;
       }
       if (!candidates.length) {

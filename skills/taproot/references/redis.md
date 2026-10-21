@@ -3,7 +3,7 @@
 Treat `kind: redis` datasources as cache lookups, not SQL queries. There is no learned schema, no `learn ensure-schema`, and no partition checks. Redis bypasses the relational learning paths entirely.
 
 ## Querying
-- Pass the raw Redis command as `--query`, for example `--query "GET <key>"`, `--query "HGETALL <key>"`, `--query "SCAN 0 COUNT 50"`, `--query "INFO keyspace"`. Quote keys with spaces or special characters; the plugin tokenizes shell-style.
+- Pass the raw Redis command as `--sql`, for example `--sql "GET <key>"`, `--sql "HGETALL <key>"`, `--sql "SCAN 0 COUNT 50"`, `--sql "INFO keyspace"`. Quote keys with spaces or special characters; the plugin tokenizes shell-style.
 - Result shape: `data.columns = ["value"]`, one row per reply line. Multi-bulk replies (`HGETALL`, `LRANGE`, `SCAN`) produce multiple rows, alternating field and value lines for hashes. Access via `data.rows[i][0]` (positional, `data.rowsForm: "array"`).
 - `taproot doctor --datasource <name>` runs `PING -> PONG` plus any wired connectors (typically `openvpn`).
 

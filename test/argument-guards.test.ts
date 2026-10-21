@@ -60,10 +60,10 @@ describe('CLI argument guards classify as BAD_INPUT', () => {
     expectBadInput(['--json', 'grpc', 'describe'], '--proto-root or --datasource required');
   });
 
-  it('points a positional query argument at --query and --datasource', () => {
+  it('points a positional query argument at --sql and --datasource', () => {
     expectBadInput(
       ['--json', 'query', 'demo-db', 'SELECT 1'],
-      'Pass the query text with --query "<sql>" (alias --sql) and the datasource with --datasource <name>',
+      'Pass the query text with --sql "<query>" and the datasource with --datasource <name>',
     );
   });
 

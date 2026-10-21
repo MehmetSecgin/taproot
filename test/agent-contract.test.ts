@@ -99,7 +99,7 @@ describe('agent JSON contract', () => {
     const startOut = runCli(['daemon', 'start'], env);
     expect(startOut.status).toBe(0);
     try {
-      const out = runCli(['--json', 'query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'], env);
+      const out = runCli(['--json', 'query', '--env', 'prod', '--service', 'missing', '--sql', 'SELECT 1 AS ok'], env);
       expect(out.status).not.toBe(0);
       const parsed = errorEnvelopeSchema.parse(JSON.parse(out.stdout));
       expect(parsed.error.code).toBe('DETERMINISTIC_REQUIRED');
@@ -124,7 +124,7 @@ describe('agent JSON contract', () => {
       TAPROOT_MASTER_KEY: 'test-master-key',
       TAPROOT_FORCE_DIRECT: '1',
     };
-    const out = runCli(['--json', 'query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'], env);
+    const out = runCli(['--json', 'query', '--env', 'prod', '--service', 'missing', '--sql', 'SELECT 1 AS ok'], env);
     expect(out.status).not.toBe(0);
     const parsed = errorEnvelopeSchema.parse(JSON.parse(out.stdout));
     expect(parsed.error.code).toBe('DETERMINISTIC_REQUIRED');

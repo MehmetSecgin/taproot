@@ -28,7 +28,7 @@ taproot --json init datasource --env qa --service orders
 taproot --json creds set --ref qa:orders --user reader --password <password>
 taproot --json self-check --agent --datasource qa-orders
 taproot --json doctor --datasource qa-orders --connect
-taproot --json query --datasource qa-orders --query "SELECT 1 AS ok"
+taproot --json query --datasource qa-orders --sql "SELECT 1 AS ok"
 ```
 
 ## Setup And Credentials
@@ -72,8 +72,8 @@ taproot --json connector status --datasource <name> --connector teleport --all -
 ## Common Commands
 - Preferred order for routine query tasks:
 ```bash
-# known datasource + explicit SQL. --intent is a ledger label, not a query source.
-taproot --json query --datasource <name> --query "<sql>" --intent "<intent>"
+# known datasource + explicit SQL. --reason is a ledger note, not a query source.
+taproot --json query --datasource <name> --sql "<sql>" --reason "<why>"
 ```
 
 - Avoid this by default:
@@ -108,15 +108,15 @@ taproot --json kb list-services
 
 - Query explicit SQL:
 ```bash
-taproot --json query --datasource <name> --query "SELECT 1 AS ok"
-taproot --json query --env <env> --service <service> --query "SELECT 1 AS ok"
-taproot --json query --env <env> --service <service> --allow-discovery --query "SELECT 1 AS ok"
+taproot --json query --datasource <name> --sql "SELECT 1 AS ok"
+taproot --json query --env <env> --service <service> --sql "SELECT 1 AS ok"
+taproot --json query --env <env> --service <service> --allow-discovery --sql "SELECT 1 AS ok"
 ```
 
 - Query timeout:
 ```bash
 # default is 15000ms; raise only when a slower query is intentional
-taproot --json query --datasource <name> --timeout 30000 --query "SELECT 1 AS ok"
+taproot --json query --datasource <name> --timeout 30000 --sql "SELECT 1 AS ok"
 ```
 
 - Redis / Dragonfly read commands:
@@ -136,17 +136,17 @@ taproot --json datasource add \
 taproot --json doctor --datasource qa-cache-redis
 
 # basic reads. Pass the raw Redis command verbatim.
-taproot --json query --datasource qa-cache-redis --query "DBSIZE"
-taproot --json query --datasource qa-cache-redis --query "INFO keyspace"
-taproot --json query --datasource qa-cache-redis --query "TYPE <key>"
-taproot --json query --datasource qa-cache-redis --query "GET <key>"
-taproot --json query --datasource qa-cache-redis --query "HGETALL <key>"
-taproot --json query --datasource qa-cache-redis --query "LRANGE <key> 0 -1"
-taproot --json query --datasource qa-cache-redis --query "SCAN 0 MATCH 'prefix:*' COUNT 100"
+taproot --json query --datasource qa-cache-redis --sql "DBSIZE"
+taproot --json query --datasource qa-cache-redis --sql "INFO keyspace"
+taproot --json query --datasource qa-cache-redis --sql "TYPE <key>"
+taproot --json query --datasource qa-cache-redis --sql "GET <key>"
+taproot --json query --datasource qa-cache-redis --sql "HGETALL <key>"
+taproot --json query --datasource qa-cache-redis --sql "LRANGE <key> 0 -1"
+taproot --json query --datasource qa-cache-redis --sql "SCAN 0 MATCH 'prefix:*' COUNT 100"
 
 # proto decode without baked defaults (per-query override)
 taproot --json query --datasource qa-cache-redis \
-  --query "GET <key>" \
+  --sql "GET <key>" \
   --proto <MessageName> \
   --proto-root /path/to/proto/src
 
@@ -188,21 +188,21 @@ taproot grpc describe --datasource qa-<svc>-grpc \
 
 # unary call. Either --request-json or --param.
 taproot --json query --datasource qa-<svc>-grpc \
-  --query "<package.Service/Method>" \
+  --sql "<package.Service/Method>" \
   --request-json '{"value":1}'
 
 taproot --json query --datasource qa-<svc>-grpc \
-  --query "<package.Service/Method>" \
+  --sql "<package.Service/Method>" \
   --param text=United
 
 # response shape: single row, value = full message. pluck nested with:
 taproot --json query --datasource qa-<svc>-grpc \
-  --query "..." --request-json '...' \
+  --sql "..." --request-json '...' \
   --pluck data.rows.0.0.<field>
 
 # example call:
 taproot --json query --datasource qa-catalog-grpc \
-  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}' --pluck data.rows.0.0.items
 ```
 
@@ -212,12 +212,12 @@ taproot --json query --datasource qa-catalog-grpc \
 taproot --json datasource add --name qa-cache-redis ... --allow-mutate
 
 # write — needs --allow-mutate at query time too
-taproot --json query --datasource qa-cache-redis --query "SET k v" --allow-mutate
-taproot --json query --datasource qa-cache-redis --query "DEL k" --allow-mutate
-taproot --json query --datasource qa-cache-redis --query "EXPIRE k 60" --allow-mutate
+taproot --json query --datasource qa-cache-redis --sql "SET k v" --allow-mutate
+taproot --json query --datasource qa-cache-redis --sql "DEL k" --allow-mutate
+taproot --json query --datasource qa-cache-redis --sql "EXPIRE k 60" --allow-mutate
 
 # FLUSH-tier requires --allow-flush IN ADDITION to --allow-mutate
-taproot --json query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
+taproot --json query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
 
 # default behaviour: writes blocked
 # - without --allow-mutate -> "redis command 'SET' is a mutate operation; re-run with --allow-mutate."
@@ -227,10 +227,10 @@ taproot --json query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutat
 
 - MySQL/TiDB schema discovery:
 ```bash
-taproot --json query --datasource <name> --query "SHOW TABLES"
-taproot --json query --datasource <name> --query "SHOW TABLES FROM <database>"
-taproot --json query --datasource <name> --query "SHOW CREATE TABLE <table>"
-taproot --json query --datasource <name> --query "SHOW FULL COLUMNS FROM <table>"
+taproot --json query --datasource <name> --sql "SHOW TABLES"
+taproot --json query --datasource <name> --sql "SHOW TABLES FROM <database>"
+taproot --json query --datasource <name> --sql "SHOW CREATE TABLE <table>"
+taproot --json query --datasource <name> --sql "SHOW FULL COLUMNS FROM <table>"
 ```
 
 - Cache maintenance:

@@ -22,10 +22,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--env <env>')
     .option('--namespace <namespace>')
     .option('--service <service>')
-    .option('--intent <intent>')
-    .option('--reason <reason>')
-    .option('--query <native>')
-    .option('--sql <native>', 'alias for --query (raw native query/SQL)')
+    .option('--reason <reason>', 'why this query runs; recorded in the runs ledger for future agents')
+    .option('--sql <native>', 'native query text: SQL, Redis command, or gRPC Service/Method')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
@@ -34,7 +32,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option('--full', 'render full result table even when result is large (skip auto-summary)', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope (e.g. data.rows, data.columns, meta.schemaContext, error.details). Full record is still persisted to ~/.taproot/runs/<runId>/summary.json — use "taproot --json run show --run-id <id> --pluck <other-path>" to fetch other fields later.')
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
     .option('--proto-root <dir>', 'directory containing .proto sources used for decoding. Loaded recursively. Defaults to resolverHints.protoRoot on the datasource if set.')
     .option('--allow-flush', 'permit Redis FLUSH-tier commands (FLUSHDB/FLUSHALL/SWAPDB/MIGRATE). Required in addition to --allow-mutate. Off by default.', false)
@@ -44,7 +41,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       '--timeout <ms>',
       `abort queries that run longer than this (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs}; overridable via defaults.query.timeoutMs in runtime config)`,
     )
-    .option('--timeout-ms <ms>', 'deprecated alias for --timeout')
     .option(
       '--tz <offset|name>',
       'session time zone for WHERE timestamp literals and rendered TIMESTAMP columns. Defaults to UTC (+00:00). Accepts an offset (e.g. +05:30) or IANA name (e.g. Europe/Berlin).',
@@ -58,18 +54,13 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .action(async (opts: QueryOpts, command: Command) => {
       if (command.args.length > 0) {
         throw badInput(
-          `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --query "<sql>" (alias --sql) and the datasource with --datasource <name>, e.g. taproot query --datasource demo-db --query "SELECT 1".`,
+          `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --sql "<query>" and the datasource with --datasource <name>, e.g. taproot query --datasource demo-db --sql "SELECT 1".`,
         );
       }
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
-      if (opts.sql && !opts.query) opts.query = opts.sql;
-      if (opts.sql && opts.query && opts.sql !== opts.query) {
-        throw badInput('pass either --query or --sql, not both with different values.');
-      }
       const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
-      const rawTimeout = opts.timeout ?? opts.timeoutMs;
-      const timeoutMs = parseTimeoutMs(rawTimeout, timeoutDefault);
+      const timeoutMs = parseTimeoutMs(opts.timeout, timeoutDefault);
       const target = deriveQueryTarget(ctx, opts);
       const env = target.env;
       const policy = environmentPolicy(ctx, env);
@@ -81,8 +72,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         verbose: ctx.verbose,
         plainUpdates: !ctx.jsonMode && process.stderr.isTTY,
       });
-      if (opts.explain && !opts.query) {
-        throw badInput('--explain requires --query (raw SQL).');
+      if (opts.explain && !opts.sql) {
+        throw badInput('--explain requires --sql.');
       }
       const request: QueryExecutionRequest = {
         datasource: opts.datasource,
@@ -90,9 +81,8 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         env,
         namespace: target.namespace,
         service: target.service,
-        intent: opts.intent,
         reason: opts.reason,
-        query: opts.query || '',
+        query: opts.sql || '',
         params: opts.param || [],
         allowDiscovery,
         allowMutate: Boolean(opts.allowMutate),

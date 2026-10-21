@@ -3,7 +3,7 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
-import { renderTable, printJson, printJsonPluck } from '../core/output.js';
+import { renderTable, printJson } from '../core/output.js';
 import { createProgress } from '../core/progress.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
@@ -244,7 +244,7 @@ function addExecutorNextActions(
     case 'executor_query_timeout':
       addActionForCheck(
         actions,
-        `taproot query --datasource ${datasource.name} --query '<sql>' --timeout-ms <ms>`,
+        `taproot query --datasource ${datasource.name} --sql '<sql>' --timeout <ms>`,
         ACTION_PRIORITIES.timeoutRetry,
         orderRef,
         check,
@@ -401,7 +401,6 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--connect', 'run connector connect steps during doctor', false)
     .option('--verbose-detail', 'print full check details in table mode', false)
     .option('--all', 'print all checks in table mode (default: warnings/failures only)', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope')
     .action(async (opts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
@@ -436,14 +435,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
             const nextActionDetails = unresolvedTargetNextActions(target);
             progress.fail(`no datasource profile for ${unresolvedTargetLabel(target)}`);
             if (ctx.jsonMode) {
-              printJsonPluck({
+              printJson({
                 datasource: null,
                 plugin: null,
                 warnings,
                 checks,
                 nextActionDetails,
                 summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
-              }, opts.pluck ? String(opts.pluck) : undefined);
+              });
             } else {
               console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
               console.log('Next actions:');
@@ -482,14 +481,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               });
               const nextActionDetails = misconfiguredDatasourceNextActions(datasource);
               if (ctx.jsonMode) {
-                printJsonPluck({
+                printJson({
                   datasource: datasource.name,
                   plugin: plugin.manifest.name,
                   warnings,
                   checks,
                   nextActionDetails,
                   summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
-                }, opts.pluck ? String(opts.pluck) : undefined);
+                });
               } else {
                 console.log(renderTable(checks.map((c) => ({ check: c.check, status: c.status, detail: c.detail }))));
                 console.log('Next actions:');
@@ -537,14 +536,14 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         const nextActionDetails = doctorNextActions(datasource, checks);
 
         if (ctx.jsonMode) {
-          printJsonPluck({
+          printJson({
             datasource: datasource.name,
             plugin: plugin.manifest.name,
             warnings,
             checks,
             nextActionDetails,
             summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
-          }, opts.pluck ? String(opts.pluck) : undefined);
+          });
         } else {
           if (warnings.length) progress.warn(`warnings: ${warnings.join(' | ')}`);
           const summary = `doctor summary: ok=${okCount} warn=${warnCount} fail=${failCount} total=${checks.length}`;

@@ -3,6 +3,7 @@ import type { AppContext } from '../src/core/app.js';
 import type { QueryOutcome } from '../src/core/execute-query.js';
 import type { ProgressReporter } from '../src/core/progress.js';
 import { presentQueryOutcome, queryFailureError } from '../src/commands/query-present.js';
+import { setOutputOptions } from '../src/core/output.js';
 
 function fakeProgress(): ProgressReporter & { calls: string[] } {
   const calls: string[] = [];
@@ -43,6 +44,7 @@ function successOutcome(overrides: Partial<Extract<QueryOutcome, { ok: true }>> 
 
 afterEach(() => {
   vi.restoreAllMocks();
+  setOutputOptions({ jsonl: false });
 });
 
 describe('presentQueryOutcome in json mode', () => {
@@ -77,14 +79,35 @@ describe('presentQueryOutcome in json mode', () => {
       writes.push(String(chunk));
       return true;
     });
+    setOutputOptions({ pluck: 'data.columns', jsonl: false });
     presentQueryOutcome({
       outcome: successOutcome(),
       ctx: ctxWith(true),
-      opts: { pluck: 'data.columns' },
+      opts: {},
       progress: fakeProgress(),
       requestId: 'req-9',
     });
     expect(JSON.parse(writes.join(''))).toEqual(['id', 'name']);
+  });
+
+  it('prints one row object per line in jsonl mode', () => {
+    // arrange
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    setOutputOptions({ jsonl: true });
+    // act
+    presentQueryOutcome({
+      outcome: successOutcome({ data: { ...(successOutcome() as Extract<QueryOutcome, { ok: true }>).data, rows: [[1, 'alpha'], [2, 'beta']] } }),
+      ctx: ctxWith(true),
+      opts: {},
+      progress: fakeProgress(),
+      requestId: 'req-9',
+    });
+    // assert
+    expect(writes.join('')).toBe('{"id":1,"name":"alpha"}\n{"id":2,"name":"beta"}\n');
   });
 
   it('prints no table in json mode', () => {

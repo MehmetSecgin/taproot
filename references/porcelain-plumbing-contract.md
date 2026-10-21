@@ -18,7 +18,8 @@ The split is per **invocation**, not per **command name**. Most commands have bo
 ### Plumbing guarantees
 - Stable envelope shape (`ok`, `data`, `meta`, `error`) — see [json-envelope-contract.md](json-envelope-contract.md).
 - Stable exit code taxonomy: `0` success, non-zero failure with `error.code` set.
-- `--pluck <dot-path>` projects a subtree of the envelope for token-efficient agent consumption (e.g. `--pluck data.rows`, `--pluck data.tables[0].indexes`).
+- `--pluck <dot-path>` projects a subtree of the envelope for token-efficient agent consumption (e.g. `--pluck data.rows`, `--pluck data.tables[0].indexes`). It is a global option: every plumbing command accepts it, and it implies `--json`. On failure it prints only the `error` object, to stderr.
+- `--jsonl` is a global option that prints JSON lines: `query` rows as one object per line, any other array one item per line, anything else as one line. On failure it prints one `CODE: message` line (plus a `nextAction:` line when present) to stderr and exits non-zero.
 - New fields may be added; existing fields will not change type or be silently renamed within a major version.
 - `meta.requestId` is included for any command that goes through the daemon.
 
@@ -38,7 +39,6 @@ The split is per **invocation**, not per **command name**. Most commands have bo
 Legend:
 - **P** — porcelain (human) supported
 - **L** — plumbing (`--json`) supported and contract-stable
-- **L+pluck** — plumbing with `--pluck` projection
 - **—** — not applicable
 
 | Command | P | L | Notes |
@@ -46,11 +46,11 @@ Legend:
 | `init` | P | L | First-run bootstrap. `init --check` returns readiness without writing. |
 | `init datasource` | P | L | KB-backed datasource bootstrap and repair. |
 | `self-check` | P | L | `--agent` for machine-readable readiness states. Target-aware via `--datasource` / `--env`+`--service`. |
-| `doctor` | P | L+pluck | Pre-flight diagnostics. Structured `nextActionDetails` in plumbing mode. |
+| `doctor` | P | L | Pre-flight diagnostics. Structured `nextActionDetails` in plumbing mode. |
 | `query` | P | L | Primary execution path. Daemon-routed includes `meta.requestId`, `meta.runId`, `meta.sessionId`. |
-| `datasource list/show/add/remove/resolve/import/export` | P | L+pluck | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import --file` bulk-adds profiles; `export` round-trips with it. |
-| `kb resolve-* / tables / related / list-services` | P | L+pluck | Knowledge-base resolvers; safe-by-default read paths. |
-| `learn status/schema/tables/joins/ensure-schema/refresh-schema` | P | L+pluck | Learning cache inspection and maintenance. |
+| `datasource list/show/add/remove/resolve/import/export` | P | L | All emit the `{ok,data,...}` envelope; pluck paths are `data`-prefixed. `import --file` bulk-adds profiles; `export` round-trips with it. |
+| `kb resolve-* / tables / related / list-services` | P | L | Knowledge-base resolvers; safe-by-default read paths. |
+| `learn status/schema/tables/joins/ensure-schema/refresh-schema` | P | L | Learning cache inspection and maintenance. |
 | `cache show/prune/clear` | P | L | Cache maintenance. |
 | `creds set/show/list/unset/migrate-to-fallback` | P | — | Interactive by design; credential material never returned in plumbing JSON. |
 | `connector status/setup` | P | L | `status` plumbing-safe. `setup` may prompt in porcelain. |
@@ -77,7 +77,7 @@ Decision tree:
 For query execution:
 
 ```bash
-taproot --json query --datasource <name> --query "<sql>" --pluck data.rows
+taproot --json query --datasource <name> --sql "<sql>" --pluck data.rows
 ```
 
 For schema discovery without re-querying:
@@ -98,6 +98,5 @@ taproot --json learn joins --datasource <name>
 For every command listed with **L** above:
 - One test asserting `ok=true` envelope shape on success path.
 - One test asserting `ok=false` envelope shape and `error.code` on a representative failure path.
-- For **L+pluck** commands: one test asserting `--pluck` returns the projected subtree.
 
 These tests live alongside the command's existing suite under `test/`.

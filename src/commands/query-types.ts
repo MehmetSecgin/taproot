@@ -4,9 +4,7 @@ export interface QueryOpts {
   env?: string;
   namespace?: string;
   service?: string;
-  intent?: string;
   reason?: string;
-  query?: string;
   sql?: string;
   param?: string[];
   allowDiscovery?: boolean;
@@ -16,14 +14,12 @@ export interface QueryOpts {
   explain?: boolean;
   full?: boolean;
   rowsObject?: boolean;
-  pluck?: string;
   proto?: string;
   protoRoot?: string;
   allowFlush?: boolean;
   requestJson?: string;
   skipProtoValidate?: boolean;
   timeout?: string;
-  timeoutMs?: string;
   tz?: string;
   jsonExtract?: string[];
 }

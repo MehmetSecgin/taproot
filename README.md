@@ -82,7 +82,7 @@ taproot creds set --ref dev:orders --user reader --password '***'
 taproot doctor --datasource dev-orders --connect
 
 # read query
-taproot query --datasource dev-orders --query "SELECT 1 AS ok"
+taproot query --datasource dev-orders --sql "SELECT 1 AS ok"
 ```
 
 ### Redis (read-only)
@@ -109,9 +109,9 @@ taproot creds set --ref qa:redis:cache --user default --password '***'
 taproot doctor --datasource qa-cache-redis
 
 # read query: pass any Redis read command as the query string
-taproot --json query --datasource qa-cache-redis --query "DBSIZE"
-taproot --json query --datasource qa-cache-redis --query "GET user:session:abc123"
-taproot --json query --datasource qa-cache-redis --query "SCAN 0 COUNT 10"
+taproot --json query --datasource qa-cache-redis --sql "DBSIZE"
+taproot --json query --datasource qa-cache-redis --sql "GET user:session:abc123"
+taproot --json query --datasource qa-cache-redis --sql "SCAN 0 COUNT 10"
 ```
 
 Redis plugin notes:
@@ -141,11 +141,11 @@ taproot datasource add \
   --allow-mutate
 
 # 2) write requires --allow-mutate at query time too
-taproot --json query --datasource qa-cache-redis --query "SET taproot:test:key hello" --allow-mutate
-taproot --json query --datasource qa-cache-redis --query "DEL taproot:test:key" --allow-mutate
+taproot --json query --datasource qa-cache-redis --sql "SET taproot:test:key hello" --allow-mutate
+taproot --json query --datasource qa-cache-redis --sql "DEL taproot:test:key" --allow-mutate
 
 # 3) FLUSHDB requires --allow-flush AS WELL AS --allow-mutate
-taproot --json query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
+taproot --json query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
 ```
 
 Proto-decoding example:
@@ -153,7 +153,7 @@ Proto-decoding example:
 ```bash
 # Per-query
 taproot --json query --datasource qa-order-cache \
-  --query "GET order:v2:1001" \
+  --sql "GET order:v2:1001" \
   --proto OrderProto \
   --proto-root ~/proto/order-cache
 
@@ -168,7 +168,7 @@ taproot datasource add \
   --hint protoMessage=OrderProto
 
 taproot --json query --datasource qa-order-cache \
-  --query "MGET order:v2:1001 order:v2:1002"
+  --sql "MGET order:v2:1001 order:v2:1002"
 # rows: [[{order_id:"1001", status:"OPEN"}], [{order_id:"1002", status:"OPEN"}]]
 ```
 
@@ -222,20 +222,20 @@ taproot --json grpc describe --datasource qa-catalog-grpc \
 taproot grpc describe --datasource qa-catalog-grpc \
   --method getItemsByParent --skeleton
 
-# unary call: --query is "<package.Service/Method>". Request body in JSON:
+# unary call: --sql is "<package.Service/Method>". Request body in JSON:
 taproot --json query --datasource qa-catalog-grpc \
-  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}'
 
 # or build the request from --param key=value pairs (numbers/booleans coerced):
 taproot --json query --datasource qa-catalog-grpc \
-  --query "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
+  --sql "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
   --param text=Widget
 
 # client-streaming or bidi call: one array element per request message.
 # Returns one row per response message (columns seq, value):
 taproot --json query --datasource qa-catalog-grpc \
-  --query "com.example.catalog.v1.CatalogService/lookupItems" \
+  --sql "com.example.catalog.v1.CatalogService/lookupItems" \
   --request-json '[{"id":1},{"id":2},{"id":3}]'
 ```
 
@@ -274,14 +274,14 @@ For MySQL/TiDB/Postgres datasources TapRoot runs `SET time_zone = '+00:00'` (Pos
 ```bash
 # both the literals and the rendered rows are UTC
 taproot --json query --datasource prod-orders \
-  --query "SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-06-24 17:00:00' AND '2026-06-24 17:05:00'"
+  --sql "SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-06-24 17:00:00' AND '2026-06-24 17:05:00'"
 ```
 
 Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` or an IANA name like `Europe/Berlin`), or per-datasource via `resolverHints.timeZone`, or globally via `defaults.query.timeZone` in runtime config. Resolution order: `--tz` > datasource hint > config default > UTC.
 
 ### Query timeout
 
-Queries abort after `--timeout <ms>` (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate). `--timeout-ms` is a deprecated alias.
+Queries abort after `--timeout <ms>` (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate).
 
 ### Extracting JSON without engine-specific SQL
 
@@ -289,13 +289,24 @@ Prefer selecting raw JSON columns and extracting client-side with `--json-extrac
 
 ```bash
 taproot --json query --datasource prod-orders \
-  --query "SELECT id, payload FROM orders LIMIT 5" \
+  --sql "SELECT id, payload FROM orders LIMIT 5" \
   --json-extract payload:order.status --json-extract payload:order.total
 ```
 
-### Failures under `--pluck`
+### Output for agents: `--jsonl` and `--pluck`
 
-When a query fails, `--pluck` does **not** emit a success-shaped value on stdout. The error envelope is written to stderr and the process exits non-zero, so a failure can never be mistaken for an empty result by a downstream `data.rows` consumer.
+Both are global options that every command accepts.
+
+```bash
+taproot --jsonl query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT 3"
+{"id":1,"status":"open"}
+{"id":2,"status":"paid"}
+{"id":3,"status":"open"}
+```
+
+- `--jsonl` prints query rows as one JSON object per line. Other commands print an array one item per line and anything else as one line. On failure stdout stays empty and stderr gets one `CODE: message` line, plus `nextAction: ...` when there is one.
+- `--pluck <dot.path>` implies `--json` and prints only that subtree of the envelope (`data.rows`, `meta.schemaContext`). On failure it prints only the `error` object to stderr.
+- Both exit non-zero on failure, so empty stdout plus a non-zero exit is never mistaken for zero rows.
 
 ---
 
@@ -407,7 +418,7 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot discover <kb|kubectl|teleport> --env <env> [--namespace <ns>] [--service <s>] [--host-pattern service-name|tiproxy] [--shared-credential-ref] [--no-vpn] [--apply] [--force]`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
-- `taproot query --datasource <name> --query <sql> [--param k=v] [--intent <label>] [--allow-discovery]`
+- `taproot query --datasource <name> --sql <sql> [--param k=v] [--reason <why>] [--allow-discovery]`
 - `taproot datasource <list|show|add|remove|resolve>`
 - `taproot connector <setup|status>`
 - `taproot kb <resolve-connection|resolve-credentials|resolve-database-name|tables|related|list-services>`
@@ -477,7 +488,7 @@ taproot datasource add \
   --connector-ref teleport=tsh:work
 
 taproot doctor --datasource production-analytics
-taproot query --datasource production-analytics --query "SELECT COUNT(*) AS row_count FROM sample_records WHERE record_id = 12345;"
+taproot query --datasource production-analytics --sql "SELECT COUNT(*) AS row_count FROM sample_records WHERE record_id = 12345;"
 ```
 
 ---

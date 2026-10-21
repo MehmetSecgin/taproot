@@ -53,7 +53,7 @@ Implication:
 ### 3.3 Query Lifecycle (Current)
 `taproot query ...`:
 1. Resolve datasource from explicit profile, env/service, learning cache, or KB bootstrap.
-2. Resolve query from `--query`.
+2. Resolve query from `--sql`.
 3. Enforce mutation policy (`src/core/safety.ts`).
 4. Execute connector `connect` hooks.
 5. Execute datasource plugin query.

@@ -64,7 +64,7 @@ taproot --json doctor --datasource pilot-grpc
 
 # 5. the call itself, as printed by --skeleton.
 taproot --json query --datasource pilot-grpc \
-  --query "taproot.test.ProfileService/GetProfile" \
+  --sql "taproot.test.ProfileService/GetProfile" \
   --request-json '{"id":"<id>"}' \
   --pluck data.rows.0.0
 ```
@@ -75,7 +75,7 @@ taproot --json init
 taproot --json init datasource --env qa --service orders
 taproot --json creds set --ref qa:orders --user reader --password <password>
 taproot --json doctor --datasource qa-orders --connect
-taproot --json query --datasource qa-orders --query "SELECT 1 AS ok"
+taproot --json query --datasource qa-orders --sql "SELECT 1 AS ok"
 # data.rows is positional: data.rows[i][data.columns.indexOf("ok")] === 1
 ```
 

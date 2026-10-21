@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, printJsonPluck, renderTable } from '../core/output.js';
+import { printJson, renderTable } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
 
@@ -14,7 +14,6 @@ interface BenchScenario {
   service?: string;
   namespace?: string;
   query?: string;
-  intent?: string;
   param?: string[];
   iterations?: number;
   allowMutate?: boolean;
@@ -124,7 +123,6 @@ async function runScenario(scenario: BenchScenario, iterations: number, timeoutM
           service: scenario.service,
           namespace: scenario.namespace,
           query: scenario.query,
-          intent: scenario.intent,
           allowMutate: Boolean(scenario.allowMutate),
           timeoutMs,
           param: scenario.param || [],
@@ -166,23 +164,21 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
     .command('bench')
     .description('Benchmark query latency with phase timing breakdown (resolve/connect/execute)')
     .option('--datasource <name>', 'datasource to benchmark (alternative: --scenario <file>)')
-    .option('--query <native>', 'query to run each iteration')
-    .option('--intent <intent>', 'intent label recorded in the runs ledger')
+    .option('--sql <native>', 'query to run each iteration')
     .option('--env <env>')
     .option('--service <service>')
     .option('--namespace <namespace>')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--iterations <n>', 'iterations per scenario', '10')
     .option('--scenario <file>', 'JSON file with { iterations, scenarios: [...] }')
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope')
     .option(
-      '--timeout-ms <ms>',
+      '--timeout <ms>',
       `per-query timeout (default ${RUNTIME_CONSTANTS.query.defaultTimeoutMs})`,
       String(RUNTIME_CONSTANTS.query.defaultTimeoutMs),
     )
     .action(async (opts) => {
       const ctx = getCtx();
-      const timeoutMs = Math.max(1, Number(opts.timeoutMs) || RUNTIME_CONSTANTS.query.defaultTimeoutMs);
+      const timeoutMs = Math.max(1, Number(opts.timeout) || RUNTIME_CONSTANTS.query.defaultTimeoutMs);
       const cliIterations = Math.max(1, Number(opts.iterations) || 10);
 
       let scenarios: BenchScenario[];
@@ -195,8 +191,8 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
         if (!opts.datasource && !(opts.env && opts.service)) {
           throw badInput('--datasource or --env+--service required (or use --scenario <file>).');
         }
-        if (!opts.query) {
-          throw badInput('--query required.');
+        if (!opts.sql) {
+          throw badInput('--sql required.');
         }
         scenarios = [
           {
@@ -205,8 +201,7 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
             env: opts.env,
             service: opts.service,
             namespace: opts.namespace,
-            query: opts.query,
-            intent: opts.intent,
+            query: opts.sql,
             param: opts.param,
             iterations: cliIterations,
           },
@@ -242,8 +237,7 @@ export function registerBench(program: Command, getCtx: () => AppContext): void 
       };
 
       if (ctx.jsonMode) {
-        if (opts.pluck) printJsonPluck(payload, String(opts.pluck));
-        else printJson(payload);
+        printJson(payload);
         if (totalFailures) process.exitCode = 1;
         return;
       }

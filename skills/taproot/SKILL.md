@@ -14,7 +14,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 | gRPC endpoints (offline introspection, unary and streaming calls) | `references/grpc.md` |
 | Redis / Dragonfly (command tiers, protobuf payloads) | `references/redis.md` |
 | SQL schema cache, partitions, relations | `references/sql.md` |
-| JSON envelope, `--pluck`, rows shape, benchmarking | `references/output.md` |
+| JSON envelope, `--jsonl`, `--pluck`, rows shape, benchmarking | `references/output.md` |
 | Symptom-to-command map | `references/troubleshooting.md` |
 | Command patterns and decision points | `references/workflows.md` |
 
@@ -33,8 +33,9 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 ## Everywhere invariants
 - Use `--json` for anything parsed or relayed. Envelope: `{ ok, data, meta, error }`.
 - `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form.
-- `--pluck <dot.path>` projects a subtree in-process; prefer it over piping to jq. On failure it writes the error envelope to stderr and exits non-zero, so always gate on exit code.
-- The SQL or native command goes in `--query "<native>"` (alias `--sql`), never as a positional argument; a positional string fails with "too many arguments for 'query'". Example: `taproot --json query --datasource <name> --reason "<why>" --query "<sql>" --pluck data.rows`
+- For rows, use `--jsonl`: one row object per line on stdout; on failure one `CODE: message` line on stderr and a non-zero exit. No python or jq post-processing needed.
+- `--pluck <dot.path>` projects a subtree in-process on any command; prefer it over piping to jq. On failure it writes only the error object to stderr and exits non-zero, so always gate on exit code.
+- The SQL or native command goes in `--sql "<native>"`, never as a positional argument; a positional string fails with "too many arguments for 'query'". Example: `taproot --jsonl query --datasource <name> --reason "<why>" --sql "<sql>"`
 - Every query response carries `meta.schemaContext` for referenced tables (SQL) or the called service and messages (gRPC). Read it instead of re-introspecting.
 - The table catalog is cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`). After a migration, force a re-read with `learn refresh-schema --datasource <name>`.
 - Wide scans warn rather than block: `unbounded_range`, `wide_range:<table>.<key>:actual=N:max=M`, and `range_unverified` land in `data.warnings`. Tighten the range unless the wide scan is intended.

@@ -15,7 +15,6 @@ function buildRequest(params: Record<string, unknown>, target: { env: string; na
     env: target.env,
     namespace: target.namespace,
     service: target.service,
-    intent: str(params.intent) || undefined,
     reason: str(params.reason) || undefined,
     query: str(params.query),
     params: rawParams,

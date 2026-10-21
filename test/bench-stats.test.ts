@@ -62,7 +62,7 @@ describe('bench argument guards', () => {
   }
 
   it('missing target fails as bad input', () => {
-    const out = runCli(['--json', 'bench', '--query', 'SELECT 1']);
+    const out = runCli(['--json', 'bench', '--sql', 'SELECT 1']);
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
@@ -105,6 +105,6 @@ describe('bench argument guards', () => {
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
-    expect(envelope.error.message).toContain('--query required');
+    expect(envelope.error.message).toContain('--sql required');
   });
 });

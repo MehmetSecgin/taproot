@@ -5,7 +5,7 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasou
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { badInput } from '../core/error-classification.js';
 import { nowIso } from '../core/time.js';
-import { renderRecord, renderTable, printJson, printEnvelope, printEnvelopePluck } from '../core/output.js';
+import { renderRecord, renderTable, printJson, printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
 import { DoctorStatus } from '../types/core.js';
 import type { Capability } from '../types/core.js';
@@ -42,7 +42,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
   ds.command('list')
     .option('--detailed', 'include confidence and updatedAt', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
@@ -67,18 +66,17 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           || String(a.service).localeCompare(String(b.service))
           || String(a.name).localeCompare(String(b.name)),
         );
-      if (ctx.jsonMode) printEnvelopePluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      if (ctx.jsonMode) printEnvelope(true, rows);
       else console.log(renderTable(rows));
     });
 
   ds.command('show')
     .requiredOption('--name <name>')
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
     const ctx = getCtx();
     const item = ctx.datasourceStore.get(opts.name);
     if (!item) throw new Error(`Datasource not found: ${opts.name}`);
-    if (ctx.jsonMode) printEnvelopePluck(item, opts.pluck ? String(opts.pluck) : undefined);
+    if (ctx.jsonMode) printEnvelope(true, item);
     else {
       console.log(renderRecord({
         name: item.name,
@@ -264,11 +262,10 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
   ds.command('export')
     .description('Emit all datasource profiles as JSON (round-trips with `datasource import --file`)')
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON envelope')
     .action((opts) => {
       const ctx = getCtx();
       const all = ctx.datasourceStore.list();
-      if (ctx.jsonMode) printEnvelopePluck(all, opts.pluck ? String(opts.pluck) : undefined);
+      if (ctx.jsonMode) printEnvelope(true, all);
       else printJson(all);
     });
 

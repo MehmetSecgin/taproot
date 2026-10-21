@@ -15,7 +15,7 @@
 
 ## Doctor + Query
 - `taproot doctor --datasource production-sample`
-- `taproot query --datasource production-sample --query "SELECT 1 AS ok"`
+- `taproot query --datasource production-sample --sql "SELECT 1 AS ok"`
 
 ## KB
 - `taproot kb resolve-connection --service sample --env production`

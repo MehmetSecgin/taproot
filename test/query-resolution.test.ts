@@ -61,7 +61,7 @@ function setupState(input?: {
 describe('query resolution', () => {
   it('resolves explicit --datasource from store', () => {
     const { env } = setupState();
-    const out = runCli(['query', '--datasource', 'qa-orders', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
@@ -106,13 +106,13 @@ describe('query resolution', () => {
         },
       ],
     });
-    const out = runCli(['query', '--datasource', 'nudge-test', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--datasource', 'nudge-test', '--sql', 'SELECT 1'], env);
     expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
   });
 
   it('resolves --env + --service from store', () => {
     const { env } = setupState();
-    const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
@@ -129,7 +129,7 @@ describe('query resolution', () => {
         },
       },
     });
-    const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(2);
     expect(out.stderr).toContain('DETERMINISTIC_REQUIRED');
   });
@@ -146,7 +146,7 @@ describe('query resolution', () => {
         },
       },
     });
-    const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--query', 'SELECT 1', '--allow-discovery'], env);
+    const out = runCli(['query', '--env', 'prod', '--service', 'unknown', '--sql', 'SELECT 1', '--allow-discovery'], env);
     expect(out.status).toBe(1);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
@@ -199,30 +199,18 @@ describe('query resolution', () => {
     });
   });
 
-  it('intent alone does not resolve a query', () => {
+  it('reason alone does not resolve a query', () => {
     const { env } = setupState();
-    const out = runCli(['query', '--datasource', 'qa-orders', '--intent', 'latest orders'], env);
+    const out = runCli(['query', '--datasource', 'qa-orders', '--reason', 'latest orders'], env);
     expect(out.status).toBe(1);
-    expect(out.stderr).toContain('No query resolved. Provide --query/--sql.');
+    expect(out.stderr).toContain('No query resolved. Provide --sql.');
   });
 
   it('malformed --param fails as bad input', () => {
     const { env } = setupState();
-    const out = runCli(['query', '--datasource', 'qa-orders', '--query', 'SELECT 1', '--param', 'brokenpair'], env);
+    const out = runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1', '--param', 'brokenpair'], env);
     expect(out.status).toBe(2);
     expect(out.stderr).toContain("Invalid --param 'brokenpair'");
-  });
-
-  it('conflicting --query and --sql fails as bad input', () => {
-    const { env } = setupState();
-    const out = runCli(
-      ['--json', 'query', '--datasource', 'qa-orders', '--query', 'SELECT 1', '--sql', 'SELECT 2'],
-      env,
-    );
-    expect(out.status).toBe(2);
-    const envelope = JSON.parse(out.stdout);
-    expect(envelope.error.code).toBe('BAD_INPUT');
-    expect(envelope.error.message).toContain('pass either --query or --sql, not both with different values');
   });
 
   it('--explain without a query fails as bad input', () => {
@@ -231,7 +219,7 @@ describe('query resolution', () => {
     expect(out.status).toBe(2);
     const envelope = JSON.parse(out.stdout);
     expect(envelope.error.code).toBe('BAD_INPUT');
-    expect(envelope.error.message).toContain('--explain requires --query (raw SQL)');
+    expect(envelope.error.message).toContain('--explain requires --sql');
   });
 
   it('service alias resolves transparently in query', () => {
@@ -242,7 +230,7 @@ describe('query resolution', () => {
         },
       },
     });
-    const out = runCli(['query', '--env', 'qa', '--service', 'legacy', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--env', 'qa', '--service', 'legacy', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(3);
     expect(out.stderr).not.toContain('DETERMINISTIC_REQUIRED');
   });
@@ -283,7 +271,7 @@ describe('query resolution', () => {
         },
       ],
     });
-    const out = runCli(['query', '--env', 'prod', '--service', 'orders', '--query', 'SELECT 1'], env);
+    const out = runCli(['query', '--env', 'prod', '--service', 'orders', '--sql', 'SELECT 1'], env);
     expect(out.status).toBe(2);
     expect(out.stderr).toContain('MISCONFIGURED_DATASOURCE');
   });

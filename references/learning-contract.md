@@ -104,7 +104,7 @@ Query path must resolve deterministically:
 KB source-of-truth clarification is documented in `references/kb/README.md`.
 
 Query resolution:
-1. Explicit `--query` / `--sql`. There is no other source.
+1. Explicit `--sql`. There is no other source.
 
 ## Retention
 - `compact`: idempotent dedupe/upsert rewrite.

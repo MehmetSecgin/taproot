@@ -280,7 +280,6 @@ export interface QueryMemoryPastRun {
   runId: string;
   ts: string;
   datasource?: string;
-  intent?: string;
   reason?: string;
   fingerprint?: string;
   outcomeCode: string;

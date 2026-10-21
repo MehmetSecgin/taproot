@@ -7,7 +7,6 @@ export interface BuildQueryMemoryInput {
   datasource: string;
   env?: string;
   service?: string;
-  intent?: string;
   reason?: string;
   sql: string;
   tables?: string[];
@@ -35,7 +34,6 @@ function toPastRun(row: RunsLedgerEntry, currentDatasource?: string): QueryMemor
     tables: row.tables,
   };
   if (row.datasource && row.datasource !== currentDatasource) out.datasource = row.datasource;
-  if (row.intent) out.intent = row.intent;
   if (row.reason) out.reason = row.reason;
   if (row.errorClass) out.errorClass = row.errorClass;
   if (row.lesson) out.lesson = row.lesson;
@@ -63,14 +61,14 @@ function recurringFailureHints(rows: RunsLedgerEntry[], tables: string[]): strin
 export function buildQueryMemory(input: BuildQueryMemoryInput): QueryMemory {
   const tables = Array.from(new Set((input.tables || []).map((item) => item.trim()).filter(Boolean))).sort();
   const normalizedSql = normalizeSqlForLedger(input.sql);
-  const fingerprint = queryFingerprint({ datasource: input.datasource, intent: input.intent, normalizedSql });
+  const fingerprint = queryFingerprint({ datasource: input.datasource, normalizedSql });
   const rows = readRunsLedgerEntries(input.ledgerDir, 1000).filter((row) => {
     if (row.datasource === input.datasource) return true;
     if (input.env && input.service && row.env === input.env && row.service === input.service) return true;
     return false;
   });
   const similarPastRuns = rows
-    .filter((row) => row.fingerprint === fingerprint || overlaps(tables, row.tables) || (input.intent && row.intent === input.intent))
+    .filter((row) => row.fingerprint === fingerprint || overlaps(tables, row.tables))
     .slice(0, 3)
     .map((row) => toPastRun(row, input.datasource));
 

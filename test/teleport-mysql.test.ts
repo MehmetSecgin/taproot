@@ -46,7 +46,7 @@ describe('teleport mysql execution', () => {
     const seed = runCli(['creds', 'set', '--ref', 'prod:orders', '--db-user', 'reader'], baseEnv);
     expect(seed.status).toBe(0);
     const out = runCli(
-      ['query', '--datasource', 'prod-orders', '--query', 'SELECT 1 AS ok'],
+      ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok'],
       {
         ...baseEnv,
         PATH: '',
@@ -83,7 +83,7 @@ describe('teleport mysql execution', () => {
     );
     fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
     const out = runCli(
-      ['query', '--datasource', 'prod-orders', '--query', 'SELECT 1 AS ok'],
+      ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok'],
       { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: '' },
     );
     expect(out.stderr).toContain('teleport proxy path unavailable');
@@ -115,7 +115,7 @@ describe('teleport mysql execution', () => {
     );
     fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
     const out = runCli(
-      ['query', '--datasource', 'prod-orders', '--query', 'SELECT 1 AS ok'],
+      ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok'],
       { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1' },
     );
     expect(out.status).not.toBe(0);

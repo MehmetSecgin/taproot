@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, printJsonPluck, renderRecord, renderTable, respondOk } from '../core/output.js';
+import { printJson, renderRecord, renderTable, respondOk } from '../core/output.js';
 import { normalizeRelations, validateRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
 
@@ -68,7 +68,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .option('--text <text>', 'substring filter on table names (alias: --match)')
     .option('--match <text>', 'substring filter on table names (alias of --text)')
     .option('--list', 'render flat list of matching table names instead of per-database counts', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
@@ -83,7 +82,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         const payload = opts.list
           ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
           : filtered;
-        printJsonPluck(payload, opts.pluck ? String(opts.pluck) : undefined);
+        printJson(payload);
         return;
       }
       if (opts.list) {
@@ -109,7 +108,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .description('Show curated cross-service and intra-service relations touching a service')
     .requiredOption('--service <service>')
     .option('--cross-service', 'only relations that cross a service boundary', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const s = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
@@ -118,7 +116,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         .filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
       if (ctx.jsonMode) {
-        printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+        printJson(rows);
       } else if (!rows.length) {
         console.log(`No curated relations for service '${opts.service}'. Derive candidates with "taproot learn relations --service ${opts.service}".`);
       } else {
@@ -138,13 +136,12 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
   relations.command('list')
     .description('List all curated relations in the KB')
     .option('--cross-service', 'only relations that cross a service boundary', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       let rows = ctx.kbStore.typedRelations();
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
       if (ctx.jsonMode) {
-        printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+        printJson(rows);
       } else if (!rows.length) {
         console.log('No curated relations. Import a map with "taproot kb relations import --file <path>".');
       } else {
@@ -161,7 +158,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .description('Check curated relation endpoints against the learned schema cache; reports ok/stale/unknown')
     .option('--service <service>', 'only relations touching this service')
     .option('--stale-only', 'only show edges whose table/column no longer exists', false)
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       let rels = ctx.kbStore.typedRelations();
@@ -177,7 +173,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
         unknown: results.filter((r) => !r.stale && (r.fromStatus === 'unknown_service' || r.toStatus === 'unknown_service')).length,
       };
       if (ctx.jsonMode) {
-        printJsonPluck({ summary, results }, opts.pluck ? String(opts.pluck) : undefined);
+        printJson({ summary, results });
       } else if (!results.length) {
         console.log('No relations to validate.');
       } else {
@@ -218,11 +214,10 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     });
 
   kb.command('list-services')
-    .option('--pluck <path>', 'return only the subtree at this dot-path of the JSON output')
     .action((opts) => {
       const ctx = getCtx();
       const rows = ctx.kbStore.listServices();
-      if (ctx.jsonMode) printJsonPluck(rows, opts.pluck ? String(opts.pluck) : undefined);
+      if (ctx.jsonMode) printJson(rows);
       else console.log(renderTable(rows.map((service) => ({ service }))));
     });
 }

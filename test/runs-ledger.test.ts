@@ -50,8 +50,8 @@ describe('runs ledger', () => {
     const b = normalizeSqlForLedger(" select id from t where name='Bob' and id=99 ");
     expect(a).toContain(':str');
     expect(a).toContain(':num');
-    expect(queryFingerprint({ datasource: 'ds', intent: 'find row', normalizedSql: a })).toBe(
-      queryFingerprint({ datasource: 'ds', intent: 'find row', normalizedSql: b }),
+    expect(queryFingerprint({ datasource: 'ds', normalizedSql: a })).toBe(
+      queryFingerprint({ datasource: 'ds', normalizedSql: b }),
     );
   });
 
@@ -69,7 +69,6 @@ describe('runs ledger', () => {
       ledgerDir,
       runId: 'run-1',
       datasource,
-      intent: 'find orders',
       reason: 'debug missing orders',
       sql: "SELECT id FROM order_items WHERE order_date = '2026-05-02'",
       tables: ['order_items'],

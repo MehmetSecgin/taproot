@@ -45,7 +45,7 @@ function callHint(datasource: string | undefined, service: string, method: strin
   return [
     'call:',
     `  taproot --json query --datasource ${ds} \\`,
-    `    --query "${service}/${method}" \\`,
+    `    --sql "${service}/${method}" \\`,
     `    --request-json '${body}'`,
   ].join('\n');
 }

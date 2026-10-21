@@ -21,7 +21,7 @@ Avoid `information_schema.tables`/`columns`/`statistics` for basic discovery, si
 Schema discovery is last-resort work. If the user named the table, or TapRoot already has the query shape, skip discovery entirely.
 
 ## Partitions and EXPLAIN
-- `taproot query --datasource <name> --explain --query "<sql>"` wraps a query in `EXPLAIN` without executing it. Use it before heavy joins or partition-touching queries to confirm partition pruning (look for `partition:p_<name>`), index usage, and join order. `--explain` requires `--query`.
+- `taproot query --datasource <name> --explain --sql "<sql>"` wraps a query in `EXPLAIN` without executing it. Use it before heavy joins or partition-touching queries to confirm partition pruning (look for `partition:p_<name>`), index usage, and join order. `--explain` requires `--sql`.
 - Range width is checked on every query against a RANGE/LIST partitioned table. `unbounded_range:<table>.<key>` means the key has a lower bound and no upper bound; `wide_range:<table>.<key>:actual=N:max=M` means the span exceeds `TAPROOT_MAX_RANGE_DAYS` (90 by default); `range_unverified` means the predicate used no date literal. These are warnings in `data.warnings`, not errors. Tighten the bound unless the wide scan is deliberate.
 - Keep partition and indexed keys as **bare columns** in `WHERE` and `JOIN` predicates. Wrapping the column in a function (`TO_DAYS(ts)`, `DATE(ts)`, `CAST(ts AS ...)`) defeats pruning and index use, forcing `partition:all`, a full scan, even when the literal looks scoped. Filter with a raw-column range instead (`ts >= '2026-06-24 00:00:00' AND ts < '2026-06-25 00:00:00'`) and confirm with `--explain` that the plan names specific partitions. Connections run in UTC, so write those bounds as UTC instants.
 

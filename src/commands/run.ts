@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { printJson, printJsonPluck, renderTable } from '../core/output.js';
+import { printJson, renderTable } from '../core/output.js';
 import { str } from '../core/strings.js';
 
 function readSummary(runsDir: string, runId: string): Record<string, unknown> {
@@ -56,12 +56,10 @@ export function registerRun(program: Command, getCtx: () => AppContext): void {
   run.command('show')
     .description('Read the persisted summary for a prior run')
     .requiredOption('--run-id <id>')
-    .option('--pluck <path>', 'return only the subtree at this dot-path (e.g. result.rows, meta.schemaContext, query.native)')
     .action((opts) => {
       const ctx = getCtx();
       const summary = readSummary(ctx.paths.runsDir, String(opts.runId));
-      const pluck = opts.pluck ? String(opts.pluck) : undefined;
-      printJsonPluck(summary, pluck);
+      printJson(summary);
       void ctx;
     });
 

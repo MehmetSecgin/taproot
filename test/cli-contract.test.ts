@@ -116,7 +116,7 @@ describe('cli contract', () => {
       },
     });
     const out = runCli(
-      ['query', '--env', 'prod', '--service', 'missing', '--query', 'SELECT 1 AS ok'],
+      ['query', '--env', 'prod', '--service', 'missing', '--sql', 'SELECT 1 AS ok'],
       { TAPROOT_FORCE_DIRECT: '1', TAPROOT_STATE_ROOT: stateRoot },
     );
     expect(out.status).toBe(2);

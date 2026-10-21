@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { buildContext, nextAction } from './core/app.js';
-import { printEnvelope, printJsonStderr } from './core/output.js';
+import { printEnvelope, setOutputOptions } from './core/output.js';
 import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerQuery } from './commands/query.js';
@@ -34,6 +34,8 @@ program
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
   .version(TAPROOT_VERSION)
   .option('--json', 'Output machine-readable JSON envelope', false)
+  .option('--jsonl', 'Output JSON lines: query rows as one object per line, other arrays one item per line; errors as one CODE: message line on stderr', false)
+  .option('--pluck <path>', 'Implies --json. Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). On failure, print only the error object to stderr.')
   .option('--no-color', 'Disable ANSI colors')
   .option('--no-animations', 'Disable animations')
   .option('--profile <name>', 'Runtime profile name')
@@ -43,7 +45,18 @@ program
   .option('--datetime-format <fmt>', 'Render Date columns as iso|js|epoch (default iso)')
   .option('--skill-version', 'Print skill version and exit', false);
 
+function jsonOutputRequested(): boolean {
+  const opts = program.opts();
+  return Boolean(opts.json || opts.jsonl || opts.pluck);
+}
+
+function applyOutputOptions(): void {
+  const opts = program.opts();
+  setOutputOptions({ pluck: opts.pluck ? String(opts.pluck) : undefined, jsonl: Boolean(opts.jsonl) });
+}
+
 program.hook('preAction', () => {
+  applyOutputOptions();
   const fmt = str(program.opts().datetimeFormat).trim().toLowerCase();
   if (fmt === 'iso' || fmt === 'js' || fmt === 'epoch') {
     process.env.TAPROOT_DATETIME_FORMAT = fmt;
@@ -74,7 +87,7 @@ function context() {
       : undefined;
   return buildContext({
     kbDir,
-    jsonMode: Boolean(opts.json),
+    jsonMode: jsonOutputRequested(),
     noColor: Boolean(opts.noColor),
     noAnimations: Boolean(opts.noAnimations),
     verbose: Boolean(opts.verbose),
@@ -107,10 +120,6 @@ program.configureOutput({
   },
 });
 
-function hasPluckFlag(): boolean {
-  return process.argv.some((arg) => arg === '--pluck' || arg.startsWith('--pluck='));
-}
-
 function hasCredsTopologyMisuseHint(input: string): boolean {
   const m = input.toLowerCase();
   if (!/unknown option/.test(m)) return false;
@@ -124,18 +133,14 @@ function emitError(error: unknown, code: string): void {
   const classifiedCode = code === 'UNHANDLED' || code === 'UNCAUGHT_EXCEPTION' || code === 'UNHANDLED_REJECTION'
     ? classifyError(message)
     : code;
-  const jsonMode = process.argv.includes('--json');
-  if (jsonMode) {
+  applyOutputOptions();
+  if (jsonOutputRequested()) {
     const priorDetails = (error as Error & { details?: Record<string, unknown> })?.details;
     const details =
       priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
         ? priorDetails
         : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
     const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
-    if (hasPluckFlag()) {
-      printJsonStderr({ ok: false, error: { code: classifiedCode, message, details }, meta });
-      return;
-    }
     printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
     return;
   }
@@ -166,7 +171,8 @@ program.parseAsync(process.argv).catch((error) => {
     const message = (error as Error)?.message || '';
     if (hasCredsTopologyMisuseHint(message)) {
       console.error("Hint: connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'.");
-    } else if (process.argv.includes('--json')) {
+    } else if (jsonOutputRequested()) {
+      applyOutputOptions();
       printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
     }
     process.exit(classifyExitCode(error));

@@ -54,12 +54,59 @@ export function renderSchemaContextFooter(schemaContext: unknown): string | null
   return null;
 }
 
-export function printJson(data: unknown): void {
-  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
+export interface OutputOptions {
+  pluck?: string;
+  jsonl: boolean;
 }
 
-export function printJsonStderr(data: unknown): void {
-  process.stderr.write(`${JSON.stringify(data, null, 2)}\n`);
+let outputOptions: OutputOptions = { jsonl: false };
+
+export function setOutputOptions(options: OutputOptions): void {
+  outputOptions = options;
+}
+
+export function getOutputOptions(): OutputOptions {
+  return outputOptions;
+}
+
+function envelopeError(data: unknown): Record<string, unknown> | undefined {
+  const env = data as { ok?: unknown; error?: unknown } | null;
+  if (!env || typeof env !== 'object' || env.ok !== false || !env.error) return undefined;
+  return typeof env.error === 'object' ? (env.error as Record<string, unknown>) : { message: String(env.error) };
+}
+
+function errorLine(error: Record<string, unknown>): string {
+  const code = str(error.code);
+  const message = str(error.message);
+  const head = !code || message.toLowerCase().startsWith(`${code.toLowerCase()}:`) ? message : `${code}: ${message}`;
+  const next = str((error.details as { nextAction?: unknown } | undefined)?.nextAction);
+  return next ? `${head}\nnextAction: ${next}\n` : `${head}\n`;
+}
+
+function jsonLines(value: unknown): string {
+  if (value === undefined) return '';
+  const items = Array.isArray(value) ? value : [value];
+  return items.map((item) => `${JSON.stringify(item)}\n`).join('');
+}
+
+export function printJson(data: unknown): void {
+  const { pluck, jsonl } = outputOptions;
+  const error = envelopeError(data);
+  if (error && jsonl) {
+    process.stderr.write(errorLine(error));
+    return;
+  }
+  if (error && pluck) {
+    process.stderr.write(`${JSON.stringify(error, null, 2)}\n`);
+    return;
+  }
+  const value = pluck ? pluckPath(data, pluck) : data;
+  if (!jsonl) {
+    process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+  const unwrapped = !pluck && (value as { ok?: unknown } | null)?.ok === true ? (value as { data?: unknown }).data : value;
+  process.stdout.write(jsonLines(unwrapped));
 }
 
 export function pluckPath(obj: unknown, path: string): unknown {
@@ -111,18 +158,6 @@ export function trimQueryJsonEnvelope<T extends Record<string, unknown>>(envelop
     ) delete meta.schemaContext;
   }
   return envelope;
-}
-
-export function printJsonPluck(data: unknown, path?: string): void {
-  if (!path) {
-    printJson(data);
-    return;
-  }
-  printJson(pluckPath(data, path));
-}
-
-export function printEnvelopePluck(data: unknown, path?: string): void {
-  printJsonPluck({ ok: true, data }, path);
 }
 
 export function printEnvelope(

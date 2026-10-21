@@ -1,6 +1,7 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
 import { bootstrapDatasource, saveKbBootstrapCandidate } from './bootstrap.js';
+import { suggestNames } from './grpc-introspect.js';
 import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from './discovery.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
@@ -36,7 +37,11 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   const asked = rawDs ? `datasource '${rawDs}'` : `env=${env || '?'} service=${service || '?'}`;
   const head = `Datasource resolution failed: no profile for ${asked}.`;
   const matches = service ? profiles.filter((p) => str(p.service).trim() === service) : [];
-  if (!matches.length) return `${head} Use --datasource or --env+--service; list profiles with taproot --json datasource list.`;
+  if (!matches.length) {
+    const close = rawDs ? suggestNames(rawDs, profiles.map((p) => p.name), 3) : [];
+    const hint = close.length ? ` Did you mean ${close.join(', ')}?` : '';
+    return `${head}${hint} Use --datasource or --env+--service; list profiles with taproot --json datasource list.`;
+  }
   const names = matches.map((p) => p.name).sort();
   const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` (+${names.length - 6})` : '');
   const envLabel = (p: DatasourceProfile) => str(p.env).trim() + (str(p.namespace).trim() ? `/${str(p.namespace).trim()}` : '');
