@@ -1,4 +1,3 @@
-import mysql from 'mysql2/promise';
 import type { Connection, ConnectionOptions, Pool } from 'mysql2/promise';
 import type { QueryRequest } from '../../types/core.js';
 
@@ -34,7 +33,11 @@ export async function closeMysqlConnection(conn: Connection): Promise<void> {
   );
 }
 
-function poolFor(config: ConnectionOptions): Pool {
+export async function loadMysql() {
+  return (await import('mysql2/promise')).default;
+}
+
+function poolFor(mysql: Awaited<ReturnType<typeof loadMysql>>, config: ConnectionOptions): Pool {
   const key = JSON.stringify(config);
   let pool = pools.get(key);
   if (!pool) {
@@ -45,7 +48,8 @@ function poolFor(config: ConnectionOptions): Pool {
 }
 
 export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, pooled: boolean) {
-  const poolConn = pooled ? await poolFor(config).getConnection() : undefined;
+  const mysql = await loadMysql();
+  const poolConn = pooled ? await poolFor(mysql, config).getConnection() : undefined;
   const conn = poolConn ?? (await mysql.createConnection(config));
   const physical = (conn as unknown as { connection: object }).connection;
   if (connectionTimeZones.get(physical) !== timeZone) {

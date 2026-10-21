@@ -1,4 +1,3 @@
-import { Client } from 'pg';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
@@ -35,6 +34,7 @@ export const postgresPlugin: TapRootPlugin = {
   },
 
   async doctor(input): Promise<DoctorCheck[]> {
+    const { Client } = await import('pg');
     const client = new Client(connConfig(input.datasource, input.credentials));
     try {
       await client.connect();
@@ -52,6 +52,7 @@ export const postgresPlugin: TapRootPlugin = {
   async execute(request, creds): Promise<QueryResult> {
     const startedAt = nowIso();
     const start = Date.now();
+    const { Client } = await import('pg');
     const client = new Client(connConfig(request.datasource, creds, request.timeoutMs));
     try {
       await client.connect();

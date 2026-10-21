@@ -1,4 +1,3 @@
-import mysql from 'mysql2/promise';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
@@ -7,7 +6,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
-import { baseConnConfig, leaseMysqlConnection } from '../_shared/db-conn.js';
+import { baseConnConfig, leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
@@ -31,7 +30,7 @@ export const mysqlPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     try {
-      const conn = await mysql.createConnection(connConfig(input.datasource, input.credentials));
+      const conn = await (await loadMysql()).createConnection(connConfig(input.datasource, input.credentials));
       await conn.query('SET time_zone = ?', [DEFAULT_SESSION_TIME_ZONE]);
       await conn.query('SELECT 1 AS ok');
       await conn.end();

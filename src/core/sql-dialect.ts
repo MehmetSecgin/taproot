@@ -1,5 +1,4 @@
-import mysqlParserPkg from 'node-sql-parser/build/mysql.js';
-import postgresParserPkg from 'node-sql-parser/build/postgresql.js';
+import { createRequire } from 'node:module';
 
 export type SqlDialect = 'mysql' | 'postgres';
 
@@ -9,10 +8,13 @@ interface SqlParser {
 
 type ParserBuild = { Parser: new () => SqlParser };
 
-const parsers: Record<SqlDialect, SqlParser> = {
-  mysql: new (mysqlParserPkg as unknown as ParserBuild).Parser(),
-  postgres: new (postgresParserPkg as unknown as ParserBuild).Parser(),
-};
+const require = createRequire(import.meta.url);
+const parsers: Partial<Record<SqlDialect, SqlParser>> = {};
+
+function parserFor(dialect: SqlDialect): SqlParser {
+  const build = dialect === 'postgres' ? 'node-sql-parser/build/postgresql.js' : 'node-sql-parser/build/mysql.js';
+  return (parsers[dialect] ??= new (require(build) as ParserBuild).Parser());
+}
 
 export function dialectFromKind(kind: string | undefined): SqlDialect {
   const value = (kind || '').toLowerCase();
@@ -25,5 +27,5 @@ export function parserDatabaseOption(dialect: SqlDialect): string {
 }
 
 export function astifySql(sql: string, dialect: SqlDialect): unknown {
-  return parsers[dialect].astify(sql, { database: parserDatabaseOption(dialect) });
+  return parserFor(dialect).astify(sql, { database: parserDatabaseOption(dialect) });
 }

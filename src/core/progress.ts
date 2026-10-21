@@ -1,6 +1,5 @@
-import ora, { type Ora } from 'ora';
-import chalk from 'chalk';
-import logSymbols from 'log-symbols';
+import { styleText as paint } from 'node:util';
+import type { Ora } from 'ora';
 
 export interface ProgressReporter {
   update(text: string): void;
@@ -21,6 +20,7 @@ export interface ProgressOptions {
 }
 
 const ACTIVE_SPINNERS = new Set<Ora>();
+const COLORS = { success: 'green', warning: 'yellow', error: 'red', info: 'cyan' } as const;
 
 function symbol(kind: 'success' | 'warning' | 'error' | 'info', noColor: boolean): string {
   if (noColor) {
@@ -31,28 +31,21 @@ function symbol(kind: 'success' | 'warning' | 'error' | 'info', noColor: boolean
       info: 'INFO',
     }[kind];
   }
-  return {
-    success: logSymbols.success,
-    warning: logSymbols.warning,
-    error: logSymbols.error,
-    info: logSymbols.info,
-  }[kind];
+  return paint(COLORS[kind], { success: '✔', warning: '⚠', error: '✖', info: 'ℹ' }[kind]);
 }
 
 function styleText(text: string, kind: 'success' | 'warning' | 'error' | 'info', noColor: boolean): string {
-  if (noColor) return text;
-  if (kind === 'success') return chalk.green(text);
-  if (kind === 'warning') return chalk.yellow(text);
-  if (kind === 'error') return chalk.red(text);
-  return chalk.cyan(text);
+  return noColor ? text : paint(COLORS[kind], text);
 }
 
 class Progress implements ProgressReporter {
   private spinner?: Ora;
   private lastText = '';
+  private finished = false;
   private readonly stream: NodeJS.WriteStream;
   private readonly noColor: boolean;
   private readonly plainUpdates: boolean;
+  private readonly useSpinner: boolean;
   private readonly prefix: string;
 
   constructor(opts: ProgressOptions) {
@@ -60,14 +53,17 @@ class Progress implements ProgressReporter {
     this.noColor = Boolean(opts.noColor);
     this.plainUpdates = Boolean(opts.plainUpdates || opts.verbose);
     this.prefix = opts.prefix || 'taproot';
-    const useSpinner = Boolean(opts.enabled && !opts.noAnimations && this.stream.isTTY);
-    if (useSpinner) {
-      this.spinner = ora({
-        text: 'starting...',
-        stream: this.stream,
-        isEnabled: true,
-      }).start();
-      ACTIVE_SPINNERS.add(this.spinner);
+    this.useSpinner = Boolean(opts.enabled && !opts.noAnimations && this.stream.isTTY);
+    if (this.useSpinner) {
+      void import('ora').then(({ default: ora }) => {
+        if (this.finished) return;
+        this.spinner = ora({
+          text: this.lastText || 'starting...',
+          stream: this.stream,
+          isEnabled: true,
+        }).start();
+        ACTIVE_SPINNERS.add(this.spinner);
+      });
     }
   }
 
@@ -79,6 +75,19 @@ class Progress implements ProgressReporter {
   private write(kind: 'success' | 'warning' | 'error' | 'info', text: string): void {
     if (!this.plainUpdates) return;
     this.stream.write(`${this.line(kind, text)}\n`);
+  }
+
+  private settle(kind: 'success' | 'warning' | 'error', text: string): void {
+    this.finished = true;
+    if (this.spinner) {
+      if (kind === 'success') this.spinner.succeed(text);
+      else if (kind === 'warning') this.spinner.warn(text);
+      else this.spinner.fail(text);
+      ACTIVE_SPINNERS.delete(this.spinner);
+      this.spinner = undefined;
+      return;
+    }
+    if (this.plainUpdates || this.useSpinner) this.stream.write(`${this.line(kind, text)}\n`);
   }
 
   update(text: string): void {
@@ -93,39 +102,19 @@ class Progress implements ProgressReporter {
   }
 
   succeed(text?: string): void {
-    const finalText = (text || this.lastText || 'done').trim();
-    if (this.spinner) {
-      this.spinner.succeed(finalText);
-      ACTIVE_SPINNERS.delete(this.spinner);
-      this.spinner = undefined;
-      return;
-    }
-    this.write('success', finalText);
+    this.settle('success', (text || this.lastText || 'done').trim());
   }
 
   warn(text?: string): void {
-    const finalText = (text || this.lastText || 'warning').trim();
-    if (this.spinner) {
-      this.spinner.warn(finalText);
-      ACTIVE_SPINNERS.delete(this.spinner);
-      this.spinner = undefined;
-      return;
-    }
-    this.write('warning', finalText);
+    this.settle('warning', (text || this.lastText || 'warning').trim());
   }
 
   fail(text?: string): void {
-    const finalText = (text || this.lastText || 'failed').trim();
-    if (this.spinner) {
-      this.spinner.fail(finalText);
-      ACTIVE_SPINNERS.delete(this.spinner);
-      this.spinner = undefined;
-      return;
-    }
-    this.write('error', finalText);
+    this.settle('error', (text || this.lastText || 'failed').trim());
   }
 
   stop(): void {
+    this.finished = true;
     if (!this.spinner) return;
     this.spinner.stop();
     ACTIVE_SPINNERS.delete(this.spinner);

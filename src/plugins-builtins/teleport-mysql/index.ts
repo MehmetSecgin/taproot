@@ -1,8 +1,7 @@
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
-import mysql from 'mysql2/promise';
 import { registerCleanup } from '../../core/cleanup.js';
-import { leaseMysqlConnection } from '../_shared/db-conn.js';
+import { leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
@@ -261,7 +260,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const sessionId = `doctor-${process.pid}-${Date.now()}`;
     try {
       const proxy = await ensureProxy(sessionId, String(target), String(user), String(database));
-      const conn = await mysql.createConnection({
+      const conn = await (await loadMysql()).createConnection({
         host: '127.0.0.1',
         port: proxy.port,
         user: String(user),
