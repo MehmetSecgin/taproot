@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../core/app.js';
 import { pruneRunArtifacts } from '../core/artifacts.js';
+import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { printJson, renderRecord, renderTable } from '../core/output.js';
 
 export function registerCache(program: Command, getCtx: () => AppContext): void {
@@ -25,7 +26,7 @@ export function registerCache(program: Command, getCtx: () => AppContext): void 
     }
   });
 
-  c.command('prune').option('--ttl-hours <n>', 'default 168', '168').action((opts) => {
+  c.command('prune').option('--ttl-hours <n>', `default ${RUNTIME_CONSTANTS.runs.ttlHours}`, String(RUNTIME_CONSTANTS.runs.ttlHours)).action((opts) => {
     const ctx = getCtx();
     const ttlHours = Number(opts.ttlHours);
     const learning = ctx.learningStore.prune(ttlHours);

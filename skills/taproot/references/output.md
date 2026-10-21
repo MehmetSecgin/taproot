@@ -31,7 +31,7 @@
   - `--pluck "length"` is unsupported; jq is still needed for aggregates.
 
 ## Runs
-Full results persist to `~/.taproot/runs/<runId>/summary.json`. When a later step needs a different slice from an earlier run, fetch it with `taproot --json run show --run-id <id> --pluck <path>` instead of re-running the query. `taproot --json run list --limit <n> [--datasource <name>]` discovers recent run IDs.
+Results persist to `~/.taproot/runs/<runId>/summary.json` for 7 days. The stored copy keeps the first 1000 rows; `result.rowCount` holds the full count and `result.truncated` is `true` when rows were cut. When a later step needs a different slice from an earlier run, fetch it with `taproot --json run show --run-id <id> --pluck <path>` instead of re-running the query. `taproot --json run list --limit <n> [--datasource <name>]` discovers recent run IDs.
 
 Results over 32 KB are persisted to a tool-results file with table formatting preserved. awk and sed on that file are brittle, so switch to `--json | jq` for precise extraction.
 

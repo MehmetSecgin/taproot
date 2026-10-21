@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { pruneRunArtifacts } from '../src/core/artifacts.js';
+import { pruneRunArtifacts, pruneRunArtifactsDaily, writeRunSummary } from '../src/core/artifacts.js';
+import type { QueryResult } from '../src/types/core.js';
 
 function makeRun(runsDir: string, name: string, ageHours: number): string {
   const runDir = path.join(runsDir, name);
@@ -52,5 +53,42 @@ describe('run artifact retention', () => {
 
     // assert
     expect(out).toEqual({ before: 0, after: 0 });
+  });
+
+  it('prunes old runs at most once per day', () => {
+    // arrange
+    const runsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-runs-daily-'));
+    makeRun(runsDir, '20260101-000000-qa-orders', 400);
+
+    // act
+    pruneRunArtifactsDaily(runsDir);
+    makeRun(runsDir, '20260102-000000-qa-orders', 400);
+    pruneRunArtifactsDaily(runsDir);
+
+    // assert
+    expect(fs.readdirSync(runsDir).sort()).toEqual(['.last-prune', '20260102-000000-qa-orders']);
+
+    // act
+    pruneRunArtifactsDaily(runsDir, Date.now() + 25 * 3600 * 1000);
+
+    // assert
+    expect(fs.readdirSync(runsDir)).toEqual(['.last-prune']);
+  });
+
+  it('caps the rows stored in summary.json and records the full row count', () => {
+    // arrange
+    const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-runs-cap-'));
+    const rows = Array.from({ length: 1500 }, (_, id) => ({ id }));
+    const result = { runId: 'r1', result: { columns: ['id'], rows } } as unknown as QueryResult;
+
+    // act
+    writeRunSummary(runDir, result);
+
+    // assert
+    const stored = JSON.parse(fs.readFileSync(path.join(runDir, 'summary.json'), 'utf8'));
+    expect(stored.result.rows).toHaveLength(1000);
+    expect(stored.result.rowCount).toBe(1500);
+    expect(stored.result.truncated).toBe(true);
+    expect(result.result.rows).toHaveLength(1500);
   });
 });

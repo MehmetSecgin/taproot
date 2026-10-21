@@ -42,6 +42,11 @@ export const RUNTIME_CONSTANTS = {
     openvpnStatusTimeoutMs: 1_500,
     openvpnCommandTimeoutMs: 3_000,
   },
+  runs: {
+    ttlHours: 168,
+    pruneIntervalMs: 24 * 60 * 60 * 1000,
+    storedRowLimit: 1000,
+  },
   grpc: {
     streamMessageLimit: intFromEnv('TAPROOT_GRPC_STREAM_MESSAGE_LIMIT', 1000),
     streamFailureRowLimit: 100,

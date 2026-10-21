@@ -36,7 +36,9 @@ function listRuns(runsDir: string, limit: number, datasource?: string): Array<{ 
     if (datasource && ds !== datasource) continue;
     const result = (parsed.result as Record<string, unknown> | undefined) || {};
     const timings = (parsed.timings as Record<string, unknown> | undefined) || {};
-    const rows = Array.isArray((result as { rows?: unknown[] }).rows) ? (result as { rows: unknown[] }).rows.length : '';
+    const rows = typeof result.rowCount === 'number'
+      ? result.rowCount
+      : Array.isArray(result.rows) ? result.rows.length : '';
     out.push({
       runId,
       datasource: ds,

@@ -73,7 +73,7 @@ export function registerLearn(program: Command, getCtx: () => AppContext): void 
         capability: summary.capability || '',
         classification: summary.classification || '',
         durationMs: summary.timings?.durationMs || '',
-        rowCount: Array.isArray(summary.result?.rows) ? summary.result.rows.length : '',
+        rowCount: summary.result?.rowCount ?? (Array.isArray(summary.result?.rows) ? summary.result.rows.length : ''),
         eventCount: events.length,
       }));
       const tail = events.slice(-5).map((line, idx) => ({ idx: events.length - Math.min(5, events.length) + idx + 1, event: line }));
