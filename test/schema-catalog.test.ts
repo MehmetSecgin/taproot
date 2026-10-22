@@ -22,7 +22,7 @@ function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('in
   const seen: string[] = [];
   const registry = new Map<string, TapRootPlugin>();
   registry.set('mysql', {
-    manifest: { name: 'mysql', version: '0.1.0', kind: 'executor', capabilities: ['executeRead'] },
+    manifest: { name: 'mysql', kind: 'executor', capabilities: ['executeRead'] },
     async execute(request) {
       seen.push(request.query);
       const rows = rowsFor(request.query);

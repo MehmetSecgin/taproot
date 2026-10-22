@@ -8,7 +8,7 @@ import type {
   SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
-import { AccessMethod, DoctorStatus } from '../../types/core.js';
+import { DoctorStatus } from '../../types/core.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -182,10 +182,8 @@ function schemaContextFor(
 export const grpcPlugin: TapRootPlugin = {
   manifest: {
     name: 'grpc',
-    version: '0.2.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 

@@ -40,10 +40,8 @@ export type KbRelationSource = (typeof KbRelationSource)[keyof typeof KbRelation
 
 export interface PluginManifest {
   name: string;
-  version: string;
   kind: PluginKind;
   capabilities: Capability[];
-  accessMethods?: AccessMethod[];
   priority?: number;
 }
 

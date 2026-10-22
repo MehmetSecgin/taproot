@@ -199,6 +199,23 @@ describe('query resolution', () => {
     });
   });
 
+  it('allow-discovery without a KB row writes a port-forward profile for a Kubernetes target', () => {
+    const { env, stateRoot } = setupState({
+      datasources: [],
+      runtimeConfig: { environmentPolicies: { qa: { preferredAccessMethods: ['tsh', 'qa-portforward'] } } },
+    });
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-fake-kubectl-'));
+    fs.writeFileSync(path.join(binDir, 'kubectl'), '#!/bin/sh\necho service/orders-mysql\n', { mode: 0o755 });
+    runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1', '--allow-discovery'], {
+      ...env,
+      PATH: binDir,
+    });
+
+    const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
+    expect(datasources).toHaveLength(1);
+    expect(datasources[0]).toMatchObject({ kind: 'mysql', connectors: ['kubectl-portforward'] });
+  });
+
   it('rejects the removed --reason and --allow-schema-introspection flags', () => {
     const { env } = setupState();
     for (const flag of [['--reason', 'why'], ['--allow-schema-introspection']]) {

@@ -140,23 +140,20 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
       const target = targets[0];
       const database = str(kb?.database || service.replace(/-/g, '_'));
       const dbUser = str(kb?.db_user);
-      const accessMethod = accessMethods[0] || kbAccessMethod;
       const syntheticKb = {
-        access_method: accessMethod,
+        access_method: AccessMethod.QaPortforward,
         database,
         db_user: dbUser,
         target,
         namespace: targetNamespace,
         ...(kb || {}),
       };
-      if (accessMethod === AccessMethod.Tsh || accessMethod === AccessMethod.QaPortforward) {
-        datasource = await saveKbBootstrapCandidate(ctx, env, service, rawDs || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
-          targetOverride: target,
-          tags: ['discovery-derived'],
-          confidence: 0.6,
-        });
-        if (datasource) source = 'kb';
-      }
+      datasource = await saveKbBootstrapCandidate(ctx, env, service, rawDs || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
+        targetOverride: target,
+        tags: ['discovery-derived'],
+        confidence: 0.6,
+      });
+      if (datasource) source = 'kb';
     }
   }
 

@@ -8,7 +8,7 @@ import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
 import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/tsh-databases.js';
-import { AccessMethod, DoctorStatus } from '../../types/core.js';
+import { DoctorStatus } from '../../types/core.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { str } from '../../core/strings.js';
 
@@ -247,10 +247,8 @@ async function startProxy(key: string, sessionId: string, target: string, user: 
 export const teleportMysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport-mysql',
-    version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: [AccessMethod.Tsh],
     priority: 100,
   },
 

@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { AccessMethod } from '../../types/core.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
 import { str } from '../../core/strings.js';
 
@@ -63,10 +62,8 @@ async function run(command: string, timeoutMs: number): Promise<{ ok: boolean; d
 export const teleportPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport',
-    version: '0.1.0',
     kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    accessMethods: [AccessMethod.Tsh],
     priority: 90,
   },
 

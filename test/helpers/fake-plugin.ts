@@ -16,7 +16,6 @@ export function fakePlugin(options: FakePluginOptions = {}): TapRootPlugin {
   return {
     manifest: {
       name: kind,
-      version: '0.0.0',
       kind: kind as never,
       capabilities: ['executeRead', 'executeMutate'] as never,
       priority: 100,

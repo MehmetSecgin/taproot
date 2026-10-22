@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { AccessMethod, DoctorStatus } from '../../types/core.js';
+import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { classifyExecutorDoctorCode, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
@@ -269,10 +269,8 @@ function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoM
 export const redisPlugin: TapRootPlugin = {
   manifest: {
     name: 'redis',
-    version: '0.3.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead', 'executeMutate'],
-    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 

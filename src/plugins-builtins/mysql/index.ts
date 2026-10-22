@@ -1,4 +1,4 @@
-import { AccessMethod, DoctorStatus } from '../../types/core.js';
+import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
@@ -21,10 +21,8 @@ function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string
 export const mysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'mysql',
-    version: '0.1.0',
     kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    accessMethods: [AccessMethod.Native, AccessMethod.QaPortforward],
     priority: 100,
   },
 
