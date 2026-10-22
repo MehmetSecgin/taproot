@@ -23,7 +23,7 @@ type ProxyRuntime = {
   cleanupRegistered: boolean;
 };
 
-const proxiesByKey = new Map<string, ProxyRuntime>();
+const proxiesByKey = new Map<string, Promise<ProxyRuntime>>();
 const proxyKeyBySession = new Map<string, Set<string>>();
 const allowedUsersByTarget = new Map<string, string[]>();
 let globalCleanupRegistered = false;
@@ -32,19 +32,19 @@ function proxyKey(sessionId: string, target: string, user: string, database: str
   return `${sessionId}|${target}|${user}|${database}`;
 }
 
-function tshAllowedUsers(target: string): string[] {
+async function tshAllowedUsers(target: string): Promise<string[]> {
   if (!allowedUsersByTarget.has(target)) {
-    for (const db of fetchTshDatabases().databases) allowedUsersByTarget.set(tshDbName(db), tshDbAllowedUsers(db));
+    for (const db of (await fetchTshDatabases()).databases) allowedUsersByTarget.set(tshDbName(db), tshDbAllowedUsers(db));
   }
   return allowedUsersByTarget.get(target) || [];
 }
 
-function resolveDbUser(ds: DatasourceProfile, creds: Record<string, string>): string {
+async function resolveDbUser(ds: DatasourceProfile, creds: Record<string, string>): Promise<string> {
   const hints = ds.resolverHints || {};
   const explicit = str(creds.dbUser || creds.user || hints.dbUser || hints.user).trim();
   const target = str(ds.connection.target).trim();
   if (explicit || !target) return explicit;
-  const users = tshAllowedUsers(target);
+  const users = await tshAllowedUsers(target);
   if (users.length > 1) {
     throw new Error(
       `teleport-mysql found several allowed db users for '${target}' in 'tsh db ls': ${users.join(', ')}. ` +
@@ -150,28 +150,41 @@ export async function closeTeleportMysqlSessionProxies(sessionId: string): Promi
   const keys = proxyKeyBySession.get(sessionId);
   if (!keys || !keys.size) return;
   for (const key of [...keys]) {
-    const proxy = proxiesByKey.get(key);
-    if (!proxy) continue;
-    await stopProxy(proxy);
+    const starting = proxiesByKey.get(key);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
+    const proxy = await starting?.catch(() => undefined);
+    if (proxy) await stopProxy(proxy);
   }
 }
 
 export async function closeAllTeleportMysqlProxies(): Promise<void> {
-  for (const proxy of [...proxiesByKey.values()]) {
-    await stopProxy(proxy);
-  }
-  proxiesByKey.clear();
-  proxyKeyBySession.clear();
+  for (const sessionId of [...proxyKeyBySession.keys()]) await closeTeleportMysqlSessionProxies(sessionId);
 }
 
 async function ensureProxy(sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
   ensureGlobalCleanup();
   const key = proxyKey(sessionId, target, user, database);
   const existing = proxiesByKey.get(key);
-  if (existing && !existing.process.killed) return existing;
+  if (existing) {
+    const proxy = await existing;
+    if (!proxy.process.killed) return proxy;
+  }
+  const starting = startProxy(key, sessionId, target, user, database);
+  proxiesByKey.set(key, starting);
+  markSessionProxy(sessionId, key);
+  try {
+    return await starting;
+  } catch (error) {
+    if (proxiesByKey.get(key) === starting) {
+      proxiesByKey.delete(key);
+      removeSessionProxy(sessionId, key);
+    }
+    throw error;
+  }
+}
 
+async function startProxy(key: string, sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
   const port = await getFreePort();
   const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', user, '--db-name', database, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -202,8 +215,6 @@ async function ensureProxy(sessionId: string, target: string, user: string, data
     process: proc,
     cleanupRegistered: true,
   };
-  proxiesByKey.set(key, runtime);
-  markSessionProxy(sessionId, key);
 
   const abortReason = (): string => {
     if (spawnError) return `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`;
@@ -220,8 +231,6 @@ async function ensureProxy(sessionId: string, target: string, user: string, data
     return runtime;
   } catch (error) {
     await stopProxy(runtime);
-    proxiesByKey.delete(key);
-    removeSessionProxy(sessionId, key);
     if (spawnError) throw connectivity(`teleport proxy path unavailable; ${spawnError}`);
     const exit = exitState.value;
     if (exit) {
@@ -250,7 +259,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     let user = '';
     let detail = 'missing target/dbUser/database in datasource+credentials';
     try {
-      user = resolveDbUser(input.datasource, input.credentials);
+      user = await resolveDbUser(input.datasource, input.credentials);
     } catch (error) {
       detail = (error as Error).message;
     }
@@ -282,7 +291,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const target = request.datasource.connection.target;
-    const user = resolveDbUser(request.datasource, creds);
+    const user = await resolveDbUser(request.datasource, creds);
     const database = request.datasource.connection.database;
     const sessionId = str(creds.__sessionId).trim();
     if (!target || !user || !database) {

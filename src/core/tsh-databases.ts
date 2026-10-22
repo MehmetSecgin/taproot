@@ -1,4 +1,7 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export interface TshDatabase {
   metadata?: { name?: string };
@@ -15,13 +18,18 @@ export function tshDbAllowedUsers(db: TshDatabase): string[] {
   return (db.users?.allowed || []).filter((u) => u && u !== '*');
 }
 
-export function fetchTshDatabases(opts: { tshPath?: string } = {}): { ok: boolean; databases: TshDatabase[]; detail: string } {
-  const proc = spawnSync(opts.tshPath || 'tsh', ['db', 'ls', '--format=json'], { encoding: 'utf8' });
-  if ((proc.status || 0) !== 0) {
-    return { ok: false, databases: [], detail: (proc.stderr || proc.stdout || `tsh exit=${proc.status}`).trim() };
+export async function fetchTshDatabases(
+  opts: { tshPath?: string } = {},
+): Promise<{ ok: boolean; databases: TshDatabase[]; detail: string }> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(opts.tshPath || 'tsh', ['db', 'ls', '--format=json']));
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; code?: unknown };
+    return { ok: false, databases: [], detail: (e.stderr || e.stdout || `tsh exit=${e.code}`).trim() };
   }
   try {
-    const parsed = JSON.parse(proc.stdout || '[]') as TshDatabase[] | { items?: TshDatabase[] };
+    const parsed = JSON.parse(stdout || '[]') as TshDatabase[] | { items?: TshDatabase[] };
     const list = Array.isArray(parsed) ? parsed : parsed.items || [];
     return { ok: true, databases: list, detail: `tsh returned ${list.length} databases` };
   } catch (err) {
