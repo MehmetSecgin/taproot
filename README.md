@@ -46,8 +46,6 @@ Verify:
 taproot --version   # prints the installed version
 ```
 
-> No npm registry release yet. `npm link` is the supported install path.
-
 ### 3. Initialize local state
 
 ```bash
