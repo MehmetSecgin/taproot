@@ -10,17 +10,6 @@ function tmpRunDir(): string {
 }
 
 describe('session registry', () => {
-  it('enforces per-session concurrent lease cap', () => {
-    const reg = new SessionRegistry(tmpRunDir());
-    const session = reg.open({ datasourceName: 'qa-sample', kind: 'mysql' });
-    const leases: string[] = [];
-    for (let i = 0; i < RUNTIME_CONSTANTS.session.maxConcurrentLeases; i += 1) {
-      leases.push(reg.acquireLease(session.sessionId));
-    }
-    expect(() => reg.acquireLease(session.sessionId)).toThrow(/SESSION_BUSY/);
-    for (const lease of leases) reg.releaseLease(session.sessionId, lease);
-  });
-
   it('reclaims stale leases on sweep', () => {
     const reg = new SessionRegistry(tmpRunDir());
     const session = reg.open({ datasourceName: 'qa-sample', kind: 'mysql' });

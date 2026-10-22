@@ -86,11 +86,10 @@ describe('daemon rpc limits', () => {
     }
   }, 15_000);
 
-  it('returns SESSION_BUSY when per-session lease cap is exceeded', async () => {
+  it('runs 8 parallel queries on one datasource without rejecting any', async () => {
     const { daemon, socketPath } = await setupDaemon(1, 500);
     try {
-      const total = RUNTIME_CONSTANTS.session.maxConcurrentLeases + 1;
-      const calls = Array.from({ length: total }, () =>
+      const calls = Array.from({ length: 8 }, () =>
         rpcCall({
           socketPath,
           method: 'query.execute',
@@ -102,8 +101,7 @@ describe('daemon rpc limits', () => {
         }),
       );
       const out = await Promise.all(calls);
-      const busy = out.filter((r) => !r.ok && r.error?.code === 'SESSION_BUSY');
-      expect(busy.length).toBeGreaterThan(0);
+      expect(out.map((r) => r.ok)).toEqual(Array(8).fill(true));
     } finally {
       await daemon.stop();
     }
@@ -118,7 +116,6 @@ describe('daemon rpc limits', () => {
       expect(res.data?.limits).toMatchObject({
         maxConcurrentQueries: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries,
         maxQueuedQueries: RUNTIME_CONSTANTS.daemon.maxQueuedQueries,
-        maxConcurrentLeases: RUNTIME_CONSTANTS.session.maxConcurrentLeases,
       });
     } finally {
       await daemon.stop();

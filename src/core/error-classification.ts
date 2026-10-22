@@ -34,7 +34,6 @@ const ERROR_CLASSES = {
   UNKNOWN_TABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/ },
   SQL_SYNTAX: { exitCode: EXIT_CODES.BAD_INPUT, match: /error in your sql syntax|syntax error at or near|syntax error at end of input/ },
   OVERLOADED: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /overloaded|queue limit/ },
-  SESSION_BUSY: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /session_busy|session .*active leases/ },
   ACCESS_DENIED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /access denied|permission denied/ },
   UNKNOWN_DATABASE: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /unknown database|does not exist/ },
   CONNECTIVITY: {
@@ -84,7 +83,6 @@ export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');
 export const discoveryUnavailable = makeThrower('DISCOVERY_UNAVAILABLE');
 export const kbMissing = makeThrower('KB_MISSING');
 export const overloaded = makeThrower('OVERLOADED');
-export const sessionBusy = makeThrower('SESSION_BUSY');
 export const accessDenied = makeThrower('ACCESS_DENIED');
 export const connectivity = makeThrower('CONNECTIVITY');
 

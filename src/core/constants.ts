@@ -9,7 +9,6 @@ export const RUNTIME_CONSTANTS = {
   session: {
     idleTtlMs: 45 * 60 * 1000,
     hardTtlMs: 6 * 60 * 60 * 1000,
-    maxConcurrentLeases: intFromEnv('TAPROOT_MAX_CONCURRENT_LEASES', 4),
     leaseHeartbeatIntervalMs: 5000,
     leaseStaleThresholdMs: 20000,
   },

@@ -18,7 +18,6 @@ export const handleDaemonStatus: Handler = async ({ base, deps }) => {
     limits: {
       maxConcurrentQueries: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries,
       maxQueuedQueries: RUNTIME_CONSTANTS.daemon.maxQueuedQueries,
-      maxConcurrentLeases: RUNTIME_CONSTANTS.session.maxConcurrentLeases,
     },
   };
 };
