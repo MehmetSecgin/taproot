@@ -28,9 +28,9 @@ function setupStateRoot() {
         tags: [],
         connection: { host: '127.0.0.1', port: 3306, database: 'demo' },
         credentialRef: 'qa:demo',
-        connectors: ['openvpn'],
+        connectors: ['kubectl-portforward'],
         policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: {},
+        resolverHints: { 'kubectl-portforwardCredentialRef': 'kpf:qa:demo' },
         updatedAt: new Date().toISOString(),
         confidence: 0.9,
       },
@@ -46,54 +46,6 @@ function setupStateRoot() {
 }
 
 describe('connector UX', () => {
-  it('connector setup stores connector refs/commands without raw creds workflow', () => {
-    const { env } = setupStateRoot();
-    const setupOut = runCli(
-      [
-        'connector',
-        'setup',
-        '--datasource',
-        'qa-demo',
-        '--connector',
-        'openvpn',
-        '--status-command',
-        'true',
-        '--connect-command',
-        'true',
-      ],
-      env,
-    );
-    expect(setupOut.status).toBe(0);
-    const parsed = JSON.parse(setupOut.stdout);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.data.connector).toBe('openvpn');
-    expect(parsed.data.ref).toContain('openvpn:');
-  });
-
-  it('connector status runs connector doctor checks and returns summary', () => {
-    const { env } = setupStateRoot();
-    runCli(
-      [
-        'connector',
-        'setup',
-        '--datasource',
-        'qa-demo',
-        '--connector',
-        'openvpn',
-        '--status-command',
-        'true',
-        '--connect-command',
-        'true',
-      ],
-      env,
-    );
-    const statusOut = runCli(['connector', 'status', '--datasource', 'qa-demo'], env);
-    expect(statusOut.status).toBe(0);
-    const parsed = JSON.parse(statusOut.stdout);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.data.summary.total).toBeGreaterThan(0);
-    expect(parsed.data.checks[0].check).toContain('openvpn');
-  });
 
   it('doctor reports the missing connector command as a coded check', () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-connector-missing-'));
@@ -131,25 +83,10 @@ describe('connector UX', () => {
 
   it('doctor returns machine-readable connector codes for blocked status checks', () => {
     const { env } = setupStateRoot();
-    const setupOut = runCli(
-      [
-        'connector',
-        'setup',
-        '--datasource',
-        'qa-demo',
-        '--connector',
-        'openvpn',
-        '--status-command',
-        'false',
-        '--connect-command',
-        'true',
-      ],
-      env,
-    );
-    expect(setupOut.status).toBe(0);
+    expect(runCli(['creds', 'set', '--ref', 'kpf:qa:demo', '--status-command', 'false', '--connect-command', 'true'], env).status).toBe(0);
     const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).not.toBe(0);
     const parsed = JSON.parse(out.stdout);
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');
+    expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe('connector_status_blocked');
   });
 });

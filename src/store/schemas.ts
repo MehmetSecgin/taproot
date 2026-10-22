@@ -50,5 +50,3 @@ export const RuntimeConfigSchema = z.object({
   serviceAliases: z.record(z.string(), z.string()).optional(),
 });
 
-export type DatasourceProfileInput = z.infer<typeof DatasourceProfileSchema>;
-export type RuntimeConfigInput = z.infer<typeof RuntimeConfigSchema>;

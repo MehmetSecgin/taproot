@@ -7,7 +7,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
-import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/discover-datasources.js';
+import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/tsh-databases.js';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { str } from '../../core/strings.js';

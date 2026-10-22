@@ -11,8 +11,6 @@ export const RUNTIME_CONSTANTS = {
     idleTtlMs: 45 * 60 * 1000,
     hardTtlMs: 6 * 60 * 60 * 1000,
     maxConcurrentLeases: intFromEnv('TAPROOT_MAX_CONCURRENT_LEASES', 4),
-    maxRevalidateAttempts: 3,
-    revalidateBackoffMs: [2000, 5000, 15000] as const,
     leaseHeartbeatIntervalMs: 5000,
     leaseStaleThresholdMs: 20000,
   },
@@ -40,8 +38,6 @@ export const RUNTIME_CONSTANTS = {
   },
   plugin: {
     dbConnectTimeoutMs: 5_000,
-    openvpnStatusTimeoutMs: 1_500,
-    openvpnCommandTimeoutMs: 3_000,
   },
   grpc: {
     streamMessageLimit: intFromEnv('TAPROOT_GRPC_STREAM_MESSAGE_LIMIT', 1000),
@@ -49,7 +45,6 @@ export const RUNTIME_CONSTANTS = {
   },
   defaultPorts: {
     mysql: 3306,
-    postgres: 5432,
     redis: 6379,
     grpc: 6565,
   },

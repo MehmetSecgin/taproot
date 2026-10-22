@@ -11,15 +11,7 @@ function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-const SQL_DATASOURCE_KINDS: readonly string[] = [
-  DatasourceKind.Mysql,
-  DatasourceKind.Postgres,
-  DatasourceKind.TeleportMysql,
-];
-
-function isSqlDatasource(kind: string): boolean {
-  return SQL_DATASOURCE_KINDS.includes(String(kind || '').trim());
-}
+const isSqlDatasource = (kind: string) => kind === DatasourceKind.Mysql || kind === DatasourceKind.TeleportMysql;
 
 function databaseLiteral(datasource: DatasourceProfile): string {
   return escapeSqlString(String(datasource.connection.database || ''));
@@ -27,15 +19,6 @@ function databaseLiteral(datasource: DatasourceProfile): string {
 
 function tableSql(datasource: DatasourceProfile): string {
   const database = databaseLiteral(datasource);
-  if (datasource.kind === DatasourceKind.Postgres) {
-    return [
-      'SELECT table_name AS table_name, column_name AS column_name',
-      'FROM information_schema.columns',
-      `WHERE table_catalog = '${database}'`,
-      "  AND table_schema NOT IN ('information_schema', 'pg_catalog')",
-      'ORDER BY table_name, ordinal_position',
-    ].join(' ');
-  }
   return [
     'SELECT table_name AS table_name, column_name AS column_name',
     'FROM information_schema.columns',
@@ -151,9 +134,8 @@ function parsePartition(kindRaw: string, exprRaw: string): SchemaPartition | und
 
 async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile): Promise<Record<string, TableContext>> {
   const tableResult = await executeCatalogRead(ctx, datasource, tableSql(datasource));
-  const mysqlLike = datasource.kind !== DatasourceKind.Postgres;
-  const indexResult = mysqlLike ? await executeCatalogRead(ctx, datasource, indexSql(datasource)) : undefined;
-  const partitionResult = mysqlLike ? await executeCatalogRead(ctx, datasource, partitionSql(datasource)) : undefined;
+  const indexResult = await executeCatalogRead(ctx, datasource, indexSql(datasource));
+  const partitionResult = await executeCatalogRead(ctx, datasource, partitionSql(datasource));
 
   const columnsByTable = new Map<string, Set<string>>();
   for (const row of tableResult.result.rows) {

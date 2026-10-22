@@ -12,7 +12,6 @@ export type PluginKind = 'connector' | 'executor' | 'resolver';
 
 export const DatasourceKind = {
   Mysql: 'mysql',
-  Postgres: 'postgres',
   TeleportMysql: 'teleport-mysql',
   Redis: 'redis',
   Grpc: 'grpc',

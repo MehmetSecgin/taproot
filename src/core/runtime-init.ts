@@ -13,6 +13,3 @@ export function ensureStarterRuntime(ctx: Pick<AppContext, 'paths'>): boolean {
   return true;
 }
 
-export function starterRuntimeConfig(): typeof STARTER_RUNTIME_CONFIG {
-  return { ...STARTER_RUNTIME_CONFIG };
-}

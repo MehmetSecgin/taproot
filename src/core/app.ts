@@ -84,10 +84,6 @@ export function defaultDatasourceName(env: string, service: string, namespace?: 
   return normalizedNamespace ? `${env}-${normalizedNamespace}-${service}` : `${env}-${service}`;
 }
 
-export function runOutputDir(paths: ReturnType<typeof resolvePaths>): string {
-  return path.join(paths.stateRoot, 'runs');
-}
-
 async function withConnectorTimeout(name: string, mode: string, timeoutMs: number, run: () => Promise<DoctorCheck[]>): Promise<DoctorCheck[]> {
   let timer: NodeJS.Timeout | undefined;
   try {

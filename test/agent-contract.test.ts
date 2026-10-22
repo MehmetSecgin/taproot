@@ -48,38 +48,15 @@ const errorEnvelopeSchema = z.object({
 });
 
 describe('agent JSON contract', () => {
-  it('daemon status JSON uses envelope with requestId', async () => {
+  it('daemon status JSON uses envelope with requestId after a query starts the daemon', async () => {
     const stateRoot = makeStateRoot();
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
-    const startOut = runCli(['daemon', 'start'], env);
-    expect(startOut.status).toBe(0);
+    runCli(['query', '--datasource', 'missing', '--sql', 'SELECT 1'], env);
     try {
       const out = runCli(['daemon', 'status'], env);
       expect(out.status).toBe(0);
       const parsed = successEnvelopeSchema.parse(JSON.parse(out.stdout));
       expect((parsed.data as any).pid).toBeTypeOf('number');
-    } finally {
-      runCli(['daemon', 'stop'], env);
-    }
-  });
-
-  it('session commands carry correlation metadata in JSON', async () => {
-    const stateRoot = makeStateRoot();
-    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
-    const startOut = runCli(['daemon', 'start'], env);
-    expect(startOut.status).toBe(0);
-    try {
-      const openOut = runCli(['session', 'open', '--datasource', 'qa-any'], {
-        ...env,
-      });
-      expect(openOut.status).toBe(0);
-      const openParsed = successEnvelopeSchema.parse(JSON.parse(openOut.stdout));
-      expect(openParsed.meta.sessionId).toBeTruthy();
-
-      const lsOut = runCli(['session', 'ls'], env);
-      expect(lsOut.status).toBe(0);
-      const lsParsed = successEnvelopeSchema.parse(JSON.parse(lsOut.stdout));
-      expect(Array.isArray((lsParsed.data as any).sessions)).toBe(true);
     } finally {
       runCli(['daemon', 'stop'], env);
     }
@@ -96,8 +73,6 @@ describe('agent JSON contract', () => {
       },
     });
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
-    const startOut = runCli(['daemon', 'start'], env);
-    expect(startOut.status).toBe(0);
     try {
       const out = runCli(['query', '--env', 'prod', '--service', 'missing', '--sql', 'SELECT 1 AS ok'], env);
       expect(out.status).not.toBe(0);

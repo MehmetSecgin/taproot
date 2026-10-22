@@ -33,7 +33,7 @@ When a gRPC call fails, first establish which half is broken: if introspection a
 
 ## Safety
 - No mutate or flush tier yet: the plugin treats every method as `executeRead`. If a method might write, gate the datasource itself with `policy.allowMutate=false` (the default).
-- Do not bypass with direct `grpcurl`. The plugin handles cluster DNS, openvpn preflight, deadlines, and decoding consistently with the rest of TapRoot.
+- Do not bypass with direct `grpcurl`. The plugin handles cluster DNS, deadlines, and decoding consistently with the rest of TapRoot.
 
 ## Example
-A service-mesh gRPC endpoint registered as `qa-catalog-grpc` (`catalog-grpc.develop:6565`, plaintext h2c, openvpn) with proto package `com.example.catalog.v1`. The pattern repeats for any service-mesh endpoint reachable via cluster DNS.
+A service-mesh gRPC endpoint registered as `qa-catalog-grpc` (`catalog-grpc.develop:6565`, plaintext h2c) with proto package `com.example.catalog.v1`. The pattern repeats for any service-mesh endpoint reachable via cluster DNS.

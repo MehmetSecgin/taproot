@@ -18,7 +18,7 @@ function resolveDaemonEntry(): string {
   return candidates[0];
 }
 
-export function daemonLogPath(): string {
+function daemonLogPath(): string {
   return path.join(path.dirname(defaultSocketPath()), 'taprootd.log');
 }
 

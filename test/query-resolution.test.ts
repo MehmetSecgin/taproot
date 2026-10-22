@@ -192,9 +192,8 @@ describe('query resolution', () => {
         target: 'orders-tidb',
       },
       credentialRef: 'prod',
-      connectors: ['openvpn', 'teleport'],
+      connectors: ['teleport'],
       resolverHints: {
-        openvpnCredentialRef: 'vpn:work',
         teleportCredentialRef: 'tsh:prod',
       },
     });

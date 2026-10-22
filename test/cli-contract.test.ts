@@ -21,20 +21,11 @@ function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) 
 }
 
 describe('cli contract', () => {
-  it('prints root help with stable commands', () => {
+  it('prints root help with the eight commands', () => {
     const out = runCli(['--help']);
     expect(out.status).toBe(0);
-    expect(out.stdout).toContain('Universal query orchestration CLI');
-    expect(out.stdout).toContain('self-check');
-    expect(out.stdout).toContain('doctor');
-    expect(out.stdout).toContain('query');
-    expect(out.stdout).toContain('datasource');
-    expect(out.stdout).toContain('kb');
-    expect(out.stdout).toContain('daemon');
-    expect(out.stdout).toContain('session');
-    expect(out.stdout).toContain('init');
-    expect(out.stdout).toContain('discover');
-    expect(out.stdout).toContain('grpc');
+    const names = JSON.parse(out.stdout).data.commands.map((c: { name: string }) => c.name.split(' ')[0]);
+    expect(names.filter((n: string) => n !== 'help').sort()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query']);
   });
 
   it('prints the version as JSON', async () => {
@@ -48,13 +39,6 @@ describe('cli contract', () => {
     const out = runCli(['learn', 'status']);
     expect(out.status).not.toBe(0);
     expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
-  });
-
-  it('self-check json includes checks', () => {
-    const out = runCli(['self-check']);
-    expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
-    expect(Array.isArray(parsed.checks)).toBe(true);
   });
 
   it('returns bad-input exit code for unknown option', () => {

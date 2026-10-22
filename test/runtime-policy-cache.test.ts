@@ -52,12 +52,6 @@ function setupState() {
 }
 
 describe('runtime policy and KB state', () => {
-  it('reports an empty schema catalog cache', () => {
-    const { env } = setupState();
-    const out = runCli(['cache', 'show'], env);
-    expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout)).toEqual({ catalogs: [] });
-  });
 
   it('lists KB services', () => {
     const { env } = setupState();

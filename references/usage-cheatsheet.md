@@ -1,8 +1,7 @@
 # TapRoot Usage Cheatsheet
 
 ## Boot
-- `taproot self-check`
-- `taproot self-check`
+- `taproot init`
 
 ## Credentials
 - `taproot creds set --ref production:sample --user sample_reader --password '***'`
@@ -20,8 +19,4 @@
 ## KB
 - `taproot kb resolve --service sample --env production`
 - `taproot kb resolve --datasource production-sample`
-
-## Cache
-- `taproot cache show`
-- `taproot cache clear`
 

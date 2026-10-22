@@ -1,7 +1,7 @@
 import type { SchemaContext, TableContext } from '../types/core.js';
 import type { SchemaCatalog } from '../store/schema-catalog.js';
 import { suggestNames } from './grpc-introspect.js';
-import { astifySql, type SqlDialect } from './sql-dialect.js';
+import { astifySql } from './sql-parser.js';
 import { str } from './strings.js';
 
 export interface PredicateColumnRefs {
@@ -41,9 +41,9 @@ function safeAlias(node: unknown): string {
   return typeof value === 'string' ? normalizeName(value) : '';
 }
 
-function parseAst(sql: string, dialect: SqlDialect): unknown | null {
+function parseAst(sql: string): unknown | null {
   try {
-    return astifySql(sql, dialect);
+    return astifySql(sql);
   } catch {
     return null;
   }
@@ -99,8 +99,8 @@ function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set
   }
 }
 
-export function collectReferencedTables(sql: string, dialect: SqlDialect): string[] {
-  const ast = parseAst(sql, dialect);
+export function collectReferencedTables(sql: string): string[] {
+  const ast = parseAst(sql);
   if (!ast) return [];
   const cteNames = new Set<string>();
   const tables = new Set<string>();
@@ -152,9 +152,9 @@ function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string
   }
 }
 
-export function collectPredicateColumns(sql: string, dialect: SqlDialect): PredicateColumnRefs {
+export function collectPredicateColumns(sql: string): PredicateColumnRefs {
   const out: PredicateColumnRefs = { byTable: new Map(), bare: new Set() };
-  const ast = parseAst(sql, dialect);
+  const ast = parseAst(sql);
   if (!ast) return out;
   const cteNames = new Set<string>();
   const aliasToTable = new Map<string, string>();
@@ -170,19 +170,19 @@ export function isSchemaMetadataQuery(sql: string): boolean {
   return /^(show\s+(create\s+(table|view)\b|tables\b|(full\s+)?(columns|fields)\b|(index(es)?|keys)\b)|describe\b|desc\b|explain\b)/.test(text);
 }
 
-export function buildSchemaContext(sql: string, dialect: SqlDialect, catalog: SchemaCatalog | undefined): SchemaContext {
+export function buildSchemaContext(sql: string, catalog: SchemaCatalog | undefined): SchemaContext {
   if (!catalog) return { tables: {} };
   const byName = new Map(Object.keys(catalog.tables).map((table) => [table.toLowerCase(), table]));
   const tables: Record<string, TableContext> = {};
-  for (const referenced of collectReferencedTables(sql, dialect)) {
+  for (const referenced of collectReferencedTables(sql)) {
     const table = byName.get(referenced.toLowerCase());
     if (table) tables[table] = catalog.tables[table];
   }
   return { tables, catalog: { tables: byName.size, fetchedAt: catalog.fetchedAt } };
 }
 
-const MISSING_COLUMN_RES = [/unknown column '([^']+)'/i, /column "?([\w.]+)"? does not exist/i];
-const MISSING_TABLE_RES = [/table '([^']+)' doesn't exist/i, /unknown table '([^']+)'/i, /relation "([^"]+)" does not exist/i];
+const MISSING_COLUMN_RES = [/unknown column '([^']+)'/i];
+const MISSING_TABLE_RES = [/table '([^']+)' doesn't exist/i, /unknown table '([^']+)'/i];
 
 function missingName(message: string, patterns: RegExp[]): string {
   return patterns.map((re) => message.match(re)?.[1]).find(Boolean) || '';

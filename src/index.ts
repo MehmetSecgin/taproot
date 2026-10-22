@@ -2,21 +2,13 @@
 import { Command, type Help } from 'commander';
 import { buildContext } from './core/app.js';
 import { printEnvelope, printJson, setPluck } from './core/output.js';
-import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerQuery } from './commands/query.js';
 import { registerDatasource } from './commands/datasource.js';
-import { registerConfig } from './commands/config.js';
 import { registerKb } from './commands/kb.js';
-import { registerCache } from './commands/cache.js';
 import { registerCreds } from './commands/creds.js';
-import { registerConnector } from './commands/connector.js';
-import { registerSanitize } from './commands/sanitize.js';
 import { registerDaemon } from './commands/daemon.js';
-import { registerSession } from './commands/session.js';
 import { registerInit } from './commands/init.js';
-import { registerBench } from './commands/bench.js';
-import { registerDiscover } from './commands/discover.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
@@ -76,21 +68,13 @@ function context() {
   });
 }
 
-registerSelfCheck(program, context);
 registerDoctor(program, context);
 registerQuery(program, context);
 registerDatasource(program, context);
-registerConfig(program, context);
 registerKb(program, context);
-registerCache(program, context);
 registerCreds(program, context);
-registerConnector(program, context);
-registerSanitize(program, context);
 registerDaemon(program);
-registerSession(program);
 registerInit(program, context);
-registerBench(program);
-registerDiscover(program, context);
 registerGrpc(program, context);
 
 function hasCredsTopologyMisuseHint(input: string): boolean {

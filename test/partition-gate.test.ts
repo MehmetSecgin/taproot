@@ -28,7 +28,6 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: 'SELECT id FROM order_items WHERE customer_id = 1 LIMIT 1',
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'mysql',
       }),
     ).toThrow(/MISSING_PARTITION_PREDICATE/);
   });
@@ -38,7 +37,6 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2026-05-01' AND '2026-05-02'",
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'mysql',
       }),
     ).toEqual([]);
   });
@@ -48,7 +46,6 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: 'SELECT e.id FROM order_items e JOIN events ev ON ev.order_date = e.order_date AND ev.id = e.id',
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'mysql',
       }),
     ).toEqual([]);
   });
@@ -58,7 +55,6 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: "SELECT id FROM order_items WHERE order_date = '2026-05-02'",
         schemaContext: context({ kind: 'RANGE', expr: 'order_date, region_id', keys: ['order_date', 'region_id'] }),
-        dialect: 'mysql',
       }),
     ).toThrow(/region_id/);
   });
@@ -68,7 +64,6 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: 'SELECT id FROM order_items WHERE customer_id = 1',
         schemaContext: context({ kind: 'LIST', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'mysql',
         allowPartitionScan: true,
       }),
     ).toContain('partition_scan_bypassed');
@@ -79,19 +74,8 @@ describe('partition predicate gate', () => {
       enforcePartitionPredicate({
         sql: 'SELECT id FROM order_items WHERE customer_id = 1',
         schemaContext: context({ kind: 'HASH', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'mysql',
       })[0],
     ).toContain('partition_pruning_not_enforced');
-  });
-
-  it('sees the partition predicate in postgres-only syntax', () => {
-    expect(
-      enforcePartitionPredicate({
-        sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2026-05-01' AND '2026-05-02' AND note ILIKE '%rush%'",
-        schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
-        dialect: 'postgres',
-      }),
-    ).toEqual([]);
   });
 
   it('bypasses metadata and diagnostic commands', () => {
@@ -106,7 +90,7 @@ describe('partition predicate gate', () => {
       'EXPLAIN SELECT id FROM order_items WHERE customer_id = 1',
       'EXPLAIN ANALYZE SELECT id FROM order_items WHERE customer_id = 1',
     ]) {
-      expect(enforcePartitionPredicate({ sql, schemaContext, dialect: 'mysql' })).toEqual([]);
+      expect(enforcePartitionPredicate({ sql, schemaContext })).toEqual([]);
     }
   });
 
@@ -121,13 +105,13 @@ describe('partition predicate gate', () => {
       'SHOW KEYS FROM order_items',
       'SHOW CREATE VIEW order_items',
     ]) {
-      expect(enforcePartitionPredicate({ sql, schemaContext, dialect: 'mysql' })).toEqual([]);
+      expect(enforcePartitionPredicate({ sql, schemaContext })).toEqual([]);
     }
   });
 
   it('still throws for a plain SELECT on a RANGE partitioned table', () => {
     const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
-    expect(() => enforcePartitionPredicate({ sql: 'SELECT * FROM order_items', schemaContext, dialect: 'mysql' })).toThrow(
+    expect(() => enforcePartitionPredicate({ sql: 'SELECT * FROM order_items', schemaContext })).toThrow(
       /MISSING_PARTITION_PREDICATE/,
     );
   });
@@ -141,7 +125,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date >= '2026-05-01' AND order_date < '2026-05-08'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
       }),
     ).toEqual([]);
   });
@@ -151,7 +134,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date = '2026-05-01'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
       }),
     ).toEqual([]);
   });
@@ -161,7 +143,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date >= '2020-01-01'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
       }),
     ).toEqual(['unbounded_range:order_items.order_date']);
   });
@@ -171,7 +152,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2025-01-01' AND '2026-01-01'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
         maxRangeDays: 90,
       }),
     ).toEqual(['wide_range:order_items.order_date:actual=365:max=90']);
@@ -182,7 +162,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2025-01-01' AND '2026-01-01'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
         maxRangeDays: 400,
       }),
     ).toEqual([]);
@@ -193,7 +172,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: 'SELECT id FROM order_items WHERE order_date >= CURDATE() - INTERVAL 7 DAY',
         schemaContext: partitioned(),
-        dialect: 'mysql',
       }),
     ).toEqual(['range_unverified:order_items.order_date']);
   });
@@ -203,7 +181,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2026-05-01' AND '2026-05-08' AND created_at >= '2020-01-01'",
         schemaContext: partitioned(),
-        dialect: 'mysql',
         maxRangeDays: 90,
       }),
     ).toEqual([]);
@@ -214,7 +191,6 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date IN ('2025-01-01', '2026-01-01')",
         schemaContext: partitioned(),
-        dialect: 'mysql',
         maxRangeDays: 90,
       }),
     ).toEqual(['wide_range:order_items.order_date:actual=365:max=90']);
@@ -225,25 +201,13 @@ describe('range guard', () => {
       collectRangeWarnings({
         sql: "SELECT id FROM order_items WHERE order_date >= '2020-01-01'",
         schemaContext: context(),
-        dialect: 'mysql',
       }),
     ).toEqual([]);
   });
 
-  it('measures the span for postgres-only syntax', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2025-01-01' AND '2026-01-01' AND note ILIKE '%rush%'",
-        schemaContext: partitioned(),
-        dialect: 'postgres',
-        maxRangeDays: 90,
-      }),
-    ).toEqual(['wide_range:order_items.order_date:actual=365:max=90']);
-  });
-
   it('ignores metadata queries', () => {
     expect(
-      collectRangeWarnings({ sql: 'SHOW CREATE TABLE order_items', schemaContext: partitioned(), dialect: 'mysql' }),
+      collectRangeWarnings({ sql: 'SHOW CREATE TABLE order_items', schemaContext: partitioned() }),
     ).toEqual([]);
   });
 });

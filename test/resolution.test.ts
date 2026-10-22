@@ -112,7 +112,7 @@ describe('datasourceKindsForQuery', () => {
       'DELETE FROM orders',
       'REPLACE INTO orders VALUES (1)',
     ]) {
-      expect(datasourceKindsForQuery(query), query).toEqual(['mysql', 'postgres', 'teleport-mysql']);
+      expect(datasourceKindsForQuery(query), query).toEqual(['mysql', 'teleport-mysql']);
     }
   });
 

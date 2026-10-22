@@ -3,9 +3,7 @@ import { str } from './strings.js';
 
 export function expectedKindFromKb(kb: Record<string, unknown>): DatasourceKind {
   const accessMethod = str(kb.access_method).toLowerCase();
-  const engine = String(kb.engine || DatasourceKind.Mysql).toLowerCase();
   if (accessMethod === AccessMethod.Tsh) return DatasourceKind.TeleportMysql;
-  if (engine.includes('postgres')) return DatasourceKind.Postgres;
   return DatasourceKind.Mysql;
 }
 

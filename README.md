@@ -2,7 +2,7 @@
 
 Node/TypeScript CLI for deterministic querying across plugin-backed datasources.
 
-v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector adapters for `openvpn`, `teleport`, `teleport-mysql`, `kubectl-portforward`, while architecture supports any queryable backend (kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
+v1 ships executor plugins (`mysql`, `teleport-mysql`, `redis`, `grpc`) and connector adapters for `teleport` and `kubectl-portforward`, while architecture supports any queryable backend (kafka, rabbitmq, loki, k8s, etc.) via plugin modules.
 
 ## Principles
 - Datasource-centric UX.
@@ -24,12 +24,10 @@ v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector a
 
 **Optional (install only what your datasources need)**
 - `mysql` CLI — for `mysql`/`teleport-mysql` datasources
-- `psql` — for `postgres` datasources
 - `redis-cli` — for `redis` datasources (Redis or Dragonfly endpoints)
 - _(`grpc` plugin needs no extra CLI — `@grpc/grpc-js` is bundled)_
 - `kubectl` — for `qa-portforward` connector
 - `tsh` (Teleport client) — for `teleport`/`teleport-mysql` datasources
-- `openvpn3` or `openvpn` — for `openvpn` connector
 - OS keychain (macOS Keychain / libsecret on Linux) — picked up automatically via the optional `keytar` dependency. If `keytar` fails to build, credentials fall back to an encrypted file in `~/.taproot/config/`. On npm versions that gate install scripts, `npm ci` prints `allow-scripts` warnings and skips building `keytar`, so the fallback file is used. That is a supported setup; to use the OS keychain instead, run `npm approve-scripts keytar` and reinstall.
 
 ### 2. Install from source
@@ -56,12 +54,12 @@ taproot --version   # prints the installed version
 taproot init
 ```
 
-Creates `~/.taproot/` (config, cache) and prints the readiness checks. Idempotent. `taproot self-check` reprints the checks at any time.
+Creates `~/.taproot/` (config, cache) and prints the readiness checks. Idempotent; rerun it to reprint the checks.
 
 ### 4. Create a datasource, store credentials, query
 
 ```bash
-# native MySQL example (substitute --kind postgres / teleport-mysql as needed)
+# native MySQL example (substitute --kind teleport-mysql as needed)
 taproot datasource add \
   --name dev-orders \
   --kind mysql \
@@ -94,9 +92,7 @@ taproot datasource add \
   --credential-ref qa:redis:cache \
   --host my-redis.develop \
   --port 6379 \
-  --database 0 \
-  --connector openvpn \
-  --openvpn-ref vpn:work
+  --database 0
 
 # no auth required? leave the cred ref empty. With AUTH set user/password via creds:
 taproot creds set --ref qa:redis:cache --user default --password '***'
@@ -120,8 +116,7 @@ Redis plugin notes:
 - Output shape: single column `value`, one row per reply line (multi-bulk replies → multiple rows).
 - Protobuf decoding (Redis only): pass `--proto <MessageName> --proto-root <dir>` to decode binary replies with `protobufjs`. `--proto-root` is loaded recursively; all `.proto` files inside are registered and imports resolve by basename. Decoded rows carry the message object as `value`; text replies (`SCAN` keys, `(nil)`, integers, `INFO` blocks) pass through unchanged. Printable-ASCII fallback prevents `SCAN`/`KEYS` from being misdecoded. Per-datasource defaults via `resolverHints.protoRoot` / `resolverHints.protoMessage` (set with `--hint key=value` on `datasource add`).
 - Without `--proto`, binary payloads pass through raw — `redis-cli` is not asked to decode them.
-- No schema catalog, no partition checks: Redis bypasses the MySQL/Postgres schema catalog.
-- Discovery (`taproot discover`) does **not** yet propose Redis datasources; register them with `datasource add`.
+- No schema catalog, no partition checks: Redis bypasses the MySQL schema catalog.
 - TLS: pass `--ssl true` on the datasource to add `--tls` to `redis-cli`.
 
 Write + flush example:
@@ -133,7 +128,6 @@ taproot datasource add \
   --env qa --namespace develop --service cache-redis \
   --host my-redis.develop --port 6379 --database 0 \
   --credential-ref qa:redis:cache \
-  --connector openvpn --openvpn-ref vpn:work \
   --allow-mutate
 
 # 2) write requires --allow-mutate at query time too
@@ -159,7 +153,6 @@ taproot datasource add \
   --env qa --namespace develop --service order-cache \
   --host my-cache.develop --port 6379 --database 14 \
   --credential-ref qa:redis:order-cache \
-  --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/order-cache \
   --hint protoMessage=OrderProto
 
@@ -194,7 +187,6 @@ taproot datasource add \
   --name qa-catalog-grpc --kind grpc \
   --env qa --namespace develop --service catalog-grpc \
   --host catalog-grpc.develop --port 6565 \
-  --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/repos/catalog-service,$HOME/repos/shared-protos
 
 # doctor: opens a channel against the first service in the loaded proto.
@@ -263,7 +255,7 @@ For a clean-machine end-to-end check, see `scripts/smoke-onboard.sh`.
 
 ### Time zones (UTC by default)
 
-For MySQL/TiDB/Postgres datasources TapRoot runs `SET time_zone = '+00:00'` (Postgres: `TimeZone = UTC`) on every connection. This means **`WHERE` timestamp literals are interpreted as UTC** and `TIMESTAMP`/`DATETIME` columns render as UTC (ISO-8601). Literal interpretation and display therefore agree on the same absolute instant:
+For MySQL/TiDB datasources TapRoot runs `SET time_zone = '+00:00'` on every connection. This means **`WHERE` timestamp literals are interpreted as UTC** and `TIMESTAMP`/`DATETIME` columns render as UTC (ISO-8601). Literal interpretation and display therefore agree on the same absolute instant:
 
 ```bash
 # both the literals and the rendered rows are UTC
@@ -289,13 +281,11 @@ taproot query --datasource prod-orders \
 
 ### Schema catalog
 
-The first query against a SQL datasource (`mysql`, `postgres`, `teleport-mysql`) starts a background read of `information_schema` columns, plus indexes and partitions on MySQL/TiDB, and caches them at `~/.taproot/cache/schema/<datasource>.json`. The fetch never delays a query: the daemon finishes it after replying, and concurrent queries share one fetch. Until it lands, responses carry no `meta.schemaContext.tables` and the partition guard has nothing to check. The cache is fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24); a stale catalog keeps serving while the refetch runs. A failed fetch never fails the query. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches the catalog and appends the closest cached names to the message (`Did you mean: orders.customer_id?`), also returned as `error.details.didYouMean`.
+The first query against a SQL datasource (`mysql`, `teleport-mysql`) starts a background read of `information_schema` columns, indexes and partitions, and caches them at `~/.taproot/cache/schema/<datasource>.json`. The fetch never delays a query: the daemon finishes it after replying, and concurrent queries share one fetch. Until it lands, responses carry no `meta.schemaContext.tables` and the partition guard has nothing to check. The cache is fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24); a stale catalog keeps serving while the refetch runs. A failed fetch never fails the query. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches the catalog and appends the closest cached names to the message (`Did you mean: orders.customer_id?`), also returned as `error.details.didYouMean`.
 
 Each SQL query returns `meta.schemaContext.tables[<table>]` for the tables it references: `database`, `columns`, `primaryKey`, `indexes` (`unique` appears only when true, `type` only when not `BTREE`) and `partition`. `meta.schemaContext.catalog` carries `{ tables, fetchedAt }`.
 
 The partition guard (`MISSING_PARTITION_PREDICATE`, bypass with `--allow-partition-scan`) and the range warnings (`TAPROOT_MAX_RANGE_DAYS`) read the same cached catalog.
-
-`taproot cache show` prints `{"catalogs":[{"datasource","fetchedAt","tables"}]}`. `taproot cache clear` deletes every cached catalog and prints `{"cleared":<count>}`.
 
 ### Output
 
@@ -356,79 +346,14 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 
 ---
 
-## Discover datasources
-
-`taproot discover` materializes datasource profiles from your local sources of truth — preferring the KB when present, falling back to live `kubectl`/`tsh` scans.
-
-### From KB (preferred when you have one)
-
-```bash
-# Read <kb-dir>/services.json, generate proposals for the env.
-# Dry-run by default; nothing is saved.
-taproot discover kb --env qa
-
-# Limit by namespace or single service.
-taproot discover kb --env qa --namespace develop
-taproot discover kb --env prod --service orders
-
-# Save proposals + seed connector credential defaults (vpn:work statusCommand, tsh:<env> statusCommand).
-taproot discover kb --env qa --apply
-taproot discover kb --env prod --apply
-```
-
-Output matches whatever the KB declares per service / env (host, port, database, target, access_method). Supported KB `access_method`s: `native`, `tsh`, `qa-portforward`. Other methods are reported as skipped.
-
-### From kubectl
-
-```bash
-# Default: classify by service-name / port, wire `openvpn` connector + vpn:work hint.
-taproot discover kubectl --env qa --namespace develop
-
-# Match a tiproxy-style cluster: rewrites host to `tiproxy-<service>.<namespace>` and uses a shared env credential ref.
-taproot discover kubectl --env qa --namespace develop --host-pattern tiproxy --shared-credential-ref
-
-# Apply.
-taproot discover kubectl --env qa --namespace develop --host-pattern tiproxy --shared-credential-ref --apply
-
-# Drop VPN wiring if your team does not VPN.
-taproot discover kubectl --env qa --namespace develop --no-vpn
-```
-
-Heuristics: service port (3306/4000/6000/6033/5432/6432) or service name (mysql/maria/tidb/percona/postgres/pg). System namespaces (`kube-system`, `cert-manager`, ...) are skipped.
-
-### From Teleport
-
-```bash
-taproot discover teleport --env prod --apply
-```
-
-Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profiles with `connectors: [openvpn, teleport]` and matching `resolverHints`. Use `--no-vpn` to skip the VPN wiring.
-
-### Notes
-- Credentials are **never** discovered or saved. After `--apply`, set them per credential ref printed by discover:
-  ```bash
-  taproot creds set --ref <env>:<service> --user <user> --password '<***>'
-  taproot creds set --ref vpn:work --status-command '<vpn status command>' --connect-command '<vpn connect command>'
-  taproot creds set --ref tsh:<env> --status-command 'tsh status' --login-command 'tsh login --proxy <proxy> --auth <auth>'
-  ```
-- `--force` overwrites datasources with the same name; without it, conflicts are reported and skipped.
-
----
-
 ## Commands
 - `taproot init` and `taproot init datasource --env <env> --service <service>`
-- `taproot discover <kb|kubectl|teleport> --env <env> [--namespace <ns>] [--service <s>] [--host-pattern service-name|tiproxy] [--shared-credential-ref] [--no-vpn] [--apply] [--force]`
-- `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
-- `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
+- `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions)
 - `taproot query --datasource <name> --sql <sql> [--param k=v] [--allow-discovery]`
-- `taproot datasource <list|show <name>|add|remove <name>|resolve>`
-- `taproot connector <setup|status>`
+- `taproot datasource <list|show <name>|add|remove <name>|resolve|import>`
 - `taproot kb <resolve|tables|related|list-services|relations list|relations import>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
-- `taproot cache <show|clear>`
-- `taproot creds <set|show|unset>`
-- `taproot daemon <start|status|stop|restart>`
-- `taproot session <open|ls|inspect|close|close-all>`
-- `taproot sanitize check-repo`
+- `taproot creds <set|show|list|unset>`
+- `taproot daemon <status|stop>`: the first query starts the daemon, and it exits when idle
 - `taproot grpc describe [--datasource <name> | --proto-root <dir>] [--service <name>] [--method <name>] [--skeleton] [--max-depth <n>]` — `--service`/`--method` accept partial names
 - `taproot grpc list [pattern] [--datasource <name> | --proto-root <dir>] [--service <name>]`
 - `taproot grpc find <pattern> [--datasource <name> | --proto-root <dir>]`
@@ -437,20 +362,7 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 
 ## Agent-facing diagnostics
 
-Use targeted readiness before deeper troubleshooting:
-
-```bash
-taproot self-check --agent --datasource <name>
-taproot self-check --agent --env <env> --service <service>
-```
-
-Targeted readiness returns:
-
-- `readiness`
-- `checks`
-- `target`
-
-For deeper diagnosis:
+`taproot init` reports whole-install readiness (`readiness`, `checks`). For one datasource:
 
 ```bash
 taproot doctor --datasource <name>
@@ -461,15 +373,14 @@ taproot doctor --datasource <name> --connect
 
 ---
 
-## OpenVPN + Teleport setup
+## Teleport setup
 
 ```bash
 # connector credential refs (local encrypted state, not repository files)
-taproot creds set --ref vpn:work --status-command "openvpn3 sessions-list" --connect-command "openvpn3 session-start --config /absolute/path/to/profile.ovpn"
 taproot creds set --ref tsh:work --status-command "tsh status" --login-command "tsh login --proxy your.teleport.proxy --auth your-sso"
 taproot creds set --ref production:analytics --db-user analytics_reader
 
-# datasource using teleport mysql executor + connectors
+# datasource using the teleport-mysql executor and the teleport connector
 taproot datasource add \
   --name production-analytics \
   --kind teleport-mysql \
@@ -478,9 +389,7 @@ taproot datasource add \
   --credential-ref production:analytics \
   --database analytics \
   --target primary-tidb \
-  --connector openvpn \
   --connector teleport \
-  --connector-ref openvpn=vpn:work \
   --connector-ref teleport=tsh:work
 
 taproot doctor --datasource production-analytics
@@ -523,7 +432,7 @@ Structure:
 - `prod` defaults to deterministic no-guess datasource resolution (profile/KB); use `--allow-discovery` only when explicitly needed.
 - Mutating queries require `--allow-mutate` **and** datasource policy with `executeMutate`.
 - `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.
-- `taproot self-check --agent` is the preferred machine-readable readiness contract, especially with `--datasource` or `--env` + `--service`.
+- `taproot init` is the whole-install readiness check; `taproot doctor --datasource <name>` checks one datasource.
 - Secrets are never printed and are redacted from JSON output envelopes.
 - The schema catalog is a deterministic local cache and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.

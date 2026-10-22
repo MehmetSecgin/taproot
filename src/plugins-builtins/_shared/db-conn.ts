@@ -26,7 +26,7 @@ export function baseConnConfig(
   };
 }
 
-export async function closeMysqlConnection(conn: Connection): Promise<void> {
+async function closeMysqlConnection(conn: Connection): Promise<void> {
   await conn.end().then(
     () => (conn as unknown as { connection?: { stream?: { unref?: () => void } } }).connection?.stream?.unref?.(),
     () => conn.destroy(),

@@ -5,7 +5,7 @@ Treat `kind: redis` datasources as cache lookups, not SQL queries. There is no s
 ## Querying
 - Pass the raw Redis command as `--sql`, for example `--sql "GET <key>"`, `--sql "HGETALL <key>"`, `--sql "SCAN 0 COUNT 50"`, `--sql "INFO keyspace"`. Quote keys with spaces or special characters; the plugin tokenizes shell-style.
 - Result shape: `data.columns = ["value"]`, one row per reply line. Multi-bulk replies (`HGETALL`, `LRANGE`, `SCAN`) produce multiple rows, alternating field and value lines for hashes. Access via `data.rows[i][0]` (positional, `data.rowsForm: "array"`).
-- `taproot doctor --datasource <name>` runs `PING -> PONG` plus any wired connectors (typically `openvpn`).
+- `taproot doctor --datasource <name>` runs `PING -> PONG` plus any wired connectors.
 
 ## Command tiers (self-gated)
 Redis classifies commands into three tiers and gates itself, because the shared SQL safety regex does not understand Redis verbs.
@@ -23,6 +23,6 @@ Default policy on `datasource add` is read-only (`allowMutate=false`). To enable
 - Payloads without a configured `--proto` pass through as raw bytes. If a binary cell shows up in output, add `--proto` rather than interpreting bytes by eye.
 
 ## Registration
-- Discovery (`taproot discover kb|kubectl|teleport`) does not propose Redis datasources yet. Register them with `taproot datasource add --kind redis ...` or hand-edit the profile. Wire `--connector openvpn --openvpn-ref vpn:work` for cluster-DNS hosts on QA.
+- Register Redis datasources with `taproot datasource add --kind redis ...`.
 - No-auth Redis: leave the cred ref unset; TapRoot reads an empty cred map fine. For AUTH or ACL, set `password` (and optionally `user`) via `taproot creds set --ref <ref>`.
 - TLS: pass `--ssl` (a boolean flag, no value) on `taproot datasource add` to add `--tls` to the `redis-cli` invocation. `--ssl true` is rejected with `error: too many arguments`.

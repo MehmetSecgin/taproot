@@ -3,7 +3,6 @@ import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { missingPartitionPredicate } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
-import type { SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
 
 const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
@@ -90,7 +89,6 @@ function hasBoundedPredicate(sql: string, key: string): boolean {
 export function collectRangeWarnings(input: {
   sql: string;
   schemaContext: SchemaContext;
-  dialect: SqlDialect;
   maxRangeDays?: number;
 }): string[] {
   const warnings: string[] = [];
@@ -99,7 +97,7 @@ export function collectRangeWarnings(input: {
   if (!Object.keys(tables).length) return warnings;
 
   const maxRangeDays = Math.max(1, Number(input.maxRangeDays || RUNTIME_CONSTANTS.query.maxRangeDays));
-  const predicateColumns = collectPredicateColumns(input.sql, input.dialect);
+  const predicateColumns = collectPredicateColumns(input.sql);
 
   for (const [table, ctx] of Object.entries(tables)) {
     const partition = ctx.partition;
@@ -131,7 +129,6 @@ export function collectRangeWarnings(input: {
 export function enforcePartitionPredicate(input: {
   sql: string;
   schemaContext: SchemaContext;
-  dialect: SqlDialect;
   allowPartitionScan?: boolean;
 }): string[] {
   const warnings: string[] = [];
@@ -141,7 +138,7 @@ export function enforcePartitionPredicate(input: {
 
   const allowByEnv = process.env.TAPROOT_ALLOW_PARTITION_SCAN === '1';
   const allowPartitionScan = Boolean(input.allowPartitionScan || allowByEnv);
-  const predicateColumns = collectPredicateColumns(input.sql, input.dialect);
+  const predicateColumns = collectPredicateColumns(input.sql);
 
   for (const [table, ctx] of Object.entries(tables)) {
     const partition = ctx.partition;

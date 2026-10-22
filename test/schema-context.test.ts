@@ -28,7 +28,6 @@ describe('schema context', () => {
   it('returns metadata for referenced joined tables', () => {
     const out = buildSchemaContext(
       'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
-      'mysql',
       makeCatalog(),
     );
 
@@ -41,7 +40,7 @@ describe('schema context', () => {
     const refs = collectReferencedTables(`
       WITH recent AS (SELECT id FROM orders WHERE order_date = '2026-05-02')
       SELECT * FROM recent WHERE id IN (SELECT customer_id FROM customers)
-    `, 'mysql');
+    `);
 
     expect(refs.sort()).toEqual(['customers', 'orders']);
   });
@@ -49,52 +48,25 @@ describe('schema context', () => {
   it('resolves aliases for predicate columns', () => {
     const refs = collectPredicateColumns(
       'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
-      'mysql',
     );
     expect(refs.byTable.get('orders')?.has('order_date')).toBe(true);
     expect(refs.byTable.get('customers')?.has('id')).toBe(true);
-  });
-
-  it('resolves aliases for postgres predicate columns', () => {
-    const refs = collectPredicateColumns(
-      "SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = '2026-05-02'",
-      'postgres',
-    );
-
-    expect(refs.byTable.get('orders')?.has('order_date')).toBe(true);
-    expect(refs.byTable.get('customers')?.has('id')).toBe(true);
-  });
-
-  it('resolves referenced tables for postgres-only syntax', () => {
-
-    const out = buildSchemaContext(
-      "SELECT id FROM orders WHERE customer_note ILIKE '%rush%'",
-      'postgres',
-      makeCatalog(),
-    );
-
-    expect(Object.keys(out.tables)).toEqual(['orders']);
   });
 
   it('returns empty context for unparseable SQL', () => {
-    expect(buildSchemaContext('SELECT FROM WHERE', 'mysql', makeCatalog()).tables).toEqual({});
-    expect(buildSchemaContext('SELECT id FROM orders', 'mysql', undefined)).toEqual({ tables: {} });
+    expect(buildSchemaContext('SELECT FROM WHERE', makeCatalog()).tables).toEqual({});
+    expect(buildSchemaContext('SELECT id FROM orders', undefined)).toEqual({ tables: {} });
   });
 });
 
 describe('suggestSchemaNames', () => {
   it('suggests the closest column of a referenced table for a MySQL error', () => {
-    const context = buildSchemaContext('SELECT customer_ident FROM orders', 'mysql', makeCatalog());
+    const context = buildSchemaContext('SELECT customer_ident FROM orders', makeCatalog());
     expect(suggestSchemaNames('UNKNOWN_COLUMN', "Unknown column 'customer_ident' in 'field list'", context, makeCatalog())[0]).toBe('orders.customer_id');
   });
 
-  it('reads the column name from a Postgres error', () => {
-    const context = buildSchemaContext('SELECT o.order_day FROM orders o', 'postgres', makeCatalog());
-    expect(suggestSchemaNames('UNKNOWN_COLUMN', 'column o.order_day does not exist', context, makeCatalog())[0]).toBe('orders.order_date');
-  });
-
   it('suggests catalog tables for a missing table, ignoring the database prefix', () => {
-    const context = buildSchemaContext('SELECT id FROM customer', 'mysql', makeCatalog());
+    const context = buildSchemaContext('SELECT id FROM customer', makeCatalog());
     expect(suggestSchemaNames('UNKNOWN_TABLE', "Table 'orders.customer' doesn't exist", context, makeCatalog())[0]).toBe('customers');
   });
 

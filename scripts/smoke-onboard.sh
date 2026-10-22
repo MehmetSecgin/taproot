@@ -91,7 +91,7 @@ docker exec "$APP_CT" bash -lc '
 
 echo "== smoke: taproot init (fresh state) =="
 docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc '
-  taproot --json init | head -c 4000; echo
+  taproot init | head -c 4000; echo
 '
 
 echo "== smoke: add native MySQL datasource =="
@@ -114,12 +114,12 @@ docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc "
 
 echo "== smoke: doctor =="
 docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc '
-  taproot --json doctor --datasource dev-smoke --connect | head -c 4000; echo
+  taproot doctor --datasource dev-smoke --connect | head -c 4000; echo
 '
 
 echo "== smoke: run query =="
 docker exec -e TAPROOT_MASTER_KEY=smoke-key "$APP_CT" bash -lc '
-  taproot --json query --datasource dev-smoke --sql "SELECT id, label FROM sample_records ORDER BY id"
+  taproot query --datasource dev-smoke --sql "SELECT id, label FROM sample_records ORDER BY id"
 '
 
 echo "== smoke: PASS =="

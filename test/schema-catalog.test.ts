@@ -206,7 +206,7 @@ describe('eager schema catalog', () => {
     await ensureDatasourceCatalog(ctx, datasource());
 
     // act
-    const context = buildSchemaContext('SELECT id FROM ORDERS', 'mysql', ctx.schemaCatalogStore.get('qa-orders'));
+    const context = buildSchemaContext('SELECT id FROM ORDERS', ctx.schemaCatalogStore.get('qa-orders'));
 
     // assert
     expect(Object.keys(context.tables)).toEqual(['orders']);

@@ -106,7 +106,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--connector <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--connector-ref <name=ref>', 'repeatable connector credential refs', (v, p: string[]) => (p || []).concat(v), [])
     .option('--hint <key=value>', 'repeatable resolverHints key/value (e.g. protoRoot=/path, protoMessage=OrderProto)', (v, p: string[]) => (p || []).concat(v), [])
-    .option('--openvpn-ref <ref>')
     .option('--teleport-ref <ref>')
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
@@ -142,7 +141,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         resolverHints: {
           ...parseConnectorRefPairs(opts.connectorRef || []),
           ...parseHintPairs(opts.hint || []),
-          ...(opts.openvpnRef ? { openvpnCredentialRef: opts.openvpnRef } : {}),
           ...(opts.teleportRef ? { teleportCredentialRef: opts.teleportRef } : {}),
         },
         updatedAt: nowIso(),
@@ -206,14 +204,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       });
       if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       printEnvelope(true, { source: 'kb', profile });
-    });
-
-  ds.command('export')
-    .description('Emit all datasource profiles as JSON (round-trips with `datasource import --file`)')
-    .action(() => {
-      const ctx = getCtx();
-      const all = ctx.datasourceStore.list();
-      printEnvelope(true, all);
     });
 
   ds.command('import')

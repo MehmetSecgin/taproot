@@ -117,10 +117,7 @@ export const kbMissing = makeThrower('KB_MISSING');
 export const overloaded = makeThrower('OVERLOADED');
 export const sessionBusy = makeThrower('SESSION_BUSY');
 export const accessDenied = makeThrower('ACCESS_DENIED');
-export const unknownDatabase = makeThrower('UNKNOWN_DATABASE');
-export const unknownTarget = makeThrower('UNKNOWN_TARGET');
 export const connectivity = makeThrower('CONNECTIVITY');
-export const authExpired = makeThrower('AUTH_EXPIRED');
 
 export function classifyExecutorDoctorCode(message: string): DoctorCheckCode | undefined {
   const normalized = str(message).trim();

@@ -13,9 +13,7 @@ For each capability:
 - Validation: `zod`
 - DB client protocols:
   - MySQL: `mysql2`
-  - Postgres: `pg`
 - Connector tooling (reuse existing CLIs):
-  - OpenVPN: `openvpn3` CLI (adapter only, no protocol reimplementation)
   - Teleport DB access: `tsh db exec` (adapter only)
 - Build/test toolchain: `tsup`, `typescript`, `vitest`, `tsx`
 

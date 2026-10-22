@@ -80,12 +80,12 @@ Plugin contract (`src/types/core.ts`):
 - optional hooks: `doctor`, `connect`, `disconnect`, `resolve`, `execute`
 
 Current builtins:
-- Executors: `mysql`, `postgres`, `teleport-mysql`
-- Connectors: `openvpn`, `teleport`, `kubectl-portforward`
+- Executors: `mysql`, `teleport-mysql`, `redis`, `grpc`
+- Connectors: `teleport`, `kubectl-portforward`
 
 ### 3.7 Schema Catalog (Current)
-Catalog is one JSON file per SQL datasource (`mysql`, `postgres`, `teleport-mysql`) at `~/.taproot/cache/schema/<datasource>.json`:
-- `information_schema` columns, plus indexes and partitions (MySQL/TiDB only).
+Catalog is one JSON file per SQL datasource (`mysql`, `teleport-mysql`) at `~/.taproot/cache/schema/<datasource>.json`:
+- `information_schema` columns, indexes and partitions.
 - Fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24).
 
 Behavior:
@@ -93,13 +93,13 @@ Behavior:
 - A stale catalog keeps serving while the refetch runs.
 - A failed fetch never fails the query.
 - The partition guard and range warnings read the cached catalog.
-- `cache show` lists cached catalogs; `cache clear` deletes them all.
+- An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error forces a refetch.
 
 ### 3.8 Current Performance Shape
 Dominant latency today (for transport-backed queries):
 - Connector checks/connect each invocation.
 - New external process spawn per query (`tsh db exec` path).
-- New DB connection per query for mysql/postgres plugins.
+- New DB connection per query outside the daemon.
 
 Consequences under bursty workload:
 - 15 back-to-back queries multiply preflight overhead.
@@ -199,8 +199,7 @@ Degraded semantics (explicit):
   - repeated timeout threshold breaches.
 - Revalidation triggers:
   - on next lease acquire when `nextRevalidateAt <= now`,
-  - periodic sweeper probe,
-  - explicit `session inspect --revalidate`.
+  - periodic sweeper probe.
 - Retry budget:
   - `maxRevalidateAttempts=3` per degradation window.
   - backoff: `2s -> 5s -> 15s`.
@@ -336,23 +335,8 @@ Rules:
 
 ## 6) Command Surface Impact (Structural)
 - Existing `query` remains primary user entry.
-- Add `session` namespace:
-  - `session open`
-  - `session ls`
-  - `session inspect`
-  - `session close`
-  - `session close --all`
-- Add `daemon` namespace:
-  - `daemon status`
-  - `daemon start`
-  - `daemon stop`
-  - `daemon restart`
-
-For casual users:
-- no required session commands; `query` auto-manages leases.
-
-For power users/agents:
-- explicit session control for bulk workflows.
+- `daemon` namespace: `daemon status`, `daemon stop`. The first query starts the daemon.
+- No session commands: `query` opens and leases sessions itself.
 
 ## 7) Security Boundaries
 - Trust boundary: local user account.
@@ -383,7 +367,7 @@ Phase 2:
 - resource ownership model, process-group cleanup, TTL caches.
 
 Phase 3:
-- DB pooling for mysql/postgres, optimized teleport command path, batch execution mode.
+- DB pooling for mysql, optimized teleport command path, batch execution mode.
 
 Phase 4:
 - operational hardening (metrics, stress tests, chaos tests for orphan cleanup).

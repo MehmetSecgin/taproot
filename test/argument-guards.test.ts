@@ -44,14 +44,6 @@ describe('CLI argument guards classify as BAD_INPUT', () => {
     expectBadInput(['creds', 'set', '--ref', 'qa:orders', '--kv', 'brokenpair'], "Invalid --kv 'brokenpair'");
   });
 
-  it('rejects config restore without a selector', () => {
-    expectBadInput(['config', 'restore'], 'Specify one of --id');
-  });
-
-  it('rejects a non-integer --keep', () => {
-    expectBadInput(['config', 'prune', '--keep', 'many'], "Invalid --keep 'many'");
-  });
-
   it('rejects grpc describe without a proto root or datasource', () => {
     expectBadInput(['grpc', 'describe'], '--proto-root or --datasource required');
   });

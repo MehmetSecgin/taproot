@@ -152,27 +152,6 @@ export class SessionRegistry {
     return created;
   }
 
-  close(sessionId: string): boolean {
-    const found = this.sessionsById.get(sessionId);
-    if (!found) return false;
-    found.state = 'closed';
-    found.lastUsedAt = nowIso();
-    this.sessionIdByFingerprint.delete(found.fingerprint);
-    this.sessionsById.delete(sessionId);
-    this.leaseHeartbeats.delete(sessionId);
-    this.persist();
-    return true;
-  }
-
-  closeAll(): number {
-    const count = this.sessionsById.size;
-    this.sessionsById.clear();
-    this.sessionIdByFingerprint.clear();
-    this.leaseHeartbeats.clear();
-    this.persist();
-    return count;
-  }
-
   acquireLease(sessionId: string): string {
     const session = this.sessionsById.get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);

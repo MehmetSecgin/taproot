@@ -1,6 +1,6 @@
 ---
 name: taproot
-description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Postgres, Redis/Dragonfly, gRPC unary and streaming calls), doctor checks, KB resolution, explicit cache operations, and session-backed connector workflows. Trigger when users ask to run DB/cache/service queries through TapRoot, call gRPC endpoints, diagnose connector or auth issues, resolve env/service to a datasource, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB, `redis-cli`, or `grpcurl` scripts.
+description: Use TapRoot for deterministic datasource queries (MySQL/TiDB, Redis/Dragonfly, gRPC unary and streaming calls), doctor checks, KB resolution, and connector-backed access through Teleport or kubectl port-forwards. Trigger when users ask to run DB/cache/service queries through TapRoot, call gRPC endpoints, diagnose connector or auth issues, resolve env/service to a datasource, inspect TapRoot KB/cache state, or work through TapRoot instead of ad-hoc DB, `redis-cli`, or `grpcurl` scripts.
 ---
 
 # TapRoot
@@ -14,7 +14,7 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 | gRPC endpoints (offline introspection, unary and streaming calls) | `references/grpc.md` |
 | Redis / Dragonfly (command tiers, protobuf payloads) | `references/redis.md` |
 | SQL schema catalog, partitions, relations | `references/sql.md` |
-| JSON envelope, `--pluck`, rows shape, benchmarking | `references/output.md` |
+| JSON envelope, `--pluck`, rows shape | `references/output.md` |
 | Symptom-to-command map | `references/troubleshooting.md` |
 | Command patterns and decision points | `references/workflows.md` |
 
@@ -38,12 +38,12 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - `--pluck <dot.path>` projects a subtree in-process on any command; prefer it over piping to jq. For rows, `--pluck data.rows`. On failure it prints the full error envelope instead and exits non-zero, so always gate on exit code.
 - The SQL or native command goes in `--sql "<native>"`, never as a positional argument; a positional string fails with "too many arguments for 'query'". Example: `taproot query --datasource <name> --sql "<sql>"`
 - Every query response carries `meta.schemaContext` for referenced tables (SQL) or the called service and messages (gRPC). Read it instead of re-introspecting.
-- The table catalog is cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`) and refreshed in the background when stale. After a migration, `cache clear` drops every cached catalog so the next query re-reads it.
+- The table catalog is cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`) and refreshed in the background when stale. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches it, so a recent migration shows up on the next query.
 - Wide scans warn rather than block: `unbounded_range`, `wide_range:<table>.<key>:actual=N:max=M`, and `range_unverified` land in `data.warnings`. Tighten the range unless the wide scan is intended.
 - Queries default to a 15000 ms timeout. Raise with `--timeout <ms>` only when a slower query is intentional.
 - Connections run in UTC, so timestamp literals are UTC and match rendered values. Override with `--tz` rather than shifting literals by hand.
 - Prefer `--datasource` when the datasource is known, `--env` + `--service` when resolution is part of the task.
-- For repeated Teleport-style access, start the daemon and open a session; a cold `tsh proxy db` costs 3 to 10 s per call.
+- The first query starts `taprootd`, which keeps Teleport tunnels and connection pools open, so only the first query pays the 3 to 10 s of a cold `tsh proxy db`.
 
 ## Error codes
 One recovery action each. Do not loop. If it does not resolve, return the error and stop.
@@ -60,7 +60,7 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `MISCONFIGURED_DATASOURCE`: repair with `taproot init datasource --env <env> --service <service>`.
 - `DETERMINISTIC_REQUIRED` / `DISCOVERY_UNAVAILABLE`: populate deterministic routing via datasource profiles or the KB. `--allow-discovery` is a last resort and needs explicit authorization.
 - `OVERLOADED`: daemon queue full. Wait and retry once, or set `TAPROOT_FORCE_DIRECT=1`.
-- `SESSION_BUSY`: concurrent-lease cap hit. Wait for in-flight queries or open a new session.
+- `SESSION_BUSY`: concurrent-lease cap hit. Wait for in-flight queries, then retry once.
 
 ## Readiness in one line
-`taproot init` and `taproot self-check --agent` print `readiness` plus checks. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. A failing check's `code` and `detail` name the cause. Details in `references/setup.md`.
+`taproot init` prints `readiness` plus checks for the whole install. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. A failing check's `code` and `detail` name the cause. Details in `references/setup.md`.

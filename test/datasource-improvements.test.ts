@@ -44,7 +44,7 @@ describe('--probe runs connector connect before the DB probe', () => {
   });
 });
 
-describe('self-check audits dangling credentialRefs', () => {
+describe('init audits dangling credentialRefs', () => {
   it('warns when a datasource references a credential ref that is not set, and clears once set', () => {
     // arrange
     const { env } = setupState();
@@ -52,7 +52,7 @@ describe('self-check audits dangling credentialRefs', () => {
             '--host', '127.0.0.1', '--port', '3306', '--database', 'd'], env);
 
     // act
-    const before = JSON.parse(runCli(['self-check', '--agent'], env).stdout);
+    const before = JSON.parse(runCli(['init'], env).stdout);
     const check = before.checks.find((c: { check: string }) => c.check === 'credential_refs');
 
     // assert
@@ -61,25 +61,24 @@ describe('self-check audits dangling credentialRefs', () => {
 
     // act — set the ref, re-check
     runCli(['creds', 'set', '--ref', 'missing-ref', '--user', 'reader', '--password', 'p'], env);
-    const after = JSON.parse(runCli(['self-check', '--agent'], env).stdout);
+    const after = JSON.parse(runCli(['init'], env).stdout);
     const okCheck = after.checks.find((c: { check: string }) => c.check === 'credential_refs');
     expect(okCheck.status).toBe('ok');
   });
 });
 
-describe('datasource export / import', () => {
-  it('round-trips profiles through export then import --file', () => {
+describe('datasource import', () => {
+  it('imports a profile read back from datasource show', () => {
     // arrange
     const { stateRoot, env } = setupState();
     runCli(['datasource', 'add', '--name', 'svc-x', '--kind', 'mysql', '--credential-ref', 'db:x',
             '--env', 'qa', '--service', 'x', '--host', '127.0.0.1', '--port', '3306', '--database', 'xdb'], env);
-    const exported = runCli(['datasource', 'export'], env);
-    expect(exported.status).toBe(0);
-    expect(JSON.parse(exported.stdout).data).toHaveLength(1);
+    const shown = runCli(['datasource', 'show', 'svc-x', '--pluck', 'data'], env);
+    expect(shown.status).toBe(0);
     const dumpFile = path.join(stateRoot, 'dump.json');
-    fs.writeFileSync(dumpFile, exported.stdout);
+    fs.writeFileSync(dumpFile, `[${shown.stdout}]`);
 
-    // act — wipe and re-import from the exported envelope
+    // act — wipe and re-import
     runCli(['datasource', 'remove', 'svc-x'], env);
     const imported = runCli(['datasource', 'import', '--file', dumpFile], env);
 

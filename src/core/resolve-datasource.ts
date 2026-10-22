@@ -56,7 +56,7 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   return `${head} Profiles for service '${service}': ${shown} (envs: ${envs}).${missing}`;
 }
 
-const SQL_KINDS: DatasourceKind[] = [DatasourceKind.Mysql, DatasourceKind.Postgres, DatasourceKind.TeleportMysql];
+const SQL_KINDS: DatasourceKind[] = [DatasourceKind.Mysql, DatasourceKind.TeleportMysql];
 const GRPC_CALL_RE = /^[\w.]+\/\w+$/;
 const SQL_STATEMENT_RE = /^(select|show|with|describe|desc|explain|insert|update|delete|replace)\b/i;
 
@@ -145,12 +145,9 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
       const target = targets[0];
       const database = str(kb?.database || inferDatabaseCandidates(service)[0]);
       const dbUser = str(kb?.db_user);
-      const engine = policy.targetPreference.find((item) => target.toLowerCase().includes(item.toLowerCase()))
-        || (String(kb?.engine || 'mysql').toLowerCase().includes('postgres') ? 'postgres' : 'mysql');
       const accessMethod = accessMethods[0] || kbAccessMethod;
       const syntheticKb = {
         access_method: accessMethod,
-        engine,
         database,
         db_user: dbUser,
         target,

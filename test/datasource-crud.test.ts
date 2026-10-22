@@ -239,9 +239,8 @@ describe('datasource CRUD', () => {
         target: 'orders-tidb',
       },
       credentialRef: 'prod',
-      connectors: ['openvpn', 'teleport'],
+      connectors: ['teleport'],
       resolverHints: {
-        openvpnCredentialRef: 'vpn:work',
         teleportCredentialRef: 'tsh:prod',
       },
     });
@@ -257,12 +256,12 @@ describe('datasource CRUD', () => {
 
   it('datasource add with connectors', () => {
     const { env } = setupState();
-    addProfile(env, ['--connector', 'openvpn', '--connector-ref', 'openvpn=openvpn:qa:svc']);
+    addProfile(env, ['--connector', 'kubectl-portforward', '--connector-ref', 'kubectl-portforward=kpf:qa:svc']);
     const out = runCli(['datasource', 'show', 'qa-svc'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.connectors).toEqual(['openvpn']);
-    expect(parsed.resolverHints.openvpnCredentialRef).toBe('openvpn:qa:svc');
+    expect(parsed.connectors).toEqual(['kubectl-portforward']);
+    expect(parsed.resolverHints['kubectl-portforwardCredentialRef']).toBe('kpf:qa:svc');
   });
 
   it('datasource add with confidence', () => {

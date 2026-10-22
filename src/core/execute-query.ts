@@ -11,7 +11,6 @@ import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate 
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
 import { ensureDatasourceCatalog } from './schema-refresh.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
-import { dialectFromKind } from './sql-dialect.js';
 import { str } from './strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
@@ -220,8 +219,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     datasourceHint: datasource.resolverHints?.timeZone,
     configDefault: ctx.runtimeConfigStore.queryTimeZone(),
   });
-  const dialect = dialectFromKind(datasource.kind);
-  const schemaContext = buildSchemaContext(query, dialect, ctx.schemaCatalogStore.get(datasource.name));
+  const schemaContext = buildSchemaContext(query, ctx.schemaCatalogStore.get(datasource.name));
   void ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
     if (catalog.outcome === 'failed') report.log(`schema catalog skipped: ${catalog.error}`);
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
@@ -246,11 +244,10 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       ...enforcePartitionPredicate({
         sql: query,
         schemaContext,
-        dialect,
         allowPartitionScan: request.allowPartitionScan,
       }),
     );
-    warnings.push(...collectRangeWarnings({ sql: query, schemaContext, dialect }));
+    warnings.push(...collectRangeWarnings({ sql: query, schemaContext }));
 
     report.log('checking connectors');
     const connectStart = Date.now();

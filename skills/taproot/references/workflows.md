@@ -11,31 +11,20 @@
 # On an initialized but unconfigured machine: all checks ok/warn, never fail, exit 0.
 # warn on kb_dir / datasources / credentials means "not configured yet", not broken.
 taproot init
-
-# whole-install health. `doctor` alone is NOT a health check: it needs a target and
-# exits non-zero without --datasource or --env+--service.
-taproot self-check --agent
 ```
+
+`init` is also the whole-install health check. `doctor` alone is not: it needs a target and exits non-zero without `--datasource` or `--env`+`--service`.
 
 ## First Successful Query (Happy Path)
 ```bash
 taproot init
 taproot init datasource --env qa --service orders
 taproot creds set --ref qa:orders --user reader --password <password>
-taproot self-check --agent --datasource qa-orders
 taproot doctor --datasource qa-orders --connect
 taproot query --datasource qa-orders --sql "SELECT 1 AS ok"
 ```
 
 ## Setup And Credentials
-- Runtime self-check:
-```bash
-taproot self-check
-taproot self-check --agent
-taproot self-check --agent --datasource <name>
-taproot self-check --agent --env <env> --service <service>
-```
-
 - KB-backed datasource create/repair:
 ```bash
 taproot init datasource --env <env> --service <service>
@@ -48,11 +37,11 @@ taproot creds show --ref <ref>
 taproot creds unset --ref <ref>
 ```
 
-- Configure and inspect connectors:
+- Wire a connector on the profile, store its commands under the ref, check it with `doctor`:
 ```bash
-taproot connector setup --datasource <name> --connector <name> --ref <ref>
-taproot connector status --datasource <name>
-taproot connector status --datasource <name> --connector teleport
+taproot datasource add ... --connector kubectl-portforward --connector-ref kubectl-portforward=<ref>
+taproot creds set --ref <ref> --status-command "<cmd>" --connect-command "<cmd>"
+taproot doctor --datasource <name> --connect
 ```
 
 ## Common Commands
@@ -109,7 +98,6 @@ taproot datasource add \
   --env qa --namespace develop --service cache-redis \
   --host my-redis.develop --port 6379 --database 0 \
   --credential-ref qa:redis:cache \
-  --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/<service> \
   --hint protoMessage=<MessageName>
 
@@ -144,7 +132,6 @@ taproot datasource add \
   --name qa-<svc>-grpc --kind grpc \
   --env qa --namespace develop --service <svc>-grpc \
   --host <svc>-grpc.develop --port 6565 \
-  --connector openvpn --openvpn-ref vpn:work \
   --hint protoRoot=$HOME/proto/<svc>
 
 # doctor opens channel against the first service in the proto (or --hint probeService=<fq> to override)
@@ -215,22 +202,10 @@ taproot query --datasource <name> --sql "SHOW CREATE TABLE <table>" --pluck meta
 taproot query --datasource <name> --sql "SHOW CREATE TABLE <table>"
 ```
 
-- Cache maintenance:
+- Daemon: the first query starts `taprootd`, which holds pools, tunnels and sessions and exits when idle.
 ```bash
-taproot cache show
-taproot cache clear
-```
-
-- Session-backed repeated access:
-```bash
-taproot daemon start
-taproot session open --datasource <name>
-taproot session ls
-```
-
-- Repo safety:
-```bash
-taproot sanitize check-repo
+taproot daemon status
+taproot daemon stop
 ```
 
 ## Output Expectations
@@ -241,8 +216,8 @@ taproot sanitize check-repo
   - `error.code`, `error.message`, `error.details`
   - `meta.requestId`, `meta.sessionId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
-  - `readiness`, `checks`, `target` from `self-check --agent`
-  - `checks` from `init` and `doctor`
+  - `readiness` and `checks` from `init`
+  - `checks` from `doctor`
 
 ## Safety
 - Keep DB operations read-only unless the user explicitly requests mutation and TapRoot policy allows it.

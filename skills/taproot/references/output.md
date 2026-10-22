@@ -12,7 +12,7 @@
 ## Types and time
 - JSON-typed columns come back as native values when the engine surfaces them as JSON, otherwise as strings.
 - Datetime cells render ISO-8601 UTC by default. Connections run with the session time zone set to UTC, so `WHERE` timestamp literals are interpreted as UTC and match the rendered values. Override per query with `--tz <offset|name>`.
-- For JSON columns, do **not** hand-write engine JSON-path SQL (`JSON_EXTRACT`, `->`, `->>`, `JSON_VALUE`): path syntax and null/type handling differ across MySQL, TiDB, and Postgres and are easy to get subtly wrong. `SELECT` the raw column and extract client-side with `--json-extract <column>:<dotpath>` (repeatable), which parses the cell after fetching and adds a derived `<column>.<dotpath>` column. For shapes it cannot express (arrays, conditional walks), pull the raw column and parse offline with jq or python.
+- For JSON columns, do **not** hand-write engine JSON-path SQL (`JSON_EXTRACT`, `->`, `->>`, `JSON_VALUE`): path syntax and null/type handling differ between MySQL and TiDB and are easy to get subtly wrong. `SELECT` the raw column and extract client-side with `--json-extract <column>:<dotpath>` (repeatable), which parses the cell after fetching and adds a derived `<column>.<dotpath>` column. For shapes it cannot express (arrays, conditional walks), pull the raw column and parse offline with jq or python.
 
 ## schemaContext
 - `meta.schemaContext.tables[<table>]` carries `database`, `columns`, `primaryKey`, `indexes` (`unique` appears only when true, `type` only when not BTREE), and `partition`. Read it before the next query against that datasource instead of re-running `SHOW CREATE`.
@@ -33,9 +33,3 @@ To reuse an earlier result, keep the output you already have. For results over 3
 
 ## Timing
 `taproot query` JSON exposes the phase split at `meta.phases` (`resolveMs`, `connectMs`, `executeMs`, `totalMs`) and overall `meta.timings.durationMs`, identical for daemon-routed and direct queries. Use it to attribute a slow query to resolution, connector preflight, or raw execution before touching timeouts. `--verbose` also prints each phase to stderr.
-
-## Benchmarking
-- `taproot bench --datasource <name> --sql "<sql>" --iterations <n>` for a single scenario. Reports p50/p95/avg per phase and aggregate totals.
-- `taproot bench --scenario <file>` for reproducible sweeps. File shape: `{ "iterations": <default>, "scenarios": [{ "name", "datasource"|"env"+"service", "query", "iterations"? }, ...] }`.
-- Bench routes through the daemon, so start it first with `taproot daemon start`.
-- Non-zero exit when any iteration fails, with errors aggregated per error code in `data.scenarios[].errors`.

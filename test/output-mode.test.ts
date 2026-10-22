@@ -44,8 +44,6 @@ describe('output mode contract', () => {
     const stateRoot = setupStateRoot();
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' };
     expect(JSON.parse(runCli(['datasource', 'show', 'qa-orders'], env).stdout).data.name).toBe('qa-orders');
-    expect(runCli(['cache', 'show'], env).status).toBe(0);
-    expect(() => JSON.parse(runCli(['cache', 'show'], env).stdout)).not.toThrow();
     expect(() => JSON.parse(runCli(['learn', 'status'], env).stdout)).not.toThrow();
   });
 

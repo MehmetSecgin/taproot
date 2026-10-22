@@ -65,7 +65,6 @@ interface BootstrapContext {
   service: string;
   datasourceName: string;
   kb: Record<string, unknown>;
-  engine: string;
   database: string;
   dbUser: string;
   target: string;
@@ -80,16 +79,6 @@ interface BootstrapStrategy {
   build(c: BootstrapContext): KbBootstrapCandidate | undefined;
 }
 
-const VPN_STATUS_COMMAND = 'pgrep -f openvpn >/dev/null && echo connected || (echo disconnected >&2; exit 1)';
-const VPN_CREDENTIAL_DEFAULT: CredentialDefaultSpec = {
-  ref: 'vpn:work',
-  defaults: { statusCommand: VPN_STATUS_COMMAND },
-};
-
-function sqlKindFromEngine(engine: string): string {
-  return engine.includes('postgres') ? DatasourceKind.Postgres : DatasourceKind.Mysql;
-}
-
 function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
   const effectiveNamespace = String(c.namespace || 'default');
   const context = String(process.env.TAPROOT_QA_CONTEXT || c.kb.k8s_context || c.env || effectiveNamespace);
@@ -102,17 +91,16 @@ function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate 
     kb: c.kb,
     profile: {
       name: c.datasourceName,
-      kind: sqlKindFromEngine(c.engine),
+      kind: DatasourceKind.Mysql,
       env: c.env,
       namespace: c.namespace,
       service: c.service,
       tags: c.tags,
       connection: { host: '127.0.0.1', port: localPort, database: c.database },
       credentialRef: c.credentialRef,
-      connectors: ['openvpn', 'kubectl-portforward'],
+      connectors: ['kubectl-portforward'],
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       resolverHints: {
-        openvpnCredentialRef: 'vpn:work',
         'kubectl-portforwardCredentialRef': kpfRef,
       },
       updatedAt: nowIso(),
@@ -120,7 +108,6 @@ function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate 
     },
     credentialDefaults: [
       { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
-      VPN_CREDENTIAL_DEFAULT,
       { ref: kpfRef, defaults: { statusCommand, connectCommand }, overwrite: true },
     ],
   };
@@ -129,28 +116,25 @@ function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate 
 function buildNativeCandidate(c: BootstrapContext): KbBootstrapCandidate | undefined {
   const host = str(c.kb.host).trim();
   if (!host) return undefined;
-  const port = Number(c.kb.port || 0) || (c.engine.includes('postgres') ? 5432 : 3306);
+  const port = Number(c.kb.port || 0) || 3306;
   return {
     kb: c.kb,
     profile: {
       name: c.datasourceName,
-      kind: sqlKindFromEngine(c.engine),
+      kind: DatasourceKind.Mysql,
       env: c.env,
       namespace: c.namespace,
       service: c.service,
       tags: c.tags,
       connection: { host, port, database: c.database },
       credentialRef: c.credentialRef,
-      connectors: ['openvpn'],
+      connectors: [],
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      resolverHints: { openvpnCredentialRef: 'vpn:work' },
+      resolverHints: {},
       updatedAt: nowIso(),
       confidence: c.confidence,
     },
-    credentialDefaults: [
-      { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
-      VPN_CREDENTIAL_DEFAULT,
-    ],
+    credentialDefaults: [{ ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } }],
   };
 }
 
@@ -167,10 +151,9 @@ function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
       tags: c.tags,
       connection: { database: c.database, target: c.target },
       credentialRef: c.credentialRef,
-      connectors: ['openvpn', 'teleport'],
+      connectors: ['teleport'],
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       resolverHints: {
-        openvpnCredentialRef: 'vpn:work',
         teleportCredentialRef: tshRef,
         ...(c.dbUser ? { dbUser: c.dbUser } : {}),
       },
@@ -179,7 +162,6 @@ function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
     },
     credentialDefaults: [
       { ref: c.credentialRef, defaults: { dbUser: c.dbUser } },
-      VPN_CREDENTIAL_DEFAULT,
       { ref: tshRef, defaults: { statusCommand: 'tsh status' } },
     ],
   };
@@ -206,7 +188,6 @@ export function buildKbBootstrapCandidate(
     service,
     datasourceName,
     kb,
-    engine: String(kb.engine || 'mysql').toLowerCase(),
     database: str(kb.database),
     dbUser: str(kb.db_user),
     target: str(options?.targetOverride || kb.target),
