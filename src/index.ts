@@ -12,6 +12,7 @@ import { registerInit } from './commands/init.js';
 import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
+import { removedCliHint } from './core/removed-cli.js';
 import { TAPROOT_VERSION } from './core/version.js';
 import { str } from './core/strings.js';
 
@@ -114,7 +115,7 @@ program.parseAsync(process.argv).catch((error) => {
     const raw = (error as Error)?.message || '';
     const message = hasCredsTopologyMisuseHint(raw)
       ? `${raw}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
-      : raw;
+      : removedCliHint(raw) ?? raw;
     applyOutputOptions();
     printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
     process.exit(classifyExitCode(error));

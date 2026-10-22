@@ -36,13 +36,13 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form.
 - Every command prints exactly one line of compact JSON on stdout, errors and `--help` included. stderr stays empty unless `--verbose`.
 - `--pluck <dot.path>` projects a subtree in-process on any command; prefer it over piping to jq. For rows, `--pluck data.rows`. On failure it prints the full error envelope instead and exits non-zero, so always gate on exit code.
-- The SQL or native command goes in `--sql "<native>"`, never as a positional argument; a positional string fails with "too many arguments for 'query'". Example: `taproot query --datasource <name> --sql "<sql>"`
+- The query text goes in `--sql "<native>"` or its synonym `--query "<native>"` (pass one, not both), never as a positional argument. `--query` reads better for a Redis command or a gRPC `Service/Method`. Example: `taproot query --datasource <name> --sql "<sql>"`
 - Every query response carries `meta.schemaContext` for referenced tables (SQL) or the called service and messages (gRPC). Read it instead of re-introspecting.
 - The table catalog is cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`) and refreshed in the background when stale. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches it, so a recent migration shows up on the next query.
 - Wide scans warn rather than block: `unbounded_range`, `wide_range:<table>.<key>:actual=N:max=M`, and `range_unverified` land in `data.warnings`. Tighten the range unless the wide scan is intended.
-- Queries default to a 15000 ms timeout. Raise with `--timeout <ms>` only when a slower query is intentional.
+- Queries default to a 15000 ms timeout, counted from when the connectors are ready. Raise with `--timeout <ms>` only when a slower query is intentional.
 - Connections run in UTC, so timestamp literals are UTC and match rendered values. Override with `--tz` rather than shifting literals by hand.
-- Prefer `--datasource` when the datasource is known, `--env` + `--service` when resolution is part of the task.
+- Prefer `--datasource` when the datasource is known, `--env` + `--service` when resolution is part of the task. To find a name, `taproot datasource list <pattern>` keeps names containing the pattern and shows each one's `host`, `target` and `database`.
 - The first query starts `taprootd`, which keeps Teleport tunnels and connection pools open, so only the first query pays the 3 to 10 s of a cold `tsh proxy db`.
 
 ## Error codes

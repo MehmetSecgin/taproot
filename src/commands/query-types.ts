@@ -5,6 +5,7 @@ export interface QueryOpts {
   namespace?: string;
   service?: string;
   sql?: string;
+  query?: string;
   param?: string[];
   allowDiscovery?: boolean;
   allowMutate?: boolean;

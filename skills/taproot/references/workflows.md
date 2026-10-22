@@ -105,17 +105,17 @@ taproot datasource add \
 taproot doctor --datasource qa-cache-redis
 
 # basic reads. Pass the raw Redis command verbatim.
-taproot query --datasource qa-cache-redis --sql "DBSIZE"
-taproot query --datasource qa-cache-redis --sql "INFO keyspace"
-taproot query --datasource qa-cache-redis --sql "TYPE <key>"
-taproot query --datasource qa-cache-redis --sql "GET <key>"
-taproot query --datasource qa-cache-redis --sql "HGETALL <key>"
-taproot query --datasource qa-cache-redis --sql "LRANGE <key> 0 -1"
-taproot query --datasource qa-cache-redis --sql "SCAN 0 MATCH 'prefix:*' COUNT 100"
+taproot query --datasource qa-cache-redis --query "DBSIZE"
+taproot query --datasource qa-cache-redis --query "INFO keyspace"
+taproot query --datasource qa-cache-redis --query "TYPE <key>"
+taproot query --datasource qa-cache-redis --query "GET <key>"
+taproot query --datasource qa-cache-redis --query "HGETALL <key>"
+taproot query --datasource qa-cache-redis --query "LRANGE <key> 0 -1"
+taproot query --datasource qa-cache-redis --query "SCAN 0 MATCH 'prefix:*' COUNT 100"
 
 # proto decode without baked defaults (per-query override)
 taproot query --datasource qa-cache-redis \
-  --sql "GET <key>" \
+  --query "GET <key>" \
   --proto <MessageName> \
   --proto-root /path/to/proto/src
 
@@ -155,21 +155,21 @@ taproot grpc describe --datasource qa-<svc>-grpc \
 
 # unary call. Either --request-json or --param.
 taproot query --datasource qa-<svc>-grpc \
-  --sql "<package.Service/Method>" \
+  --query "<package.Service/Method>" \
   --request-json '{"value":1}'
 
 taproot query --datasource qa-<svc>-grpc \
-  --sql "<package.Service/Method>" \
+  --query "<package.Service/Method>" \
   --param text=United
 
 # response shape: single row, value = full message. pluck nested with:
 taproot query --datasource qa-<svc>-grpc \
-  --sql "..." --request-json '...' \
+  --query "..." --request-json '...' \
   --pluck data.rows.0.0.<field>
 
 # example call:
 taproot query --datasource qa-catalog-grpc \
-  --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}' --pluck data.rows.0.0.items
 ```
 
@@ -179,12 +179,12 @@ taproot query --datasource qa-catalog-grpc \
 taproot datasource add --name qa-cache-redis ... --allow-mutate
 
 # write: needs --allow-mutate at query time too
-taproot query --datasource qa-cache-redis --sql "SET k v" --allow-mutate
-taproot query --datasource qa-cache-redis --sql "DEL k" --allow-mutate
-taproot query --datasource qa-cache-redis --sql "EXPIRE k 60" --allow-mutate
+taproot query --datasource qa-cache-redis --query "SET k v" --allow-mutate
+taproot query --datasource qa-cache-redis --query "DEL k" --allow-mutate
+taproot query --datasource qa-cache-redis --query "EXPIRE k 60" --allow-mutate
 
 # FLUSH-tier requires --allow-flush IN ADDITION to --allow-mutate
-taproot query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
+taproot query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
 
 # default behaviour: writes blocked
 # - without --allow-mutate -> "redis command 'SET' is a mutate operation; re-run with --allow-mutate."

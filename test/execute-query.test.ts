@@ -297,6 +297,27 @@ describe('executeQuery datasource kind routing', () => {
   });
 });
 
+describe('executeQuery timeout', () => {
+  it('starts the query timeout after the connectors are ready', async () => {
+    // arrange
+    stateRoot = await setupQueryState({ connectors: ['slow-connector'] });
+    const ctx = contextWith(fakePlugin({ holdMs: 100 }));
+    ctx.pluginRegistry.set('slow-connector', {
+      ...fakePlugin({ kind: 'slow-connector' }),
+      connect: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return [];
+      },
+    });
+
+    // act
+    const outcome = await executeQuery(queryRequest({ timeoutMs: 200 }), { ctx, report: silentQueryReport });
+
+    // assert
+    expect(outcome.ok).toBe(true);
+  });
+});
+
 describe('executeQuery access denied', () => {
   it('fails with ACCESS_DENIED without retrying', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));

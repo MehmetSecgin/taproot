@@ -101,9 +101,9 @@ taproot creds set --ref qa:redis:cache --user default --password '***'
 taproot doctor --datasource qa-cache-redis
 
 # read query: pass any Redis read command as the query string
-taproot query --datasource qa-cache-redis --sql "DBSIZE"
-taproot query --datasource qa-cache-redis --sql "GET user:session:abc123"
-taproot query --datasource qa-cache-redis --sql "SCAN 0 COUNT 10"
+taproot query --datasource qa-cache-redis --query "DBSIZE"
+taproot query --datasource qa-cache-redis --query "GET user:session:abc123"
+taproot query --datasource qa-cache-redis --query "SCAN 0 COUNT 10"
 ```
 
 Redis plugin notes:
@@ -131,11 +131,11 @@ taproot datasource add \
   --allow-mutate
 
 # 2) write requires --allow-mutate at query time too
-taproot query --datasource qa-cache-redis --sql "SET taproot:test:key hello" --allow-mutate
-taproot query --datasource qa-cache-redis --sql "DEL taproot:test:key" --allow-mutate
+taproot query --datasource qa-cache-redis --query "SET taproot:test:key hello" --allow-mutate
+taproot query --datasource qa-cache-redis --query "DEL taproot:test:key" --allow-mutate
 
 # 3) FLUSHDB requires --allow-flush AS WELL AS --allow-mutate
-taproot query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow-flush
+taproot query --datasource qa-cache-redis --query "FLUSHDB" --allow-mutate --allow-flush
 ```
 
 Proto-decoding example:
@@ -143,7 +143,7 @@ Proto-decoding example:
 ```bash
 # Per-query
 taproot query --datasource qa-order-cache \
-  --sql "GET order:v2:1001" \
+  --query "GET order:v2:1001" \
   --proto OrderProto \
   --proto-root ~/proto/order-cache
 
@@ -157,7 +157,7 @@ taproot datasource add \
   --hint protoMessage=OrderProto
 
 taproot query --datasource qa-order-cache \
-  --sql "MGET order:v2:1001 order:v2:1002"
+  --query "MGET order:v2:1001 order:v2:1002"
 # rows: [[{order_id:"1001", status:"OPEN"}], [{order_id:"1002", status:"OPEN"}]]
 ```
 
@@ -209,20 +209,20 @@ taproot grpc describe --datasource qa-catalog-grpc \
 taproot grpc describe --datasource qa-catalog-grpc \
   --method getItemsByParent --skeleton
 
-# unary call: --sql is "<package.Service/Method>". Request body in JSON:
+# unary call: --query is "<package.Service/Method>". Request body in JSON:
 taproot query --datasource qa-catalog-grpc \
-  --sql "com.example.catalog.v1.CatalogService/getItemsByParent" \
+  --query "com.example.catalog.v1.CatalogService/getItemsByParent" \
   --request-json '{"value":1}'
 
 # or build the request from --param key=value pairs (numbers/booleans coerced):
 taproot query --datasource qa-catalog-grpc \
-  --sql "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
+  --query "com.example.catalog.v1.CatalogService/findItemsByNameLike" \
   --param text=Widget
 
 # client-streaming or bidi call: one array element per request message.
 # Returns one row per response message (columns seq, value):
 taproot query --datasource qa-catalog-grpc \
-  --sql "com.example.catalog.v1.CatalogService/lookupItems" \
+  --query "com.example.catalog.v1.CatalogService/lookupItems" \
   --request-json '[{"id":1},{"id":2},{"id":3}]'
 ```
 
@@ -267,7 +267,7 @@ Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` 
 
 ### Query timeout
 
-Queries abort after `--timeout <ms>` (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate).
+Queries abort when execution runs longer than `--timeout <ms>`, counted after connectors are ready (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate).
 
 ### Extracting JSON without engine-specific SQL
 
@@ -349,8 +349,8 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 ## Commands
 - `taproot init` and `taproot init datasource --env <env> --service <service>`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions)
-- `taproot query --datasource <name> --sql <sql> [--param k=v] [--allow-discovery]`
-- `taproot datasource <list|show <name>|add|remove <name>|resolve|import>`
+- `taproot query --datasource <name> --sql <sql> [--param k=v] [--allow-discovery]`; `--query` is a synonym of `--sql` that reads better for Redis and gRPC
+- `taproot datasource <list [pattern]|show <name>|add|remove <name>|resolve|import>`
 - `taproot kb <resolve|tables|list-services|relations list|relations import>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
 - `taproot creds <set|show|list|unset>`
 - `taproot daemon <status|stop>`: the first query starts the daemon, and it exits when idle

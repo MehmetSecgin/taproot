@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { _resetProtoCachesForTest, loadProtobufRoot, loadGrpcPackage } from '../src/core/proto-loader.js';
 import {
@@ -237,6 +238,19 @@ describe('grpc-introspect discovery helpers', () => {
     const { protobufRoot } = await loadProtobufRoot(dir);
     const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.GetProfileRequest') as Record<string, unknown>;
     expect(skeleton).toEqual({ id: '<string>' });
+  });
+
+  it('grpc describe --skeleton prints a ready-to-run query call', () => {
+    const dir = tmpDir('introspect-skeleton-call');
+    writeFixtureProto(dir);
+    const out = spawnSync(
+      process.execPath,
+      [path.join(process.cwd(), 'dist', 'index.js'), 'grpc', 'describe', '--proto-root', dir, '--method', 'GetProfile', '--skeleton', '--pluck', 'data.requestSkeletons'],
+      { encoding: 'utf8', env: { ...process.env, TAPROOT_STATE_ROOT: tmpDir('introspect-state') } },
+    );
+    expect(JSON.parse(out.stdout)[0].call).toBe(
+      `taproot query --datasource <datasource> --query "taproot.test.ProfileService/GetProfile" --request-json '{"id":"<string>"}'`,
+    );
   });
 
   it('buildRequestSkeleton expands nested messages, repeated, enum, map, oneof', async () => {

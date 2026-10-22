@@ -72,17 +72,21 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         expand: { maxDepth },
       });
 
-      const skeletons: Array<{ service: string; method: string; request: string; skeleton: unknown }> = [];
+      const skeletons: Array<{ service: string; method: string; request: string; skeleton: unknown; call: string }> = [];
+      const datasourceArg = opts.datasource ? String(opts.datasource) : '<datasource>';
       if (opts.skeleton) {
         for (const svc of descriptor.services) {
           for (const m of svc.methods) {
             if (methodName && m.name !== methodName) continue;
             const message = buildRequestSkeleton(protobufRoot, m.requestType, { maxDepth });
+            const skeleton = m.requestStream ? [message] : message;
+            const body = JSON.stringify(skeleton).replace(/'/g, `'\\''`);
             skeletons.push({
               service: svc.name,
               method: m.name,
               request: m.requestType,
-              skeleton: m.requestStream ? [message] : message,
+              skeleton,
+              call: `taproot query --datasource ${datasourceArg} --query "${svc.name}/${m.name}" --request-json '${body}'`,
             });
           }
         }

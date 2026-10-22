@@ -84,6 +84,17 @@ describe('datasource CRUD', () => {
     expect(JSON.parse(out.stdout).data.some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
   });
 
+  it('datasource list filters by name and shows host and database', () => {
+    const { env } = setupState();
+    addProfile(env);
+    const out = runCli(['datasource', 'list', 'SVC'], env);
+    const none = runCli(['datasource', 'list', 'nomatch'], env);
+    expect(JSON.parse(out.stdout).data).toEqual([
+      { name: 'qa-svc', kind: 'mysql', env: 'qa', namespace: '', service: 'svc', host: '127.0.0.1', database: 'svcdb' },
+    ]);
+    expect(JSON.parse(none.stdout).data).toEqual([]);
+  });
+
   it('datasource add --probe keeps the profile when plugin doctor fails', () => {
     // arrange
     const { env } = setupState();

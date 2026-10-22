@@ -53,7 +53,7 @@ taproot doctor --datasource pilot-grpc
 
 # 5. the call itself, as printed by --skeleton.
 taproot query --datasource pilot-grpc \
-  --sql "taproot.test.ProfileService/GetProfile" \
+  --query "taproot.test.ProfileService/GetProfile" \
   --request-json '{"id":"<id>"}' \
   --pluck data.rows.0.0
 ```

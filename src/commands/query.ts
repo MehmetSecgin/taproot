@@ -22,6 +22,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--namespace <namespace>')
     .option('--service <service>')
     .option('--sql <native>', 'native query text: SQL, Redis command, or gRPC Service/Method')
+    .option('--query <native>', 'same as --sql; reads better for a Redis command or a gRPC Service/Method')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
@@ -61,7 +62,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
       const env = target.env;
       const policy = environmentPolicy(ctx, env);
       const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
-      if (opts.explain && !opts.sql) {
+      if (opts.sql && opts.query) {
+        throw badInput('pass the query text once, with --sql or --query, not both.');
+      }
+      const text = opts.sql || opts.query || '';
+      if (opts.explain && !text) {
         throw badInput('--explain requires --sql.');
       }
       const request: QueryExecutionRequest = {
@@ -70,7 +75,7 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         env,
         namespace: target.namespace,
         service: target.service,
-        query: opts.sql || '',
+        query: text,
         params: opts.param || [],
         allowDiscovery,
         allowMutate: Boolean(opts.allowMutate),

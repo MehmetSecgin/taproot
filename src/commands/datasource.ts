@@ -47,11 +47,15 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   const ds = program.command('datasource').description('Datasource profile operations');
 
   ds.command('list')
+    .description('List datasource profiles; optional [pattern] keeps names containing it')
+    .argument('[pattern]', 'case-insensitive substring of the datasource name')
     .option('--detailed', 'include confidence and updatedAt', false)
-    .action((opts) => {
+    .action((pattern: string | undefined, opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
+      const needle = (pattern || '').toLowerCase();
       const rows = ctx.datasourceStore.list()
+        .filter((d) => d.name.toLowerCase().includes(needle))
         .map((d) => {
           const row: Record<string, unknown> = {
             name: d.name,
@@ -59,6 +63,9 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
             env: d.env || '',
             namespace: d.namespace || '',
             service: d.service || '',
+            ...(d.connection.host ? { host: d.connection.host } : {}),
+            ...(d.connection.target ? { target: d.connection.target } : {}),
+            ...(d.connection.database ? { database: d.connection.database } : {}),
           };
           if (detailed) {
             row.confidence = d.confidence;

@@ -179,8 +179,6 @@ async function resolveTargetDatasource(
 export async function executeQuery(request: QueryExecutionRequest, deps: QueryDeps): Promise<QueryOutcome> {
   const { ctx, report } = deps;
   const startedAt = Date.now();
-  const deadlineMs = startedAt + request.timeoutMs;
-  const remainingMs = (): number => Math.max(1, deadlineMs - Date.now());
   let phaseConnectMs = 0;
   let phaseExecuteMs = 0;
 
@@ -207,7 +205,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   try {
     params = parseParamPairs(request.params || []);
     jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
-    if (!query) throw new Error('No query resolved. Provide --sql.');
+    if (!query) throw new Error('No query resolved. Provide --sql (or --query for Redis and gRPC).');
   } catch (error) {
     return failure(error, {});
   }
@@ -250,7 +248,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
     report.log('checking connectors');
     const connectStart = Date.now();
-    const preflightBudgetMs = Math.max(remainingMs(), RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
+    const preflightBudgetMs = Math.max(request.timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
     const connectorChecks = await withQueryTimeout({
       timeoutMs: preflightBudgetMs,
       run: () =>
@@ -273,6 +271,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
     report.log(`executing query via ${plugin.manifest.name}`);
     const executeStart = Date.now();
+    const remainingMs = (): number => Math.max(1, executeStart + request.timeoutMs - Date.now());
     const executedQuery = request.explain ? `EXPLAIN ${query}` : query;
     const pluginParams = buildPluginParams(request, params, datasource.kind);
     const result: QueryResult = await withQueryTimeout({

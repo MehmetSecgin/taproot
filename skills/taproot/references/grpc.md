@@ -16,7 +16,7 @@ When a gRPC call fails, first establish which half is broken: if introspection a
 - All of these honor `--proto-root <dir>` when no datasource is registered yet.
 
 ## Calling
-- Query syntax: `--sql "<fully.qualified.package.Service/Method>"`, mirroring `grpcurl`. The slash separates service from method, and method casing must match the `.proto` rpc declaration.
+- Query syntax: `--query "<fully.qualified.package.Service/Method>"` (or `--sql`), mirroring `grpcurl`. The slash separates service from method, and method casing must match the `.proto` rpc declaration.
 - Request payload: full JSON via `--request-json '{...}'` (takes precedence), or built from `--param key=value` pairs (numeric strings become numbers, `true`/`false` become bools, everything else stays string). The shape must match the request message exactly. Use `grpc describe` rather than grepping `.proto` by hand.
 - Streaming request: for a client-streaming or bidi method, pass a JSON array in `--request-json`, one element per message. A single object is sent as a one-message stream. An array on a unary or server-streaming method is `BAD_INPUT`. Validation errors name the element: `request[2]: unknown field ...` with `field: [2].<name>`. `grpc describe --skeleton` emits the array form for these methods.
 - Stream limits: at most 1000 request messages per call (`BAD_INPUT` above it). A response stream stops at 1000 messages and adds a warning. `TAPROOT_GRPC_STREAM_MESSAGE_LIMIT` changes both. `--timeout` covers the whole stream.

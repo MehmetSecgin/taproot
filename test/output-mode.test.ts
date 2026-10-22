@@ -53,6 +53,17 @@ describe('output mode contract', () => {
     expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
   });
 
+  it('names the replacement for a flag or command removed in 1.0', () => {
+    expect(JSON.parse(runCli(['--json', 'datasource', 'list']).stdout).error.message).toMatch(/removed in 1\.0: output is always one line of compact JSON/);
+    expect(JSON.parse(runCli(['daemon', 'start']).stdout).error.message).toMatch(/removed in 1\.0: the first taproot query starts the daemon/);
+    expect(JSON.parse(runCli(['query', '--bogus']).stdout).error.message).toBe("error: unknown option '--bogus'");
+  });
+
+  it('rejects --sql and --query together', () => {
+    const out = JSON.parse(runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1', '--query', 'SELECT 2']).stdout);
+    expect(out.error.code).toBe('BAD_INPUT');
+  });
+
   it('prints exactly one JSON document and nothing on stderr for every CLI surface', () => {
     for (const args of [[], ['--version'], ['--help'], ['query', '--help'], ['daemon'], ['nosuch'], ['query', '--bogus'], ['--json', 'datasource', 'list']]) {
       const out = runCli(args);
