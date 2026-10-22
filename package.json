@@ -1,6 +1,6 @@
 {
   "name": "@mehmetsecgin/taproot",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Universal query orchestration CLI with plugin runtime (DB-first v1)",
   "type": "module",
   "license": "MIT",
