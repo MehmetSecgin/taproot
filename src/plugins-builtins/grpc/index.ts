@@ -263,10 +263,11 @@ export const grpcPlugin: TapRootPlugin = {
         const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, message);
         if (validationError) {
           const position = Array.isArray(payload) ? `request[${index}]` : '';
-          throw badInput(position ? `${position}: ${validationError.message}` : validationError.message, {
+          const skeleton = `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`;
+          const detail = position ? `${position}: ${validationError.message}` : validationError.message;
+          throw badInput(`${detail}. The request shape is printed by '${skeleton}'.`, {
             field: position ? `[${index}].${validationError.field}` : validationError.field,
             expected: validationError.expected,
-            nextCommand: `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`,
           });
         }
       }

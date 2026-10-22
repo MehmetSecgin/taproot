@@ -56,11 +56,7 @@ taproot --version   # prints the installed version
 taproot init
 ```
 
-Creates `~/.taproot/` (config, cache). Idempotent.
-
-On an unconfigured machine it also prints an ordered `next actions` list of runnable commands (add a datasource, store its credentials, verify with `doctor`). Each entry is a real command with every required flag, so you can fill in the placeholders and paste it. The list shrinks as you complete each step, and `taproot self-check` reprints it at any time.
-
-Pass `--kind mysql|postgres|redis|grpc` to tailor those steps to the engine you are setting up, for example `taproot init --kind grpc`.
+Creates `~/.taproot/` (config, cache) and prints the readiness checks. Idempotent. `taproot self-check` reprints the checks at any time.
 
 ### 4. Create a datasource, store credentials, query
 
@@ -189,7 +185,7 @@ taproot query --datasource qa-order-cache \
 # imports it so you know which repo to clone.
 ```
 
-`taproot init --kind grpc` prints this flow as runnable next actions, with no credential step: gRPC datasources need no stored credentials, so leave `--credential-ref` off (it defaults to `--env`). Add `--ssl` if the endpoint speaks TLS rather than plaintext h2c.
+gRPC datasources need no stored credentials, so leave `--credential-ref` off (it defaults to `--env`). Add `--ssl` if the endpoint speaks TLS rather than plaintext h2c.
 
 Everything under `grpc list` / `find` / `describe` reads the local proto root only, so you can explore an API and build a request skeleton before you have network access to the service. Only `doctor` and `query` need to reach it.
 
@@ -293,7 +289,7 @@ taproot query --datasource prod-orders \
 
 ### Schema catalog
 
-The first query against a SQL datasource (`mysql`, `postgres`, `teleport-mysql`) reads `information_schema` columns once, plus indexes and partitions on MySQL/TiDB, and caches them at `~/.taproot/cache/schema/<datasource>.json`. The cache is fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24). When it is stale, TapRoot refetches it in the background while the query runs. A failed fetch never fails the query.
+The first query against a SQL datasource (`mysql`, `postgres`, `teleport-mysql`) starts a background read of `information_schema` columns, plus indexes and partitions on MySQL/TiDB, and caches them at `~/.taproot/cache/schema/<datasource>.json`. The fetch never delays a query: the daemon finishes it after replying, and concurrent queries share one fetch. Until it lands, responses carry no `meta.schemaContext.tables` and the partition guard has nothing to check. The cache is fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24); a stale catalog keeps serving while the refetch runs. A failed fetch never fails the query. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches the catalog and appends the closest cached names to the message (`Did you mean: orders.customer_id?`), also returned as `error.details.didYouMean`.
 
 Each SQL query returns `meta.schemaContext.tables[<table>]` for the tables it references: `database`, `columns`, `primaryKey`, `indexes` (`unique` appears only when true, `type` only when not `BTREE`) and `partition`. `meta.schemaContext.catalog` carries `{ tables, fetchedAt }`.
 
@@ -451,10 +447,6 @@ taproot self-check --agent --env <env> --service <service>
 Targeted readiness returns:
 
 - `readiness`
-- `missing`
-- `nextCommand`
-- `nextActions`
-- `nextActionDetails`
 - `checks`
 - `target`
 
@@ -465,7 +457,7 @@ taproot doctor --datasource <name>
 taproot doctor --datasource <name> --connect
 ```
 
-`doctor` returns both `nextActions` (ordered command strings) and `nextActionDetails` (structured remediation with `command`, `priority`, `checks`, `codes`, `reasons`). `init` and `self-check --agent` expose the same `nextActionDetails` shape.
+`doctor` returns `checks`, each with `status`, `code`, and a `detail` that names the cause.
 
 ---
 

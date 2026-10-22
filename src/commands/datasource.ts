@@ -27,10 +27,7 @@ function parseHintPairs(values: string[]): Record<string, string> {
 function probeFailed(name: string, detail: string): Error {
   const rerun = `taproot doctor --datasource ${name} --connect`;
   const remove = `taproot datasource remove ${name}`;
-  return Object.assign(
-    new Error(`PROBE_FAILED: profile ${name} saved, probe failed. ${detail}. Re-run: ${rerun}. Remove: ${remove}`),
-    { details: { datasource: name, nextAction: rerun, removeCommand: remove } },
-  );
+  return new Error(`PROBE_FAILED: profile ${name} saved, probe failed. ${detail}. Re-run: ${rerun}. Remove: ${remove}`);
 }
 
 function parseConnectorRefPairs(values: string[]): Record<string, string> {

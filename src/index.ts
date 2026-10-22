@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command, type Help } from 'commander';
-import { buildContext, nextAction } from './core/app.js';
+import { buildContext } from './core/app.js';
 import { printEnvelope, printJson, setPluck } from './core/output.js';
 import { registerSelfCheck } from './commands/self-check.js';
 import { registerDoctor } from './commands/doctor.js';
@@ -106,11 +106,7 @@ function emitError(error: unknown, code: string): void {
     ? classifyError(message)
     : code;
   applyOutputOptions();
-  const priorDetails = (error as Error & { details?: Record<string, unknown> })?.details;
-  const details =
-    priorDetails && typeof priorDetails === 'object' && 'nextAction' in priorDetails
-      ? priorDetails
-      : { ...(priorDetails || {}), nextAction: nextAction(classifiedCode) };
+  const details = (error as Error & { details?: Record<string, unknown> })?.details;
   const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
   printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
 }
@@ -132,12 +128,12 @@ program.parseAsync(process.argv).catch((error) => {
     return;
   }
   if (commanderCode.startsWith('commander.')) {
-    const message = (error as Error)?.message || '';
-    const details = hasCredsTopologyMisuseHint(message)
-      ? { nextAction: "Connection topology belongs on datasource profiles. Use 'taproot datasource add ... --host --port --database --target'." }
-      : undefined;
+    const raw = (error as Error)?.message || '';
+    const message = hasCredsTopologyMisuseHint(raw)
+      ? `${raw}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
+      : raw;
     applyOutputOptions();
-    printEnvelope(false, undefined, { code: 'CLI_ERROR', message, details });
+    printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
     process.exit(classifyExitCode(error));
     return;
   }

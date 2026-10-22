@@ -80,7 +80,7 @@ describe('daemon rpc limits', () => {
       const out = await Promise.all(calls);
       const overloaded = out.filter((r) => !r.ok && r.error?.code === 'OVERLOADED');
       expect(overloaded.length).toBeGreaterThan(0);
-      expect(overloaded[0].error?.details?.nextAction).toContain('queue');
+      expect(overloaded[0].error?.message).toContain('queue');
     } finally {
       await daemon.stop();
     }

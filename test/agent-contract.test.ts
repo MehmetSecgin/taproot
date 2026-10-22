@@ -109,7 +109,7 @@ describe('agent JSON contract', () => {
     }
   });
 
-  it('direct-mode query error emits the same error envelope with a nextAction hint', async () => {
+  it('direct-mode query error emits the same error envelope', async () => {
     const stateRoot = makeStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
@@ -128,6 +128,6 @@ describe('agent JSON contract', () => {
     expect(out.status).not.toBe(0);
     const parsed = errorEnvelopeSchema.parse(JSON.parse(out.stdout));
     expect(parsed.error.code).toBe('DETERMINISTIC_REQUIRED');
-    expect((parsed.error.details as any)?.nextAction).toBeTruthy();
+    expect(parsed.error.message).toContain('--datasource');
   });
 });

@@ -106,8 +106,8 @@ describe('datasource CRUD', () => {
     expect(out.status).not.toBe(0);
     const error = JSON.parse(out.stdout).error;
     expect(error.message).toContain('PROBE_FAILED');
-    expect(error.details.nextAction).toBe('taproot doctor --datasource qa-probe --connect');
-    expect(error.details.removeCommand).toBe('taproot datasource remove qa-probe');
+    expect(error.message).toContain('Re-run: taproot doctor --datasource qa-probe --connect');
+    expect(error.message).toContain('Remove: taproot datasource remove qa-probe');
     expect(runCli(['datasource', 'show', 'qa-probe'], env).status).toBe(0);
   });
 

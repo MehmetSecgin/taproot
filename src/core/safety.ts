@@ -171,9 +171,6 @@ export function enforcePartitionPredicate(input: {
         table,
         partition,
         missingKeys,
-        nextAction: requiredKeys.length
-          ? `Add a WHERE or JOIN predicate on ${missingKeys.join(', ')} before retrying.`
-          : 'TapRoot could not derive the partition key; inspect schemaContext.partition and add the partition predicate before retrying.',
       },
     );
   }

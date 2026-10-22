@@ -3,7 +3,7 @@ import { normalizeNamespace, normalizeService } from '../core/app.js';
 import type { AppContext } from '../core/app.js';
 import { EXIT_CODES } from '../core/exit-codes.js';
 import { printJson } from '../core/output.js';
-import { collectReadinessSnapshot, nextCommandForReadiness } from '../core/readiness.js';
+import { collectReadinessSnapshot } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { TAPROOT_SKILL_VERSION, TAPROOT_VERSION } from '../core/version.js';
 import { DoctorStatus } from '../types/core.js';
@@ -36,15 +36,6 @@ export function registerSelfCheck(program: Command, getCtx: () => AppContext): v
           : check);
         const data = {
           readiness: snapshot.readiness,
-          missing: snapshot.readiness === 'ready' ? null : snapshot.readiness,
-          nextCommand:
-            snapshot.nextActionDetails[0]?.command ||
-            nextCommandForReadiness(snapshot.readiness, {
-              ...(snapshot.target?.datasource ? { datasource: ctx.datasourceStore.get(snapshot.target.datasource) } : {}),
-              ...(target ? { target } : {}),
-              checks: snapshot.checks,
-            }),
-          nextActionDetails: snapshot.nextActionDetails,
           checks: trimmedChecks,
           ...(snapshot.target ? { target: snapshot.target } : {}),
         };

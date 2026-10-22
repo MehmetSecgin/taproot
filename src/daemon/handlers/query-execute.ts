@@ -1,4 +1,4 @@
-import { environmentPolicy, nextAction } from '../../core/app.js';
+import { environmentPolicy } from '../../core/app.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { discoveryUnavailable } from '../../core/error-classification.js';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../../core/execute-query.js';
@@ -89,10 +89,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
     base.error = {
       code: outcome.code,
       message: outcome.message,
-      details: {
-        ...((outcome.details as Record<string, unknown>) || {}),
-        nextAction: nextAction(outcome.code),
-      },
+      details: outcome.details as Record<string, unknown> | undefined,
     };
   } finally {
     clearTimeout(timeoutTimer);

@@ -62,7 +62,7 @@ describe('cli contract', () => {
     expect(out.status).toBe(2);
     const parsed = JSON.parse(out.stdout);
     expect(parsed.error.message.toLowerCase()).toContain('unknown option');
-    expect(parsed.error.details.nextAction).toContain('datasource add');
+    expect(parsed.error.message).toContain('taproot datasource add');
   });
 
   it('enforces prod no-guess mode unless discovery is explicit', () => {

@@ -206,27 +206,33 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   return tables;
 }
 
-export function supportsSchemaCatalog(datasource?: DatasourceProfile): boolean {
-  return Boolean(datasource && isSqlDatasource(datasource.kind));
-}
-
 export interface CatalogEnsureResult {
   outcome: 'unsupported' | 'cached' | 'fetched' | 'failed';
   tableCount: number;
   error?: string;
 }
 
-export async function ensureDatasourceCatalog(ctx: AppContext, datasource: DatasourceProfile): Promise<CatalogEnsureResult> {
-  if (!supportsSchemaCatalog(datasource)) return { outcome: 'unsupported', tableCount: 0 };
+const catalogFetches = new Map<string, Promise<CatalogEnsureResult>>();
+
+export function ensureDatasourceCatalog(
+  ctx: AppContext,
+  datasource: DatasourceProfile,
+  opts: { force?: boolean } = {},
+): Promise<CatalogEnsureResult> {
+  if (!isSqlDatasource(datasource.kind)) return Promise.resolve({ outcome: 'unsupported', tableCount: 0 });
   const cached = ctx.schemaCatalogStore.get(datasource.name);
   const cachedCount = Object.keys(cached?.tables || {}).length;
   const ttlMs = RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
-  if (cached && Date.now() - Date.parse(cached.fetchedAt) < ttlMs) return { outcome: 'cached', tableCount: cachedCount };
-  try {
-    const tables = await fetchSchemaCatalog(ctx, datasource);
-    ctx.schemaCatalogStore.save(datasource.name, tables);
-    return { outcome: 'fetched', tableCount: Object.keys(tables).length };
-  } catch (error) {
-    return { outcome: 'failed', tableCount: cachedCount, error: (error as Error).message };
-  }
+  if (!opts.force && cached && Date.now() - Date.parse(cached.fetchedAt) < ttlMs) return Promise.resolve({ outcome: 'cached', tableCount: cachedCount });
+  const running = catalogFetches.get(datasource.name);
+  if (running) return running;
+  const fetch = fetchSchemaCatalog(ctx, datasource)
+    .then((tables): CatalogEnsureResult => {
+      ctx.schemaCatalogStore.save(datasource.name, tables);
+      return { outcome: 'fetched', tableCount: Object.keys(tables).length };
+    })
+    .catch((error): CatalogEnsureResult => ({ outcome: 'failed', tableCount: cachedCount, error: (error as Error).message }))
+    .finally(() => catalogFetches.delete(datasource.name));
+  catalogFetches.set(datasource.name, fetch);
+  return fetch;
 }

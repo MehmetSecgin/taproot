@@ -3,9 +3,9 @@
 Map symptoms to TapRoot commands. Do not bypass with direct shell DB tools.
 
 - **Hangs about 10 s, then `CONNECTIVITY: teleport proxy path unavailable`.** `tsh proxy db` is exiting before TCP-ready (expired cert, bad db user, missing target). Run `taproot doctor --datasource <n> --connect`. Check `tsh status` outside TapRoot to diagnose only; do not switch to direct `tsh db exec` for the actual query.
-- **Need a table's columns, indexes, or partition key.** Run any cheap query on it (`SELECT ... LIMIT 1`) with `--pluck meta.schemaContext.tables.<t>`. `SHOW TABLES` lists tables; `SHOW CREATE TABLE` gives the full DDL.
-- **Columns from a migration are missing in `meta.schemaContext`.** The catalog is cached per datasource for 24 h. Run `taproot cache clear`, then query again to re-read it.
-- **The same query keeps failing.** A failed query is never short-circuited, so resending it fails the same way. Read `error.code` and `nextActionDetails`, change the cause, then retry.
+- **Need a table's columns, indexes, or partition key.** `SHOW CREATE TABLE <t>` with `--pluck meta.schemaContext.tables.<t>`. The full question-to-command table is in `references/sql.md`.
+- **Columns from a migration are missing in `meta.schemaContext`.** The catalog is cached per datasource for 24 h. An `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` error refetches it in the background; otherwise run `taproot cache clear`.
+- **The same query keeps failing.** Resending it fails the same way. Read `error.code` and `error.message`, change the cause, then retry.
 - **`taproot doctor` slow (over 15 s).** Usually OpenVPN connect (up to 20 s) or a cold `tsh proxy db`. Drop `--connect` if you only need status, and confirm the daemon is started so later queries reuse the session.
 - **Query timeout fires immediately.** Connector preflight ran before the query timeout applied. Pass `--timeout` large enough to cover preflight plus query.
 - **First query against a Teleport datasource is always slow.** Cold-spawning `tsh proxy db` is the cost. Start the daemon and open a session, then query.

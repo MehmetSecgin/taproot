@@ -174,12 +174,9 @@ describe('grpcPlugin proto pre-flight validation', () => {
       requestJson: JSON.stringify({ itemid: 'abc' }),
     });
     await expect(grpcPlugin.execute!(request, {})).rejects.toMatchObject({
-      message: expect.stringMatching(/^BAD_INPUT: unknown field 'itemid'/),
+      message: expect.stringMatching(/^BAD_INPUT: unknown field 'itemid'.*taproot grpc describe .* --method GetItem --skeleton/),
       code: 'BAD_INPUT',
-      details: {
-        field: 'itemid',
-        nextCommand: expect.stringMatching(/taproot grpc describe .* --method GetItem --skeleton/),
-      },
+      details: { field: 'itemid' },
     });
   });
 

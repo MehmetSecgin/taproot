@@ -76,7 +76,7 @@ Response failure:
   "error": {
     "code": "ACCESS_DENIED",
     "message": "Access denied for user ...",
-    "details": {"nextAction": "Check datasource credentialRef and credential values."}
+    "details": {"datasource": "qa-orders"}
   },
   "meta": {
     "sessionId": "sess_..."

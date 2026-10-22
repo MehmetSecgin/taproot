@@ -1,7 +1,7 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
+import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import type { QueryReport } from '../src/core/execute-query.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../src/types/core.js';
@@ -55,7 +55,7 @@ describe('executeQuery success', () => {
       classification: 'success',
     });
     expect(outcome.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
-    expect(Object.keys(outcome.meta.phases || {})).toEqual(['resolveMs', 'catalogMs', 'connectMs', 'executeMs', 'totalMs']);
+    expect(Object.keys(outcome.meta.phases || {})).toEqual(['resolveMs', 'connectMs', 'executeMs', 'totalMs']);
   });
 
   it('omits rowsForm and returns objects when rowsObject is set', async () => {
@@ -91,43 +91,37 @@ describe('executeQuery success', () => {
     expect(outcome.data.warnings).toEqual(['slow scan']);
   });
 
-  it('runs the query while a stale catalog refreshes and reports catalogMs', async () => {
+  it('returns without waiting for a cold catalog fetch, which then lands in the cache', async () => {
     // arrange
     stateRoot = await setupQueryState({ kind: 'mysql' });
     let releaseCatalog: () => void = () => {};
     const catalogGate = new Promise<void>((resolve) => {
       releaseCatalog = resolve;
     });
+    const catalogQueries: string[] = [];
     const plugin = fakePlugin({ kind: 'mysql' });
     const inner = plugin.execute!;
     plugin.execute = async (request, creds): Promise<QueryResult> => {
-      if (request.query.includes('information_schema')) await catalogGate;
-      else releaseCatalog();
+      if (request.query.includes('information_schema')) {
+        catalogQueries.push(request.query);
+        await catalogGate;
+      }
       return inner(request, creds);
     };
     const ctx = contextWith(plugin);
-    ctx.schemaCatalogStore.save('qa-fake', {});
-    const catalogFile = path.join(stateRoot, 'cache', 'schema', 'qa-fake.json');
-    const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
-    catalog.fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
-    fs.writeFileSync(catalogFile, JSON.stringify(catalog));
-    const recorder = recordingReport();
 
     // act
-    const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+    const cachedBeforeRelease = ctx.schemaCatalogStore.get('qa-fake');
+    releaseCatalog();
+    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!);
 
     // assert
-    expect(recorder.logs.join(' ')).not.toContain('caching its full schema catalog');
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.meta.phases?.catalogMs).toEqual(expect.any(Number));
-  });
-
-  it('emits the catalog notice on the first query against a sql datasource', async () => {
-    stateRoot = await setupQueryState({ kind: 'mysql' });
-    const ctx = contextWith(fakePlugin({ kind: 'mysql' }));
-    const recorder = recordingReport();
-    await executeQuery(queryRequest(), { ctx, report: recorder.report });
-    expect(recorder.logs.join(' ')).toContain('caching its full schema catalog');
+    expect(outcome.ok).toBe(true);
+    expect(cachedBeforeRelease).toBeUndefined();
+    expect(landed.outcome).toBe('fetched');
+    expect(ctx.schemaCatalogStore.get('qa-fake')).toBeDefined();
+    expect(catalogQueries.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
   });
 });
 
@@ -197,6 +191,23 @@ describe('executeQuery failure', () => {
     if (outcome.ok) return;
     expect(outcome.code).toBe('ACCESS_DENIED');
     expect(outcome.meta.schemaContext).toBeDefined();
+  });
+
+  it('adds did-you-mean column suggestions from the cached catalog', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin({ failWith: "Unknown column 'customer_ident' in 'field list'" }));
+    ctx.schemaCatalogStore.save('qa-fake', {
+      orders: { database: 'fake', columns: ['id', 'customer_id', 'created_at'], primaryKey: ['id'], indexes: [] },
+    });
+
+    // act
+    const outcome = await executeQuery(queryRequest({ query: 'SELECT customer_ident FROM orders' }), { ctx, report: silentQueryReport });
+
+    // assert
+    if (outcome.ok) throw new Error('expected failure');
+    expect(outcome.code).toBe('UNKNOWN_COLUMN');
+    expect(outcome.message).toContain('Did you mean: orders.customer_id');
+    expect(outcome.details).toMatchObject({ didYouMean: expect.arrayContaining(['orders.customer_id']) });
   });
 
   it('fails when no plugin serves the datasource kind', async () => {

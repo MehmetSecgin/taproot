@@ -3,7 +3,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext, classifyError, nextAction } from '../core/app.js';
+import { buildContext, classifyError } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import type { RpcRequest, RpcResponse } from './types.js';
@@ -129,7 +129,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
             base.error = {
               code,
               message,
-              details: { ...(((error as Error & { details?: Record<string, unknown> }).details) || {}), nextAction: nextAction(code) },
+              details: (error as Error & { details?: Record<string, unknown> }).details,
             };
           }
 

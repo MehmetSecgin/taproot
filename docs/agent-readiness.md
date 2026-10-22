@@ -71,7 +71,7 @@ For a user or agent to succeed on day one, the current setup is usually:
 - `init datasource` can now repair critically stale datasource profiles instead of forcing delete-and-recreate.
 - Runtime config has safe neutral defaults when an env policy is missing.
 - `self-check` gives a lightweight runtime sanity check.
-- `doctor` provides ranked next steps for connector and executor failures, and `doctor` now exposes structured `nextActionDetails`.
+- `doctor` classifies connector and executor failures with a check `code` and a `detail` naming the cause.
 
 ### What Still Feels Heavy
 

@@ -89,8 +89,8 @@ Catalog is one JSON file per SQL datasource (`mysql`, `postgres`, `teleport-mysq
 - Fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24).
 
 Behavior:
-- The first query against a datasource fetches the catalog once, bounded by `TAPROOT_CATALOG_TIMEOUT_MS`.
-- A stale catalog is refetched in the background while the query runs.
+- The first query against a datasource starts the catalog fetch in the background, bounded by `TAPROOT_CATALOG_TIMEOUT_MS`; no query waits for it, and concurrent queries share one fetch.
+- A stale catalog keeps serving while the refetch runs.
 - A failed fetch never fails the query.
 - The partition guard and range warnings read the cached catalog.
 - `cache show` lists cached catalogs; `cache clear` deletes them all.
@@ -206,7 +206,7 @@ Degraded semantics (explicit):
   - backoff: `2s -> 5s -> 15s`.
 - Queue behavior while degraded:
   - if retry budget remains: first queued request can trigger revalidation.
-  - if budget exhausted: fail fast with classified error and next action.
+  - if budget exhausted: fail fast with a classified error.
 
 ### 4.7 Query Path with Daemon
 1. CLI sends request (`datasource`, query, mode).
@@ -260,7 +260,7 @@ Default TTLs (initial):
 - profile-level override allowed, bounded by daemon max policy.
 
 ### 4.11 Failure and Recovery Contracts
-- Connector failure: explicit classified error + suggested next action.
+- Connector failure: explicit classified error.
 - Session health failure: auto demote to `degraded`, retry strategy with cap.
 - Hard failures: close session and surface deterministic failure code.
 - Daemon crash: restart daemon, stale lock/socket cleanup, no silent reuse.

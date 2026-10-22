@@ -1,17 +1,15 @@
 # Setup, Credentials, Operations
 
 ## Brand-new machine (nothing configured yet)
-- `taproot init` creates `~/.taproot/` and prints the readiness summary plus an ordered `next actions` list. On a correctly initialized but unconfigured machine every check is `ok` or `warn`, never `fail`, and the exit code is 0. `warn` on `kb_dir`, `datasources`, or `credentials` means "not configured yet", not broken. Do not treat those warns as errors or start repairing them.
-- Pass `--kind mysql|postgres|redis|grpc` to tailor the setup steps to the engine being configured, for example `taproot init --kind grpc`. Each emitted action is a complete, runnable command with every required flag. Fill in the `<placeholders>` and run them in the order given. The list shrinks as steps complete, so re-run `init` (or `self-check`) to see what remains.
-- The gRPC chain deliberately has no `creds set` step and adds `grpc list` before `doctor`, because introspection validates the proto root offline before any network access is needed.
+- `taproot init` creates `~/.taproot/` and prints the readiness summary and checks. On a correctly initialized but unconfigured machine every check is `ok` or `warn`, never `fail`, and the exit code is 0. `warn` on `kb_dir`, `datasources`, or `credentials` means "not configured yet", not broken. Do not treat those warns as errors or start repairing them.
+- A gRPC datasource needs no `creds set` step. Run `grpc list` before `doctor`: introspection validates the proto root offline before any network access is needed.
 - `taproot doctor` with no target is not a health check. It requires `--datasource <name>` or `--env <env> --service <service>` and exits non-zero without one. For whole-install health use `taproot init` or `taproot self-check --agent`.
-- `readiness` reports the first unmet item and ranks `missing_kb` above datasources, so a machine with no KB reports `missing_kb` even when the KB is irrelevant. The KB is optional and only powers `--env`/`--service` routing. If datasources are addressed by name, skip it and read `nextActionDetails` for the real sequence.
+- `readiness` reports the first unmet item and ranks `missing_kb` above datasources, so a machine with no KB reports `missing_kb` even when the KB is irrelevant. The KB is optional and only powers `--env`/`--service` routing. If datasources are addressed by name, skip it.
 - `taproot init --kb-dir <dir>` saves the KB directory in TapRoot config, so shells without `TAPROOT_KB_DIR` still find it. Order: `--kb-dir`, `TAPROOT_KB_DIR`, saved `kbDir`, `<state-root>/kb`.
 
 ## Readiness payloads
 - `taproot self-check --agent` is the machine-readable readiness check. Prefer targeted runs with `--datasource <name>` or `--env <env> --service <service>` when checking a real query path.
-- `nextActionDetails` carries remediation on `init`, `self-check --agent`, and `doctor`. Each entry has `command`, `priority`, `reasons`, `checks`, `codes`, sorted by ascending `priority` (lowest number first). There is no `nextActions` string array on these payloads.
-- `nextCommand` is emitted by `self-check --agent` only, not by `init` or `doctor`. Use `nextActionDetails[0].command` for the top action on those two.
+- A failing check carries a `code` that classifies it and a `detail` that names the cause. Decide the fix from those.
 - `ok`-status checks omit the `detail` field. Only `warn` and `fail` checks carry it.
 - `taproot self-check` (without `--agent`) validates the runtime environment before debugging higher-level failures.
 
@@ -42,8 +40,6 @@
 Steps 1 to 3 need no network, no VPN, and no credentials. Only step 4 onward touches the service.
 
 ```bash
-taproot init --kind grpc                     # prints this sequence as next actions
-
 # 1. register the endpoint. protoRoot is a LOCAL dir of .proto sources, loaded recursively.
 taproot datasource add \
   --name pilot-grpc --kind grpc \
@@ -80,7 +76,7 @@ taproot query --datasource qa-orders --sql "SELECT 1 AS ok"
 
 ## Smoke test against an existing Teleport datasource
 
-The first query caches the datasource's table catalog and returns the referenced table's schema:
+The first query starts caching the datasource's table catalog in the background; a query a moment later returns the referenced table's schema:
 
 ```bash
 taproot daemon start

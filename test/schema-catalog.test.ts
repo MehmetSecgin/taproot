@@ -108,6 +108,33 @@ describe('eager schema catalog', () => {
     expect(seen.length).toBeGreaterThan(afterFirst);
   });
 
+  it('shares one in-flight fetch between concurrent callers', async () => {
+    // arrange
+    const { ctx, seen } = makeContext();
+
+    // act
+    const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource()), ensureDatasourceCatalog(ctx, datasource())]);
+
+    // assert
+    expect(first).toEqual({ outcome: 'fetched', tableCount: 3 });
+    expect(second).toEqual(first);
+    expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
+  });
+
+  it('refetches a fresh catalog when forced', async () => {
+    // arrange
+    const { ctx, seen } = makeContext();
+    await ensureDatasourceCatalog(ctx, datasource());
+    const afterFirst = seen.length;
+
+    // act
+    const out = await ensureDatasourceCatalog(ctx, datasource(), { force: true });
+
+    // assert
+    expect(out.outcome).toBe('fetched');
+    expect(seen.length).toBeGreaterThan(afterFirst);
+  });
+
   it('reports unsupported kinds without touching the plugin', async () => {
     // arrange
     const { ctx, seen } = makeContext();

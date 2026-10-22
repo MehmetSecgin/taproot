@@ -108,7 +108,6 @@ export interface QueryRequest {
 
 export interface QueryPhaseTimings {
   resolveMs?: number;
-  catalogMs?: number;
   connectMs?: number;
   executeMs?: number;
   totalMs?: number;
@@ -254,15 +253,6 @@ export interface DoctorCheck {
   code?: DoctorCheckCode;
 }
 
-export interface RemediationAction {
-  command: string;
-  priority: number;
-  reasons: string[];
-  checks: string[];
-  codes: DoctorCheckCode[];
-}
-
-export type DoctorNextAction = RemediationAction;
 
 export interface TapRootPlugin {
   manifest: PluginManifest;

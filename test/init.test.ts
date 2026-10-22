@@ -160,112 +160,6 @@ describe('init command', () => {
     expect(parsed.readiness).toBe('missing_kb');
   });
 
-  it('emits an ordered, runnable setup chain when nothing is configured', () => {
-    // arrange
-    const stateRoot = makeStateRoot();
-    const kbDir = makeKbDir();
-    setupKb(kbDir);
-
-    // act
-    const out = runCli(['init'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-      TAPROOT_KB_DIR: kbDir,
-    });
-
-    // assert
-    expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
-    expect(parsed.checks.every((check: any) => check.status !== 'fail')).toBe(true);
-    const commands: string[] = parsed.nextActionDetails.map((action: any) => action.command);
-    expect(commands[0]).toBe(
-      'taproot datasource add --name <name> --kind mysql --env <env> --service <service> --host <host> --port 3306 --database <db> --credential-ref <name>',
-    );
-    expect(commands.indexOf('taproot creds set --ref <ref> --user <user> --password <password>')).toBeGreaterThan(0);
-    expect(commands.indexOf('taproot doctor --datasource <name>')).toBeGreaterThan(
-      commands.indexOf('taproot creds set --ref <ref> --user <user> --password <password>'),
-    );
-    expect(commands.some((command) => command.includes('...'))).toBe(false);
-  });
-
-  it('drops the setup chain once a datasource exists', () => {
-    // arrange
-    const stateRoot = makeStateRoot();
-    const kbDir = makeKbDir();
-    setupKb(kbDir);
-    const env = {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-      TAPROOT_KB_DIR: kbDir,
-    };
-    runCli(['init'], env);
-    const added = runCli(
-      ['datasource', 'add', '--name', 'demo', '--kind', 'mysql', '--env', 'qa', '--service', 'orders', '--host', '127.0.0.1', '--port', '3306', '--database', 'orders', '--credential-ref', 'demo'],
-      env,
-    );
-    expect(added.status).toBe(0);
-
-    // act
-    const out = runCli(['init'], env);
-
-    // assert
-    expect(out.status).toBe(0);
-    const commands: string[] = JSON.parse(out.stdout).nextActionDetails.map((action: any) => action.command);
-    expect(commands.some((command) => command.startsWith('taproot datasource add'))).toBe(false);
-    expect(commands.some((command) => command.startsWith('taproot doctor --datasource <name>'))).toBe(false);
-  });
-
-  it('tailors the setup chain to grpc and omits the credential step', () => {
-    // arrange
-    const stateRoot = makeStateRoot();
-    const kbDir = makeKbDir();
-    setupKb(kbDir);
-
-    // act
-    const out = runCli(['init', '--kind', 'grpc'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-      TAPROOT_KB_DIR: kbDir,
-    });
-
-    // assert
-    expect(out.status).toBe(0);
-    const commands: string[] = JSON.parse(out.stdout).nextActionDetails.map((action: any) => action.command);
-    expect(commands[0]).toBe(
-      'taproot datasource add --name <name> --kind grpc --env <env> --service <service> --host <host> --port <port> --credential-ref <name> --hint protoRoot=<dir>',
-    );
-    expect(commands).toContain('taproot grpc list --datasource <name>');
-    expect(commands.some((command) => command.startsWith('taproot creds set'))).toBe(false);
-    expect(commands.indexOf('taproot doctor --datasource <name>')).toBeGreaterThan(
-      commands.indexOf('taproot grpc list --datasource <name>'),
-    );
-  });
-
-  it('marks the credential step optional in the redis setup chain', () => {
-    // arrange
-    const stateRoot = makeStateRoot();
-    const kbDir = makeKbDir();
-    setupKb(kbDir);
-
-    // act
-    const out = runCli(['init', '--kind', 'redis'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-      TAPROOT_KB_DIR: kbDir,
-    });
-
-    // assert
-    expect(out.status).toBe(0);
-    const details = JSON.parse(out.stdout).nextActionDetails;
-    const commands: string[] = details.map((action: any) => action.command);
-    expect(commands[0]).toBe(
-      'taproot datasource add --name <name> --kind redis --env <env> --service <service> --host <host> --port 6379 --credential-ref <name>',
-    );
-    const credsAction = details.find((action: any) => String(action.command).startsWith('taproot creds set'));
-    expect(credsAction).toBeDefined();
-    expect(credsAction.reasons.join(' ')).toMatch(/optional/i);
-  });
-
   it('reports credentials as optional when only redis datasources are configured', () => {
     // arrange
     const stateRoot = makeStateRoot();
@@ -317,8 +211,6 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     const credentials = parsed.checks.find((check: any) => check.check === 'credentials');
     expect(credentials.status).toBe('ok');
-    const commands: string[] = parsed.nextActionDetails.map((action: any) => action.command);
-    expect(commands.some((command) => command.startsWith('taproot creds set'))).toBe(false);
   });
 
   it('warns when master key is missing', () => {
@@ -348,14 +240,6 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(Array.isArray(parsed.checks)).toBe(true);
     expect(typeof parsed.readiness).toBe('string');
-    expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
-    expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: expect.any(String),
-      priority: expect.any(Number),
-      reasons: expect.any(Array),
-      checks: expect.any(Array),
-      codes: expect.any(Array),
-    });
   });
 
   it('creates datasource profile from KB', () => {
@@ -572,9 +456,6 @@ describe('init command', () => {
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout);
     expect(typeof parsed.readiness).toBe('string');
-    expect(parsed).toHaveProperty('missing');
-    expect(parsed).toHaveProperty('nextCommand');
-    expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
   });
 
   it('returns missing_connector_config for targeted self-check when connector wiring is incomplete', () => {
@@ -622,13 +503,6 @@ describe('init command', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe(
       'connector_status_command_missing',
     );
-    expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: expect.stringContaining('taproot connector setup --datasource qa-orders --connector kubectl-portforward'),
-      priority: 50,
-      checks: ['kubectl-portforward status'],
-      codes: ['connector_status_command_missing'],
-    });
-    expect(parsed.nextCommand).toContain('taproot connector setup --datasource qa-orders --connector kubectl-portforward');
   });
 
   it('returns blocked_connector_auth for targeted self-check when connector status fails', () => {
@@ -679,13 +553,6 @@ describe('init command', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.readiness).toBe('blocked_connector_auth');
     expect(parsed.checks.find((check: { check: string }) => check.check === 'openvpn status')?.code).toBe('connector_status_blocked');
-    expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: 'taproot doctor --datasource qa-orders --connect',
-      priority: 60,
-      checks: expect.arrayContaining(['openvpn status']),
-      codes: expect.arrayContaining(['connector_status_blocked']),
-    });
-    expect(parsed.nextCommand).toBe('taproot doctor --datasource qa-orders --connect');
   });
 
   it('returns ready for targeted self-check when connector status succeeds', () => {

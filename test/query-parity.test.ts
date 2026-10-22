@@ -179,12 +179,6 @@ describe('query parity between the direct and daemon adapters', () => {
     expect(meta.phases).toMatchObject({ resolveMs: expect.any(Number), executeMs: expect.any(Number) });
   });
 
-  it('adds a nextAction hint to daemon error details', async () => {
-    const { rpc } = await runBothPaths(baseRequest({ params: ['brokenpair'] }));
-    expect(rpc.ok).toBe(false);
-    expect(rpc.error?.details?.nextAction).toBeTruthy();
-  });
-
   it('returns rows as objects on both paths when rowsObject is set', async () => {
     const { direct, rpc } = await runBothPaths(baseRequest({ rowsObject: true }));
     if (!direct.ok) throw new Error('direct path failed');

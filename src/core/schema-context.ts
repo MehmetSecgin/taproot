@@ -1,5 +1,6 @@
 import type { SchemaContext, TableContext } from '../types/core.js';
 import type { SchemaCatalog } from '../store/schema-catalog.js';
+import { suggestNames } from './grpc-introspect.js';
 import { astifySql, type SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
 
@@ -178,4 +179,25 @@ export function buildSchemaContext(sql: string, dialect: SqlDialect, catalog: Sc
     if (table) tables[table] = catalog.tables[table];
   }
   return { tables, catalog: { tables: byName.size, fetchedAt: catalog.fetchedAt } };
+}
+
+const MISSING_COLUMN_RES = [/unknown column '([^']+)'/i, /column "?([\w.]+)"? does not exist/i];
+const MISSING_TABLE_RES = [/table '([^']+)' doesn't exist/i, /unknown table '([^']+)'/i, /relation "([^"]+)" does not exist/i];
+
+function missingName(message: string, patterns: RegExp[]): string {
+  return patterns.map((re) => message.match(re)?.[1]).find(Boolean) || '';
+}
+
+export function suggestSchemaNames(code: string, message: string, schemaContext: SchemaContext, catalog: SchemaCatalog | undefined): string[] {
+  if (code === 'UNKNOWN_COLUMN') {
+    const missing = missingName(message, MISSING_COLUMN_RES);
+    const columns = Object.entries(schemaContext.tables).flatMap(([table, ctx]) => ctx.columns.map((column) => `${table}.${column}`));
+    return missing ? suggestNames(missing, columns, 3) : [];
+  }
+  if (code === 'UNKNOWN_TABLE') {
+    const missing = bareName(missingName(message, MISSING_TABLE_RES));
+    const tables = Object.keys(catalog?.tables || {});
+    return missing ? suggestNames(missing, tables, 3) : [];
+  }
+  return [];
 }

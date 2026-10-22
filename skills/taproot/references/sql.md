@@ -1,17 +1,21 @@
 # SQL: schema, partitions, relations
 
-## Schema arrives with the query
-The first query against a SQL datasource (mysql, postgres, teleport-mysql) reads `information_schema` columns once, plus indexes and partitions on MySQL/TiDB, and caches the **whole table catalog** per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`). A stale catalog is refreshed in the background. You do not run a schema step first. Every response carries:
-- `meta.schemaContext.tables[<table>]` for the tables the query referenced: `database`, `columns`, `primaryKey`, `indexes` (`unique` only when true, `type` only when not BTREE), `partition`.
-- `meta.schemaContext.catalog` as `{tables: N, fetchedAt}`, the proof that all N tables of that datasource are cached.
+## Schema: which command answers which question
+If the user, the code, or the migration files already name the table and columns, run the real query. Otherwise look the name up first: do not guess columns from conventions (`<x>_id`, `name`, `sport`), since a guessed name is the most common cause of `UNKNOWN_COLUMN`.
 
-To see one table's columns, indexes, and partition key, pluck the context from a DDL read, which the partition guard never blocks: `taproot query --datasource <name> --sql "SHOW CREATE TABLE <t>" --pluck meta.schemaContext.tables.<t>`.
-- List tables: `SHOW TABLES` (or `SHOW TABLES FROM <database>`).
-- Full DDL: `SHOW CREATE TABLE <t>` runs like any read when the catalog fields are not enough.
-- After a migration adds or changes columns: `taproot cache clear` drops every cached catalog, and the next query re-reads it. `taproot cache show` lists cached catalogs (`datasource`, `fetchedAt`, `tables`).
-- Reserve `information_schema` queries for size, row counts, partition stats, and similar needs the catalog does not hold.
+| Question | Command (MySQL/TiDB) | Notes |
+|---|---|---|
+| Which tables exist? | `SHOW TABLES` | |
+| What columns, indexes and partition key does `<t>` have? | `SHOW CREATE TABLE <t>` with `--pluck meta.schemaContext.tables.<t>` | Compact form from the cached catalog. On Postgres use `SELECT * FROM <t> WHERE false` with the same pluck. |
+| What are the column types, defaults, nullability? | `SHOW CREATE TABLE <t>` without `--pluck` | The catalog holds column names only. |
+| Which table has a column like X? | `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND column_name LIKE '%x%'` | Postgres: `table_schema = current_schema()`. |
+| How big is a table? | `SELECT table_name, table_rows FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('<t>')` | `table_rows` is an estimate. |
+| Why does the schema look like this, or when did it change? | The service repo's migration files | The database shows the current state, not the history. |
+| Is the cached catalog current? | `taproot cache show` | `taproot cache clear` after a migration you know about. |
 
-If the user named the table, skip discovery and run the real query.
+On `UNKNOWN_COLUMN` or `UNKNOWN_TABLE` the error message ends with `Did you mean: <table>.<column>?` (also `error.details.didYouMean`), taken from the cached catalog. Use it, fix the query, and retry once. The same error also refetches the catalog in the background, so a column added by a recent migration shows up on the next query.
+
+How the catalog works: the first query against a SQL datasource (mysql, postgres, teleport-mysql) starts a background read of `information_schema` columns, plus indexes and partitions on MySQL/TiDB, cached per datasource for 24 h (`TAPROOT_CATALOG_TTL_HOURS`). No query waits for it. Once it lands, every response carries `meta.schemaContext.tables[<table>]` for the referenced tables (`database`, `columns`, `primaryKey`, `indexes` with `unique` only when true and `type` only when not BTREE, `partition`) and `meta.schemaContext.catalog` (`{tables: N, fetchedAt}`). Until then, responses carry no schema context and the partition guard cannot check them.
 
 ## Partitions and EXPLAIN
 - `taproot query --datasource <name> --explain --sql "<sql>"` wraps a query in `EXPLAIN` without executing it. Use it before heavy joins or partition-touching queries to confirm partition pruning (look for `partition:p_<name>`), index usage, and join order. `--explain` requires `--sql`.

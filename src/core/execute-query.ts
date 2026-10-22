@@ -8,8 +8,8 @@ import type { JsonExtractSpec } from './json-extract.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate } from './safety.js';
-import { buildSchemaContext } from './schema-context.js';
-import { ensureDatasourceCatalog, supportsSchemaCatalog } from './schema-refresh.js';
+import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
+import { ensureDatasourceCatalog } from './schema-refresh.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
 import { dialectFromKind } from './sql-dialect.js';
 import { str } from './strings.js';
@@ -221,20 +221,11 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     configDefault: ctx.runtimeConfigStore.queryTimeZone(),
   });
   const dialect = dialectFromKind(datasource.kind);
-  const firstCatalog = supportsSchemaCatalog(datasource) && !ctx.schemaCatalogStore.get(datasource.name);
-  if (firstCatalog) {
-    report.log(`first query against ${datasource.name}, caching its full schema catalog once`);
-  }
-  let phaseCatalogMs = 0;
-  const catalogStart = Date.now();
-  const catalogTask = ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
-    phaseCatalogMs = Date.now() - catalogStart;
+  const schemaContext = buildSchemaContext(query, dialect, ctx.schemaCatalogStore.get(datasource.name));
+  void ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
     if (catalog.outcome === 'failed') report.log(`schema catalog skipped: ${catalog.error}`);
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
-  if (firstCatalog) await catalogTask;
-
-  const schemaContext = buildSchemaContext(query, dialect, ctx.schemaCatalogStore.get(datasource.name));
 
   const capability = request.allowMutate ? 'executeMutate' : 'executeRead';
   const plugin = ctx.pluginRegistry.get(datasource.kind);
@@ -243,7 +234,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   }
   const execute = plugin.execute;
   if (!plugin.manifest.capabilities.includes(capability as any)) {
-    await catalogTask;
     return failure(new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`), { schemaContext });
   }
 
@@ -308,12 +298,10 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
     const result: QueryResult = await runExecute();
     phaseExecuteMs = Date.now() - executeStart;
-    await catalogTask;
 
     if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];
     const phases = {
       resolveMs: phaseResolveMs,
-      catalogMs: phaseCatalogMs,
       connectMs: phaseConnectMs,
       executeMs: phaseExecuteMs,
       totalMs: Date.now() - startedAt,
@@ -358,7 +346,15 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       },
     };
   } catch (error) {
-    await catalogTask;
-    return failure(error, meta);
+    const outcome = failure(error, meta);
+    if (outcome.ok || (outcome.code !== 'UNKNOWN_COLUMN' && outcome.code !== 'UNKNOWN_TABLE')) return outcome;
+    void ensureDatasourceCatalog(ctx, datasource, { force: true });
+    const didYouMean = suggestSchemaNames(outcome.code, outcome.message, schemaContext, ctx.schemaCatalogStore.get(datasource.name));
+    if (!didYouMean.length) return outcome;
+    return {
+      ...outcome,
+      message: `${outcome.message}. Did you mean: ${didYouMean.join(', ')}?`,
+      details: { ...((outcome.details as Record<string, unknown>) || {}), didYouMean },
+    };
   }
 }

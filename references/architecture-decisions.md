@@ -31,7 +31,7 @@ For each capability:
 
 ## Schema catalog
 - One cached catalog per SQL datasource at `~/.taproot/cache/schema/<datasource>.json`.
-- Fetched on the first query, refreshed in the background when older than `TAPROOT_CATALOG_TTL_HOURS`.
+- Fetched in the background on the first query and refreshed when older than `TAPROOT_CATALOG_TTL_HOURS`; no query waits for it.
 
 ## Config boundaries
 - Datasource profiles own connection topology (`host`, `port`, `database`, `target`).

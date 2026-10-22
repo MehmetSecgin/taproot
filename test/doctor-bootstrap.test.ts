@@ -71,7 +71,7 @@ describe('doctor with an unresolved env/service target', () => {
     expect(fs.existsSync(path.join(configDir, 'credentials.json.enc'))).toBe(false);
   });
 
-  it('reports the missing profile and points at KB-backed creation', () => {
+  it('reports the missing profile and that the KB can supply it', () => {
     // arrange
     const { env } = setupState();
 
@@ -88,10 +88,9 @@ describe('doctor with an unresolved env/service target', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
       status: 'ok',
     });
-    expect(parsed.nextActionDetails[0].command).toBe('taproot init datasource --env prod --service orders');
   });
 
-  it('falls back to datasource add when the KB has no connection for the target', () => {
+  it('warns when the KB has no connection for the target', () => {
     // arrange
     const { env } = setupState();
 
@@ -104,6 +103,5 @@ describe('doctor with an unresolved env/service target', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
       status: 'warn',
     });
-    expect(parsed.nextActionDetails[0].command).toContain('taproot datasource add --name prod-payments');
   });
 });

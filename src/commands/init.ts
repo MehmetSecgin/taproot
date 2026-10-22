@@ -12,21 +12,18 @@ import { DoctorStatus } from '../types/core.js';
 export function registerInit(program: Command, getCtx: () => AppContext): void {
   const init = program.command('init').description('Initialize local TapRoot runtime state for first use');
 
-  init.option('--kind <kind>', 'tailor the setup steps to a datasource kind (mysql|postgres|redis|grpc)');
-
-  init.action(async (opts) => {
+  init.action(async () => {
     const ctx = getCtx();
     const createdConfig = ensureStarterRuntime(ctx);
     const kbDirToSave = str(program.opts().kbDir).trim() || (ctx.runtimeConfigStore.get().kbDir ? '' : str(process.env.TAPROOT_KB_DIR).trim());
     if (kbDirToSave) ctx.runtimeConfigStore.saveKbDir(path.resolve(kbDirToSave));
-    const snapshot = await collectReadinessSnapshot(ctx, { createdConfig, setupKind: opts.kind });
+    const snapshot = await collectReadinessSnapshot(ctx, { createdConfig });
     const trimmedChecks = snapshot.checks.map((check) => check.status === DoctorStatus.Ok
       ? { check: check.check, status: check.status }
       : check);
     const data = {
       checks: trimmedChecks,
       readiness: snapshot.readiness,
-      nextActionDetails: snapshot.nextActionDetails,
       ...(kbDirToSave ? { savedKbDir: path.resolve(kbDirToSave) } : {}),
     };
     printJson(data);

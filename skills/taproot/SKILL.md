@@ -19,11 +19,11 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 | Command patterns and decision points | `references/workflows.md` |
 
 ## Hard Rules
-- **Schema arrives on its own. Never run a separate schema step.** The first query against a SQL datasource caches its whole table catalog, and every response carries `meta.schemaContext.tables` for the referenced tables plus `meta.schemaContext.catalog` (`{tables, fetchedAt}`) proving the full catalog is cached. To see a table's columns, indexes, and partition key, run any cheap query on it (for example `SELECT ... LIMIT 1`) with `--pluck meta.schemaContext.tables.<t>`. `SHOW TABLES` lists tables; `SHOW CREATE TABLE` gives the full DDL when you need it.
-- **Never probe with `SELECT 1`.** Run the real query. A dead connector returns `CONNECTIVITY` with `nextActionDetails`; a pre-flight ping only costs a round trip and tells you nothing the first query would not.
+- **Never guess column or table names.** If the user, the code, or the migration files do not name them, look them up with the question-to-command table in `references/sql.md` (`SHOW TABLES`, `SHOW CREATE TABLE <t> --pluck meta.schemaContext.tables.<t>`, `information_schema.columns ... LIKE`). There is no separate schema step: the catalog caches itself in the background on the first query. A response without `meta.schemaContext.catalog` means it is not cached yet, so the partition guard did not check that query: keep the partition column in `WHERE` yourself.
+- **Never probe with `SELECT 1`.** Run the real query. A dead connector returns `CONNECTIVITY`; a pre-flight ping only costs a round trip and tells you nothing the first query would not.
 - **Never run `mysql -e`, `psql -c`, `tsh db exec`, `tsh proxy db`, `redis-cli`, or `grpcurl` directly.** Every query goes through `taproot query`.
 - **Never retry identical failing SQL.** Change the cause first.
-- **No silent fallback.** On `CONNECTIVITY`, `ACCESS_DENIED`, `AUTH_EXPIRED`, `MISCONFIGURED_DATASOURCE`, or any non-`ok` response, surface `error.code`, `error.message`, and `nextActionDetails`, then stop. Direct shell fallback needs an explicit user request.
+- **No silent fallback.** On `CONNECTIVITY`, `ACCESS_DENIED`, `AUTH_EXPIRED`, `MISCONFIGURED_DATASOURCE`, or any non-`ok` response, surface `error.code` and `error.message`, then stop. Direct shell fallback needs an explicit user request.
 - **Read-only by default.** Keep queries read-only unless the user explicitly asks for mutation and the datasource policy allows it. Redis mutate and flush tiers are gated separately (see `references/redis.md`).
 - **Never hand-write engine JSON-path SQL** (`JSON_EXTRACT`, `->`, `->>`, `JSON_VALUE`). Select the raw column and use `--json-extract <column>:<dotpath>`, or parse offline.
 - **Keep partition and indexed keys as bare columns** in `WHERE` and `JOIN`. Wrapping them in `TO_DAYS()`, `DATE()`, or `CAST()` forces `partition:all`, a full scan.
@@ -46,10 +46,10 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - For repeated Teleport-style access, start the daemon and open a session; a cold `tsh proxy db` costs 3 to 10 s per call.
 
 ## Error codes
-One recovery action each. Do not loop. If it does not resolve, return the error plus `nextActionDetails` and stop.
+One recovery action each. Do not loop. If it does not resolve, return the error and stop.
 
 - `CONNECTIVITY`: rerun `doctor --datasource <n> --connect` **once**, then stop. `getaddrinfo ENOTFOUND` on an in-cluster hostname means the cluster network (VPN, telepresence, port-forward) is down.
-- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: check names against `meta.schemaContext.tables` or `SHOW TABLES`, fix the query, then retry.
+- `UNKNOWN_COLUMN` / `UNKNOWN_TABLE`: the message ends with `Did you mean: ...?` (`error.details.didYouMean`) from the cached catalog. Fix the name and retry once; without a suggestion, look it up with `SHOW CREATE TABLE` or `SHOW TABLES`.
 - `KB_MISSING`: the KB directory named in the message does not exist or lists no services. Ask the user for the KB path and run `taproot init --kb-dir <dir>`, or use `datasource add`.
 - `UNKNOWN_DATASOURCE`: no profile has that name. Use a name from the `Did you mean` list, or pass `--env` + `--service`.
 - `SQL_SYNTAX`: fix the SQL. Never resend it unchanged.
@@ -63,4 +63,4 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `SESSION_BUSY`: concurrent-lease cap hit. Wait for in-flight queries or open a new session.
 
 ## Readiness in one line
-`taproot init` (add `--kind mysql|postgres|redis|grpc`) prints checks plus an ordered list of runnable next actions. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. Read `nextActionDetails[0].command` for the top action; only `self-check --agent` also emits `nextCommand`. Details in `references/setup.md`.
+`taproot init` and `taproot self-check --agent` print `readiness` plus checks. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. A failing check's `code` and `detail` name the cause. Details in `references/setup.md`.

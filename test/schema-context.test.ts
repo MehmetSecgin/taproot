@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSchemaContext, collectPredicateColumns, collectReferencedTables } from '../src/core/schema-context.js';
+import { buildSchemaContext, collectPredicateColumns, collectReferencedTables, suggestSchemaNames } from '../src/core/schema-context.js';
 import type { SchemaCatalog } from '../src/store/schema-catalog.js';
 
 function makeCatalog(): SchemaCatalog {
@@ -79,5 +79,26 @@ describe('schema context', () => {
   it('returns empty context for unparseable SQL', () => {
     expect(buildSchemaContext('SELECT FROM WHERE', 'mysql', makeCatalog()).tables).toEqual({});
     expect(buildSchemaContext('SELECT id FROM orders', 'mysql', undefined)).toEqual({ tables: {} });
+  });
+});
+
+describe('suggestSchemaNames', () => {
+  it('suggests the closest column of a referenced table for a MySQL error', () => {
+    const context = buildSchemaContext('SELECT customer_ident FROM orders', 'mysql', makeCatalog());
+    expect(suggestSchemaNames('UNKNOWN_COLUMN', "Unknown column 'customer_ident' in 'field list'", context, makeCatalog())[0]).toBe('orders.customer_id');
+  });
+
+  it('reads the column name from a Postgres error', () => {
+    const context = buildSchemaContext('SELECT o.order_day FROM orders o', 'postgres', makeCatalog());
+    expect(suggestSchemaNames('UNKNOWN_COLUMN', 'column o.order_day does not exist', context, makeCatalog())[0]).toBe('orders.order_date');
+  });
+
+  it('suggests catalog tables for a missing table, ignoring the database prefix', () => {
+    const context = buildSchemaContext('SELECT id FROM customer', 'mysql', makeCatalog());
+    expect(suggestSchemaNames('UNKNOWN_TABLE', "Table 'orders.customer' doesn't exist", context, makeCatalog())[0]).toBe('customers');
+  });
+
+  it('suggests nothing without a cached catalog', () => {
+    expect(suggestSchemaNames('UNKNOWN_TABLE', "Table 'orders.customer' doesn't exist", { tables: {} }, undefined)).toEqual([]);
   });
 });

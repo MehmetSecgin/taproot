@@ -95,7 +95,7 @@ describe('connector UX', () => {
     expect(parsed.data.checks[0].check).toContain('openvpn');
   });
 
-  it('doctor emits connector setup next-action hints for missing connector config', () => {
+  it('doctor reports the missing connector command as a coded check', () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-connector-missing-'));
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
@@ -124,16 +124,9 @@ describe('connector UX', () => {
     });
     expect(out.status).not.toBe(0);
     const parsed = JSON.parse(out.stdout);
-    expect(Array.isArray(parsed.nextActionDetails)).toBe(true);
-    expect(parsed.nextActionDetails.map((d: { command: string }) => d.command).join('\n')).toContain(
-      'taproot connector setup --datasource qa-kpf --connector kubectl-portforward --status-command',
+    expect(parsed.checks).toContainEqual(
+      expect.objectContaining({ check: 'kubectl-portforward status', code: 'connector_status_command_missing' }),
     );
-    expect(parsed.nextActionDetails[0]).toMatchObject({
-      command: expect.stringContaining('taproot connector setup --datasource qa-kpf --connector kubectl-portforward'),
-      priority: 10,
-      checks: ['kubectl-portforward status'],
-      codes: ['connector_status_command_missing'],
-    });
   });
 
   it('doctor returns machine-readable connector codes for blocked status checks', () => {

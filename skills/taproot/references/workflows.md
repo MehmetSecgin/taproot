@@ -7,14 +7,10 @@
 
 ## Brand-New Machine
 ```bash
-# creates ~/.taproot/ and prints an ordered, runnable next-actions list.
+# creates ~/.taproot/ and prints the readiness checks.
 # On an initialized but unconfigured machine: all checks ok/warn, never fail, exit 0.
 # warn on kb_dir / datasources / credentials means "not configured yet", not broken.
 taproot init
-
-# tailor the setup steps to the engine being configured
-taproot init --kind grpc
-taproot init --kind mysql|postgres|redis
 
 # whole-install health. `doctor` alone is NOT a health check: it needs a target and
 # exits non-zero without --datasource or --env+--service.
@@ -38,16 +34,6 @@ taproot self-check
 taproot self-check --agent
 taproot self-check --agent --datasource <name>
 taproot self-check --agent --env <env> --service <service>
-```
-
-- For `init` and `self-check --agent`, read the structured records. There is no `nextActions` string array on these payloads.
-```bash
-# structured records with command, priority, checks, codes, reasons; sorted by ascending priority
-nextActionDetails
-nextActionDetails[0].command      # top action for init and doctor
-
-# self-check --agent only: a separate top-action hint
-nextCommand
 ```
 
 - KB-backed datasource create/repair:
@@ -92,12 +78,7 @@ taproot doctor --datasource <name> --connect
 taproot doctor --datasource <name> --connect
 ```
 
-- If `doctor` fails, read the structured records (`doctor` emits no `nextActions` array and no `nextCommand`):
-```bash
-# structured records with command, priority, checks, codes, reasons
-nextActionDetails
-nextActionDetails[0].command
-```
+- If `doctor` fails, read the failing checks: `code` classifies the failure and `detail` names the cause.
 
 - Resolve from env/service:
 ```bash
@@ -260,9 +241,8 @@ taproot sanitize check-repo
   - `error.code`, `error.message`, `error.details`
   - `meta.requestId`, `meta.sessionId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
-  - `readiness`, `missing`, `nextCommand`, `target` from `self-check --agent`
-  - `nextActions`, `nextActionDetails` from `init` and `self-check --agent`
-  - `nextActions`, `nextActionDetails` from `doctor`
+  - `readiness`, `checks`, `target` from `self-check --agent`
+  - `checks` from `init` and `doctor`
 
 ## Safety
 - Keep DB operations read-only unless the user explicitly requests mutation and TapRoot policy allows it.
