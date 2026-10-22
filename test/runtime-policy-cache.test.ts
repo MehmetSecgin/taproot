@@ -57,6 +57,6 @@ describe('runtime policy and KB state', () => {
     const { env } = setupState();
     const out = runCli(['kb', 'list-services'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout)).toEqual(['orders', 'sample-service']);
+    expect(JSON.parse(out.stdout).data).toEqual(['orders', 'sample-service']);
   });
 });

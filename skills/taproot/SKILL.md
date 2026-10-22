@@ -63,4 +63,4 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `SESSION_BUSY`: concurrent-lease cap hit. Wait for in-flight queries, then retry once.
 
 ## Readiness in one line
-`taproot init` prints `readiness` plus checks for the whole install. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. A failing check's `code` and `detail` name the cause. Details in `references/setup.md`.
+`taproot init` prints `data.readiness` plus `data.checks` for the whole install. `warn` means not configured yet, not broken. Bare `taproot doctor` is not a health check: it needs `--datasource` or `--env`+`--service`. A failing check's `code` and `detail` name the cause. Details in `references/setup.md`.

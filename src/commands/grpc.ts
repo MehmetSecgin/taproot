@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
-import { printJson, respondOk } from '../core/output.js';
+import { printEnvelope, printJson } from '../core/output.js';
 import { loadProtobufRoot } from '../core/proto-loader.js';
 import {
   buildRequestSkeleton,
@@ -125,7 +125,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
         const p = String(pattern).toLowerCase();
         flat = flat.filter((r) => `${r.service} ${r.method} ${r.request} ${r.response}`.toLowerCase().includes(p));
       }
-      respondOk({ methods: flat }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
+      printEnvelope(true, { methods: flat }, undefined, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
     });
 
   grpc
@@ -139,6 +139,6 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
       const { root, source } = resolveProtoRoot(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));
-      respondOk({ matches }, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
+      printEnvelope(true, { matches }, undefined, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
     });
 }

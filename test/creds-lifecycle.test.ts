@@ -49,7 +49,7 @@ describe('credential lifecycle', () => {
     runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret123'], env);
     const out = runCli(['creds', 'show', '--ref', 'qa:orders'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).values.password).toBe('[REDACTED]');
+    expect(JSON.parse(out.stdout).data.values.password).toBe('[REDACTED]');
   });
 
   it('creds show redacts token', () => {
@@ -92,7 +92,7 @@ describe('credential lifecycle', () => {
 
     const jsonOut = runCli(['creds', 'list'], env);
     expect(jsonOut.status).toBe(0);
-    const parsed = JSON.parse(jsonOut.stdout) as Array<{ ref: string; keys: string[]; source: string }>;
+    const parsed = JSON.parse(jsonOut.stdout).data as Array<{ ref: string; keys: string[]; source: string }>;
     expect(parsed.map((e) => e.ref).sort()).toEqual(['prod:billing', 'qa:orders']);
     for (const entry of parsed) {
       for (const key of entry.keys) {

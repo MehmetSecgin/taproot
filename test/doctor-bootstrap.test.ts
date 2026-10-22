@@ -80,7 +80,7 @@ describe('doctor with an unresolved env/service target', () => {
 
     // assert
     expect(out.status).toBe(7);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.datasource).toBe(null);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'target_datasource')).toMatchObject({
       status: 'fail',
@@ -99,7 +99,7 @@ describe('doctor with an unresolved env/service target', () => {
 
     // assert
     expect(out.status).toBe(7);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
       status: 'warn',
     });

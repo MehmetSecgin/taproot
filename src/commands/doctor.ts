@@ -3,7 +3,7 @@ import type { AppContext } from '../core/app.js';
 import { classifyError, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
-import { printJson } from '../core/output.js';
+import { printEnvelope } from '../core/output.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { verboseLog } from './query-direct.js';
 import { DoctorStatus } from '../types/core.js';
@@ -71,7 +71,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           };
           logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
           const checks = unresolvedTargetChecks(target);
-          printJson({
+          printEnvelope(true, {
             datasource: null,
             plugin: null,
             warnings,
@@ -106,7 +106,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
               status: DoctorStatus.Warn,
               detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
             });
-            printJson({
+            printEnvelope(true, {
               datasource: datasource.name,
               plugin: plugin.manifest.name,
               warnings,
@@ -144,7 +144,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
       const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
       const okCount = checks.filter((c) => c.status === DoctorStatus.Ok).length;
 
-      printJson({
+      printEnvelope(true, {
         datasource: datasource.name,
         plugin: plugin.manifest.name,
         warnings,

@@ -25,7 +25,7 @@
 - On a **failed** command `--pluck` is ignored: stdout gets the full error envelope (`{"ok":false,"error":{code,message,details}}`) and the exit code is non-zero. When capturing a plucked value, always gate on exit code.
 - Paths differ per command:
   - `query ... --pluck data.rows` (rows only), `--pluck data.columns`, `--pluck meta.schemaContext.tables.<t>.indexes`.
-  - `datasource list|show|add|resolve|remove|import|export` wrap output in `{ok,data}`, so paths need the `data.` prefix: `--pluck "data[0].name"`, `jq '.data[]'`.
+  - Every command wraps output in `{ok,data}`, so paths need the `data.` prefix: `--pluck "data[0].name"`, `--pluck data.readiness`, `jq '.data[]'`.
   - `--pluck "length"` is unsupported; jq is still needed for aggregates.
 
 ## Large results

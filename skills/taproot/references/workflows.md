@@ -216,8 +216,8 @@ taproot daemon stop
   - `error.code`, `error.message`, `error.details`
   - `meta.requestId`, `meta.sessionId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
-  - `readiness` and `checks` from `init`
-  - `checks` from `doctor`
+  - `data.readiness` and `data.checks` from `init`
+  - `data.checks` from `doctor`
 
 ## Safety
 - Keep DB operations read-only unless the user explicitly requests mutation and TapRoot policy allows it.

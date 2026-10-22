@@ -52,7 +52,7 @@ describe('init audits dangling credentialRefs', () => {
             '--host', '127.0.0.1', '--port', '3306', '--database', 'd'], env);
 
     // act
-    const before = JSON.parse(runCli(['init'], env).stdout);
+    const before = JSON.parse(runCli(['init'], env).stdout).data;
     const check = before.checks.find((c: { check: string }) => c.check === 'credential_refs');
 
     // assert
@@ -61,7 +61,7 @@ describe('init audits dangling credentialRefs', () => {
 
     // act — set the ref, re-check
     runCli(['creds', 'set', '--ref', 'missing-ref', '--user', 'reader', '--password', 'p'], env);
-    const after = JSON.parse(runCli(['init'], env).stdout);
+    const after = JSON.parse(runCli(['init'], env).stdout).data;
     const okCheck = after.checks.find((c: { check: string }) => c.check === 'credential_refs');
     expect(okCheck.status).toBe('ok');
   });

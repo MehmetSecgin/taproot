@@ -75,7 +75,7 @@ describe('connector UX', () => {
       TAPROOT_MASTER_KEY: 'test-master-key',
     });
     expect(out.status).not.toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks).toContainEqual(
       expect.objectContaining({ check: 'kubectl-portforward status', code: 'connector_status_command_missing' }),
     );
@@ -86,7 +86,7 @@ describe('connector UX', () => {
     expect(runCli(['creds', 'set', '--ref', 'kpf:qa:demo', '--status-command', 'false', '--connect-command', 'true'], env).status).toBe(0);
     const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).not.toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe('connector_status_blocked');
   });
 });

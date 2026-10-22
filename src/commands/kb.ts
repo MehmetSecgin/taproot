@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
-import { printJson, respondOk } from '../core/output.js';
+import { printEnvelope } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
 import { normalizeRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
@@ -42,7 +42,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       );
     }
     const row = { service, ...out };
-    printJson(row);
+    printEnvelope(true, row);
   });
 
   kb.command('tables')
@@ -64,7 +64,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const payload = opts.list
         ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
         : filtered;
-      printJson(payload);
+      printEnvelope(true, payload);
     });
 
   const relations = kb.command('relations').description('Curated cross-service relation operations');
@@ -76,7 +76,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const ctx = getCtx();
       let rows = ctx.kbStore.typedRelations();
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
-      printJson(rows);
+      printEnvelope(true, rows);
     });
 
   relations.command('import')
@@ -96,12 +96,12 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       const normalized = normalizeRelations(parsed);
       const skipped = parsed.length - normalized.length;
       const result = ctx.kbStore.promoteRelations(normalized);
-      respondOk({ added: result.added, total: result.total, skipped });
+      printEnvelope(true, { added: result.added, total: result.total, skipped });
     });
 
   kb.command('list-services')
     .action(() => {
       const ctx = getCtx();
-      printJson(ctx.kbStore.listServices());
+      printEnvelope(true, ctx.kbStore.listServices());
     });
 }

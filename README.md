@@ -362,14 +362,14 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 
 ## Agent-facing diagnostics
 
-`taproot init` reports whole-install readiness (`readiness`, `checks`). For one datasource:
+`taproot init` reports whole-install readiness (`data.readiness`, `data.checks`). For one datasource:
 
 ```bash
 taproot doctor --datasource <name>
 taproot doctor --datasource <name> --connect
 ```
 
-`doctor` returns `checks`, each with `status`, `code`, and a `detail` that names the cause.
+`doctor` returns `data.checks`, each with `status`, `code`, and a `detail` that names the cause.
 
 ---
 

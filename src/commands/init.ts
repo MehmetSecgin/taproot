@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
 import { reconcileDatasource } from '../core/bootstrap.js';
-import { printJson } from '../core/output.js';
+import { printEnvelope } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { str } from '../core/strings.js';
@@ -26,7 +26,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       readiness: snapshot.readiness,
       ...(kbDirToSave ? { savedKbDir: path.resolve(kbDirToSave) } : {}),
     };
-    printJson(data);
+    printEnvelope(true, data);
   });
 
   init.command('datasource')
@@ -52,6 +52,6 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
         connectors: result.connectors,
         warnings: result.warnings,
       };
-      printJson(data);
+      printEnvelope(true, data);
     });
 }

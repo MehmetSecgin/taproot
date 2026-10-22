@@ -86,9 +86,9 @@ describe('init command', () => {
 
     // assert
     expect(init.status).toBe(0);
-    expect(JSON.parse(init.stdout).savedKbDir).toBe(kbDir);
+    expect(JSON.parse(init.stdout).data.savedKbDir).toBe(kbDir);
     expect(list.status).toBe(0);
-    expect(JSON.parse(list.stdout)).toEqual(['orders']);
+    expect(JSON.parse(list.stdout).data).toEqual(['orders']);
   });
 
   it('keeps a saved kbDir when TAPROOT_KB_DIR points elsewhere', () => {
@@ -154,7 +154,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     const kbCheck = parsed.checks.find((check: any) => check.check === 'kb_dir');
     expect(kbCheck.status).not.toBe('ok');
     expect(parsed.readiness).toBe('missing_kb');
@@ -182,7 +182,7 @@ describe('init command', () => {
 
     // assert
     expect(out.status).toBe(0);
-    const credentials = JSON.parse(out.stdout).checks.find((c: { check: string }) => c.check === 'credentials');
+    const credentials = JSON.parse(out.stdout).data.checks.find((c: { check: string }) => c.check === 'credentials');
     expect(credentials.status).toBe('ok');
   });
 
@@ -208,7 +208,7 @@ describe('init command', () => {
 
     // assert
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     const credentials = parsed.checks.find((check: any) => check.check === 'credentials');
     expect(credentials.status).toBe('ok');
   });
@@ -222,7 +222,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     const masterKeyCheck = parsed.checks.find((check: any) => check.check === 'master_key');
     expect(masterKeyCheck.status).toBe('warn');
   });
@@ -237,7 +237,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(Array.isArray(parsed.checks)).toBe(true);
     expect(typeof parsed.readiness).toBe('string');
   });
@@ -252,7 +252,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('kb-bootstrap');
     const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
     expect(datasources[0].name).toBe('qa-develop-orders');
@@ -293,7 +293,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('store-existing');
     expect(parsed.skipped).toBe(true);
   });
@@ -336,7 +336,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.profile).toMatchObject({
       name: 'qa-develop-orders',
       env: 'qa',
@@ -400,7 +400,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('kb-repaired');
     expect(parsed.skipped).toBe(false);
     expect(parsed.profile.kind).toBe('teleport-mysql');
@@ -417,7 +417,7 @@ describe('init command', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(creds.status).toBe(0);
-    const credsParsed = JSON.parse(creds.stdout);
+    const credsParsed = JSON.parse(creds.stdout).data;
     expect(credsParsed.values.dbUser).toBe('existing-reader');
   });
 });

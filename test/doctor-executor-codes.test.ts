@@ -48,7 +48,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).toBe(3);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
   });
 
@@ -87,7 +87,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(3);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
       'executor_connectivity',
     );
@@ -125,7 +125,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(1);
-    const parsed = JSON.parse(out.stdout);
+    const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql doctor')?.code).toBe(
       'executor_configuration_missing',
     );

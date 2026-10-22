@@ -72,7 +72,7 @@ describe('output mode contract', () => {
     const stateRoot = setupStateRoot();
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' };
     expect(runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret'], env).status).toBe(0);
-    const parsed = JSON.parse(runCli(['creds', 'show', '--ref', 'qa:orders'], env).stdout);
+    const parsed = JSON.parse(runCli(['creds', 'show', '--ref', 'qa:orders'], env).stdout).data;
     expect(parsed.values.user).toBe('qa_user');
     expect(parsed.values.password).toBe('[REDACTED]');
   });

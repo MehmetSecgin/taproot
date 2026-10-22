@@ -111,6 +111,6 @@ describe('cli contract', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(kbOut.status).toBe(0);
-    expect(JSON.parse(kbOut.stdout).service).toBe('sample-service');
+    expect(JSON.parse(kbOut.stdout).data.service).toBe('sample-service');
   });
 });

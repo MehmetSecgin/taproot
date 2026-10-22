@@ -69,12 +69,8 @@ export function printEnvelope(
   ok: boolean,
   data: unknown,
   error?: CliOutputEnvelope['error'],
-  meta?: CliOutputEnvelope['meta'],
+  meta?: CliOutputEnvelope['meta'] & Record<string, unknown>,
 ): void {
   const env: CliOutputEnvelope = { ok, data, error, meta };
   printJson(env);
-}
-
-export function respondOk<T = unknown>(data: T, meta?: Record<string, unknown>): void {
-  printJson({ ok: true, data, meta: meta || {} });
 }

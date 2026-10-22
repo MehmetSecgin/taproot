@@ -51,5 +51,6 @@ Error envelope:
   - `open`/`inspect` should include `meta.sessionId` when available
 
 ## Output Discipline
+- Every command prints the shared envelope on success, with its payload under `data`.
 - stdout contains exactly one line of compact JSON, for every command, error, `--help` and `--version`.
 - stderr is empty unless `--verbose` is set, which adds JSON lines.
