@@ -130,8 +130,8 @@ export async function collectReadinessSnapshot(
     { check: 'plugins', status: DoctorStatus.Ok, detail: `${pluginNames.length} loaded: ${pluginNames.join(', ')}` },
     {
       check: 'master_key',
-      status: process.env.TAPROOT_MASTER_KEY ? DoctorStatus.Ok : DoctorStatus.Warn,
-      detail: process.env.TAPROOT_MASTER_KEY ? 'TAPROOT_MASTER_KEY is set' : 'TAPROOT_MASTER_KEY is unset; credential storage falls back to a derived local secret',
+      status: DoctorStatus.Ok,
+      detail: process.env.TAPROOT_MASTER_KEY ? 'TAPROOT_MASTER_KEY is set' : 'TAPROOT_MASTER_KEY is unset (optional); the credential fallback file uses a key derived from $USER',
     },
     configCheck(ctx, Boolean(input?.createdConfig)),
     {

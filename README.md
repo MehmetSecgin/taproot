@@ -306,7 +306,7 @@ taproot query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT
 | Variable | Purpose | Default |
 |---|---|---|
 | `TAPROOT_STATE_ROOT` | Override state directory | `~/.taproot` |
-| `TAPROOT_MASTER_KEY` | Symmetric key for the encrypted credential fallback file. **Set this for portable, deterministic secrets.** | derived from `$USER@$platform` |
+| `TAPROOT_MASTER_KEY` | Optional key for the encrypted credential fallback file, used when the OS keychain is unavailable. Set it to replace the default key, which anyone who knows your username can derive, or to read the file under another username. | derived from `$USER@$platform` |
 | `TAPROOT_NO_KEYCHAIN` | Force the encrypted file even when `keytar` is available | unset |
 | `TAPROOT_KB_DIR` | Path to the KB directory (the one containing `services.json`). Overrides the directory saved by `taproot init --kb-dir`. TapRoot does not care how you author the KB: Obsidian, a git repo, a hand-edited folder, anything. | saved `kbDir`, else `<TAPROOT_STATE_ROOT>/kb` |
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |

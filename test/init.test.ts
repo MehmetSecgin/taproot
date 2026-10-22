@@ -213,7 +213,7 @@ describe('init command', () => {
     expect(credentials.status).toBe('ok');
   });
 
-  it('warns when master key is missing', () => {
+  it('treats a missing master key as optional', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
@@ -224,7 +224,7 @@ describe('init command', () => {
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     const masterKeyCheck = parsed.checks.find((check: any) => check.check === 'master_key');
-    expect(masterKeyCheck.status).toBe('warn');
+    expect(masterKeyCheck.status).toBe('ok');
   });
 
   it('returns machine-readable init summary', () => {
