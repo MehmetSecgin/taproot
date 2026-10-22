@@ -16,13 +16,13 @@ TapRoot is much closer to agent-ready in an already prepared environment than it
 
 If the machine is already prepared, an agent can usually:
 
-- choose the right command family (`doctor`, `query`, `datasource resolve`, `kb`, `cache`, `learn`, `template`, `connector`, `self-check`)
+- choose the right command family (`doctor`, `query`, `datasource resolve`, `kb`, `cache`, `template`, `connector`, `self-check`)
 - follow a safe read-only workflow
 - use env/service resolution and datasource resolution correctly
 - understand deterministic vs discovery-based resolution
 - inspect runtime health with `self-check`
 - preflight connector/auth state with `doctor`
-- use saved templates, cache entries, and learning state through TapRoot commands instead of reading files directly
+- use saved templates and cache entries through TapRoot commands instead of reading files directly
 
 This means the skill is already useful as an operating manual for an agent once TapRoot has been installed and configured.
 

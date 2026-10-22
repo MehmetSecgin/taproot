@@ -12,13 +12,8 @@ export interface Paths {
   datasourceFile: string;
   credentialFile: string;
   cacheDir: string;
-  runsDir: string;
-  runsLedgerDir: string;
-  learningDir: string;
   kbDir: string;
 }
-
-export const RUNS_LEDGER_DIR_NAME = 'runs-ledger';
 
 function runtimeConfigFileFor(stateRoot: string): string {
   return path.join(stateRoot, 'config', 'deterministic-config.json');
@@ -41,9 +36,6 @@ function buildPaths(stateRoot: string, kbDir: string): Paths {
     datasourceFile: path.join(configDir, 'datasources.json'),
     credentialFile: path.join(configDir, 'credentials.json.enc'),
     cacheDir: path.join(stateRoot, 'cache'),
-    runsDir: path.join(stateRoot, 'runs'),
-    runsLedgerDir: path.join(stateRoot, 'learning', RUNS_LEDGER_DIR_NAME),
-    learningDir: path.join(stateRoot, 'learning'),
     kbDir,
   };
 }
@@ -55,7 +47,7 @@ export function resolvePaths(kbDir?: string): Paths {
 }
 
 export function ensurePaths(paths: Paths): void {
-  [paths.stateRoot, paths.configDir, paths.cacheDir, paths.runsDir, paths.learningDir, paths.runsLedgerDir].forEach((p) => fs.mkdirSync(p, { recursive: true }));
+  [paths.stateRoot, paths.configDir, paths.cacheDir].forEach((p) => fs.mkdirSync(p, { recursive: true }));
 }
 
 export function resolveFallbackPaths(kbDir?: string): Paths {

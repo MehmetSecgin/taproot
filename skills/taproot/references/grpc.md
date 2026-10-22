@@ -1,6 +1,6 @@
 # gRPC
 
-Treat `kind: grpc` datasources as RPC endpoints, not databases. Unary, server-streaming, client-streaming, and bidi methods are all callable. A streaming call is a batch: TapRoot sends every request message, half-closes, and collects every response before it returns. Persistent learning for calls is deferred.
+Treat `kind: grpc` datasources as RPC endpoints, not databases. Unary, server-streaming, client-streaming, and bidi methods are all callable. A streaming call is a batch: TapRoot sends every request message, half-closes, and collects every response before it returns.
 
 ## Introspection is offline
 `grpc list`, `grpc find`, and `grpc describe` read the local proto root only. They need no network, no VPN, no running server, and no credentials. Use them to explore an API and build a request before connectivity exists. Only `doctor` and `query` open a channel.

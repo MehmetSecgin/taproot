@@ -3,8 +3,9 @@
 Map symptoms to TapRoot commands. Do not bypass with direct shell DB tools.
 
 - **Hangs about 10 s, then `CONNECTIVITY: teleport proxy path unavailable`.** `tsh proxy db` is exiting before TCP-ready (expired cert, bad db user, missing target). Run `taproot doctor --datasource <n> --connect`. Check `tsh status` outside TapRoot to diagnose only; do not switch to direct `tsh db exec` for the actual query.
-- **`REDUNDANT_INTROSPECTION` on `SHOW CREATE TABLE`, `DESCRIBE`, or `SHOW COLUMNS`.** The service schema is already cached. Read it with `taproot learn ensure-schema --service <svc>` (or `learn schema --datasource <name>`). The cache holds columns, indexes, primary key, and partition, and the error's `details.nextCommand` points at the exact read. Pass `--allow-schema-introspection` only when the user explicitly asks for raw DDL or you suspect drift the cache missed.
-- **Same service across env or namespace.** The schema cache is service-keyed, so one `learn refresh-schema --service <svc>` covers every env for that service. Re-running per env is wasted work.
+- **Need a table's columns, indexes, or partition key.** Run any cheap query on it (`SELECT ... LIMIT 1`) with `--pluck meta.schemaContext.tables.<t>`. `SHOW TABLES` lists tables; `SHOW CREATE TABLE` gives the full DDL.
+- **Columns from a migration are missing in `meta.schemaContext`.** The catalog is cached per datasource for 24 h. Run `taproot cache clear`, then query again to re-read it.
+- **The same query keeps failing.** A failed query is never short-circuited, so resending it fails the same way. Read `error.code` and `nextActionDetails`, change the cause, then retry.
 - **`taproot doctor` slow (over 15 s).** Usually OpenVPN connect (up to 20 s) or a cold `tsh proxy db`. Drop `--connect` if you only need status, and confirm the daemon is started so later queries reuse the session.
 - **Query timeout fires immediately.** Connector preflight ran before the query timeout applied. Pass `--timeout` large enough to cover preflight plus query.
 - **First query against a Teleport datasource is always slow.** Cold-spawning `tsh proxy db` is the cost. Start the daemon and open a session, then query.

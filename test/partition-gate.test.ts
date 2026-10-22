@@ -17,7 +17,6 @@ function context(partition?: SchemaContext['tables'][string]['partition']): Sche
         primaryKey: ['id'],
         indexes: [{ name: 'idx_order_customer', columns: ['order_date', 'customer_id'] }],
         partition,
-        lastSeenAt: new Date().toISOString(),
       },
     },
   };

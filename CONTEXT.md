@@ -1,13 +1,13 @@
 # Context
 
 TapRoot is a query orchestration CLI with a plugin runtime. It resolves a datasource, gates the
-query against safety policy, executes it through a plugin, and records the run.
+query against safety policy, and executes it through a plugin.
 
 ## Glossary
 
 Terms below are the ones the query execution seam turns on. The wider vocabulary (datasource,
-credential ref, connector, executor, capability, access method, KB, learning cache, schema catalog,
-run artifacts, runs ledger, session, lease, envelope, readiness) is defined
+credential ref, connector, executor, capability, access method, KB, schema catalog,
+session, lease, envelope, readiness) is defined
 across `references/`. Terms move here when a decision depends on the definition.
 
 **Query execution request**

@@ -8,8 +8,7 @@ When fields overlap between datasource profiles and KB entries (`engine`, `host`
 
 1. Explicit CLI args
 2. Datasource profile store (`~/.taproot/config/datasources.json`)
-3. Learning resolution cache (`~/.taproot/learning/resolution-cache.json`)
-4. KB static files (`references/kb/*.json`)
+3. KB static files (`references/kb/*.json`)
 
 Practical meaning:
 - Datasource profiles are runtime source-of-truth.

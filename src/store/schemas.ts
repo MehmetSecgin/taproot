@@ -35,7 +35,6 @@ export const EnvironmentPolicySchema = z.object({
   allowDiscoveryByDefault: z.boolean().default(false),
   preferredAccessMethods: z.array(z.string()).default([]),
   targetPreference: z.array(z.string()).default([]),
-  ledgerRedactionTier: z.enum(['raw', 'redact', 'strict']).optional(),
 });
 
 export const RuntimeConfigSchema = z.object({
@@ -45,15 +44,6 @@ export const RuntimeConfigSchema = z.object({
     query: z.object({
       timeoutMs: z.number().int().positive().optional(),
       timeZone: z.string().optional(),
-    }).optional(),
-    learning: z.object({
-      enabled: z.boolean().optional(),
-      sampleRowsMax: z.number().int().positive().optional(),
-      sampleCellMax: z.number().int().positive().optional(),
-      ttlHours: z.number().int().positive().optional(),
-    }).optional(),
-    ledger: z.object({
-      redactionTier: z.enum(['raw', 'redact', 'strict']).optional(),
     }).optional(),
   }).optional(),
   environmentPolicies: z.record(z.string(), EnvironmentPolicySchema.partial()).optional(),

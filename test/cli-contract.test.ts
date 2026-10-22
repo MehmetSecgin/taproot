@@ -44,11 +44,10 @@ describe('cli contract', () => {
     expect(JSON.parse(out.stdout)).toEqual({ version: pkg.version });
   });
 
-  it('learn help includes schema snapshot command', () => {
-    const out = runCli(['learn', '--help']);
-    expect(out.status).toBe(0);
-    expect(out.stdout).toContain('schema');
-    expect(out.stdout).toContain('ensure-schema');
+  it('rejects the removed learning commands', () => {
+    const out = runCli(['learn', 'status']);
+    expect(out.status).not.toBe(0);
+    expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
   });
 
   it('self-check json includes checks', () => {

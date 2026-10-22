@@ -21,10 +21,7 @@
 - `taproot kb resolve --service sample --env production`
 - `taproot kb resolve --datasource production-sample`
 
-## Learning + Cache
-- `taproot learn status`
-- `taproot learn compact`
-- Learning contract: `references/learning-contract.md`
+## Cache
 - `taproot cache show`
-- `taproot cache prune --ttl-hours 168`
+- `taproot cache clear`
 

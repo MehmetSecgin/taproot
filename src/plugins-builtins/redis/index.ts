@@ -344,7 +344,6 @@ export const redisPlugin: TapRootPlugin = {
       rows = lines.map((line) => ({ value: line }));
     }
     return {
-      runId: '',
       datasource: request.datasource.name,
       plugin: 'redis',
       capability: request.capability,

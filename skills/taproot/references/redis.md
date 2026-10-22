@@ -1,6 +1,6 @@
 # Redis / Dragonfly
 
-Treat `kind: redis` datasources as cache lookups, not SQL queries. There is no learned schema, no `learn ensure-schema`, and no partition checks. Redis bypasses the relational learning paths entirely.
+Treat `kind: redis` datasources as cache lookups, not SQL queries. There is no schema catalog and no partition checks.
 
 ## Querying
 - Pass the raw Redis command as `--sql`, for example `--sql "GET <key>"`, `--sql "HGETALL <key>"`, `--sql "SCAN 0 COUNT 50"`, `--sql "INFO keyspace"`. Quote keys with spaces or special characters; the plugin tokenizes shell-style.

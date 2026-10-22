@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { kbMissing } from '../core/error-classification.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
-import { normalizeRelations, relationsForTables } from '../core/relations.js';
-import type { KbRelation, SchemaRelationEdge } from '../types/core.js';
+import { normalizeRelations } from '../core/relations.js';
+import type { KbRelation } from '../types/core.js';
 import { str } from '../core/strings.js';
 
 export class KbStore {
@@ -34,11 +34,6 @@ export class KbStore {
 
   typedRelations(): KbRelation[] {
     return normalizeRelations(this.relations());
-  }
-
-  relationsForTables(service: string, tables: string[], liveColumns?: Map<string, Set<string>>): SchemaRelationEdge[] {
-    if (!service || !tables.length) return [];
-    return relationsForTables(this.typedRelations(), service, tables, liveColumns);
   }
 
   promoteRelations(candidates: KbRelation[]): { added: number; total: number } {

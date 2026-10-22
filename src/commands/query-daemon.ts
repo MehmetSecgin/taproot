@@ -44,7 +44,7 @@ export async function runDaemonQuery(request: QueryExecutionRequest, ctx: AppCon
 
   const meta = (rpc.meta || {}) as QueryOutcomeMeta;
   if (rpc.ok) {
-    logVerbose(`daemon request=${rpc.requestId} session=${meta.sessionId || 'n/a'} run=${meta.runId || 'n/a'}`);
+    logVerbose(`daemon request=${rpc.requestId} session=${meta.sessionId || 'n/a'}`);
     presentQueryOutcome({ ok: true, data: (rpc.data || {}) as unknown as QuerySuccessData, meta }, rpc.requestId);
     return 'handled';
   }

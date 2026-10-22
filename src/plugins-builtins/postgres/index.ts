@@ -61,7 +61,6 @@ export const postgresPlugin: TapRootPlugin = {
         request.timeoutMs ? ({ text: request.query, query_timeout: request.timeoutMs } as any) : request.query,
       );
       return {
-        runId: '',
         datasource: request.datasource.name,
         plugin: 'postgres',
         capability: request.capability,

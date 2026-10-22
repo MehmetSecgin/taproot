@@ -49,20 +49,17 @@ function isEmptyMap(value: unknown): boolean {
 export function trimQueryJsonEnvelope<T extends Record<string, unknown>>(envelope: T): T {
   const data = envelope.data as Record<string, unknown> | undefined;
   if (data && typeof data === 'object') {
-    if ('queryMemory' in data && isEmptyMap(data.queryMemory)) delete data.queryMemory;
     if (Array.isArray(data.warnings) && data.warnings.length === 0) delete data.warnings;
   }
   const meta = envelope.meta as Record<string, unknown> | undefined;
   if (meta && typeof meta === 'object') {
-    if ('queryMemory' in meta && isEmptyMap(meta.queryMemory)) delete meta.queryMemory;
     const sc = meta.schemaContext as Record<string, unknown> | undefined;
     if (
       sc &&
       isEmptyMap(sc.tables) &&
       isEmptyMap(sc.services) &&
       isEmptyMap(sc.messages) &&
-      isEmptyMap(sc.enums) &&
-      !(Array.isArray(sc.relations) && sc.relations.length)
+      isEmptyMap(sc.enums)
     ) delete meta.schemaContext;
   }
   return envelope;

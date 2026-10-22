@@ -315,7 +315,6 @@ export const grpcPlugin: TapRootPlugin = {
       schemaContext = undefined;
     }
     const result: QueryResult = {
-      runId: '',
       datasource: request.datasource.name,
       plugin: 'grpc',
       capability: request.capability,

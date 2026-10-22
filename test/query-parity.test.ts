@@ -41,7 +41,6 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
     allowDiscovery: false,
     allowMutate: false,
     allowPartitionScan: false,
-    allowSchemaIntrospection: false,
     explain: false,
     rowsObject: false,
     jsonExtract: [],
@@ -172,10 +171,9 @@ describe('query parity between the direct and daemon adapters', () => {
     expect(rpc.error?.code).toBe('BAD_INPUT');
   });
 
-  it('maps run, session and phase metadata onto the daemon response', async () => {
+  it('maps session and phase metadata onto the daemon response', async () => {
     const { rpc } = await runBothPaths(baseRequest());
     const meta = rpc.meta as Record<string, unknown>;
-    expect(meta.runId).toBeTruthy();
     expect(meta.sessionId).toBeTruthy();
     expect(meta.resolved).toBeDefined();
     expect(meta.phases).toMatchObject({ resolveMs: expect.any(Number), executeMs: expect.any(Number) });

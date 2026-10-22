@@ -4,13 +4,11 @@ export interface QueryOpts {
   env?: string;
   namespace?: string;
   service?: string;
-  reason?: string;
   sql?: string;
   param?: string[];
   allowDiscovery?: boolean;
   allowMutate?: boolean;
   allowPartitionScan?: boolean;
-  allowSchemaIntrospection?: boolean;
   explain?: boolean;
   rowsObject?: boolean;
   proto?: string;

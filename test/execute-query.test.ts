@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
@@ -25,14 +24,6 @@ function capturingPlugin(capture: { query?: string; creds?: Record<string, strin
     return inner(request, creds);
   };
   return plugin;
-}
-
-function ledgerEntries(): string[] {
-  const ledgerDir = path.join(stateRoot, 'learning', 'runs-ledger');
-  if (!fs.existsSync(ledgerDir)) return [];
-  return fs
-    .readdirSync(ledgerDir)
-    .flatMap((file) => fs.readFileSync(path.join(ledgerDir, file), 'utf8').split('\n').filter(Boolean));
 }
 
 beforeEach(async () => {
@@ -63,7 +54,6 @@ describe('executeQuery success', () => {
       plugin: 'fake',
       classification: 'success',
     });
-    expect(outcome.meta.runId).toBeTruthy();
     expect(outcome.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
     expect(Object.keys(outcome.meta.phases || {})).toEqual(['resolveMs', 'catalogMs', 'connectMs', 'executeMs', 'totalMs']);
   });
@@ -101,15 +91,6 @@ describe('executeQuery success', () => {
     expect(outcome.data.warnings).toEqual(['slow scan']);
   });
 
-  it('writes a run summary and a ledger entry', async () => {
-    const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-    if (!outcome.ok) throw new Error('expected success');
-    const summary = path.join(stateRoot, 'runs', outcome.meta.runId!, 'summary.json');
-    expect(fs.existsSync(summary)).toBe(true);
-    expect(ledgerEntries().length).toBe(1);
-  });
-
   it('runs the query while a stale catalog refreshes and reports catalogMs', async () => {
     // arrange
     stateRoot = await setupQueryState({ kind: 'mysql' });
@@ -125,11 +106,11 @@ describe('executeQuery success', () => {
       return inner(request, creds);
     };
     const ctx = contextWith(plugin);
-    ctx.learningStore.saveSchemaCatalog({ datasource: ctx.datasourceStore.get('qa-fake')!, tableCount: 1 });
-    const catalogFile = path.join(stateRoot, 'learning', 'schema-catalog.json');
-    const rows = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
-    rows[0].fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
-    fs.writeFileSync(catalogFile, JSON.stringify(rows));
+    ctx.schemaCatalogStore.save('qa-fake', {});
+    const catalogFile = path.join(stateRoot, 'cache', 'schema', 'qa-fake.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
+    catalog.fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+    fs.writeFileSync(catalogFile, JSON.stringify(catalog));
     const recorder = recordingReport();
 
     // act
@@ -181,15 +162,13 @@ describe('executeQuery session identity', () => {
 });
 
 describe('executeQuery failure', () => {
-  it('rejects a malformed param before any run is recorded', async () => {
+  it('rejects a malformed param', async () => {
     const ctx = contextWith(fakePlugin());
     const outcome = await executeQuery(queryRequest({ params: ['brokenpair'] }), { ctx, report: silentQueryReport });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.code).toBe('BAD_INPUT');
     expect(outcome.message).toContain("Invalid --param 'brokenpair'");
-    expect(outcome.meta.runId).toBeUndefined();
-    expect(ledgerEntries().length).toBe(0);
   });
 
   it('rejects an empty query', async () => {
@@ -200,7 +179,7 @@ describe('executeQuery failure', () => {
     expect(outcome.message).toContain('No query resolved');
   });
 
-  it('blocks a mutating query without allowMutate and records the failure', async () => {
+  it('blocks a mutating query without allowMutate', async () => {
     const ctx = contextWith(fakePlugin());
     const outcome = await executeQuery(queryRequest({ query: 'DELETE FROM orders' }), {
       ctx,
@@ -209,18 +188,15 @@ describe('executeQuery failure', () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).toContain('--allow-mutate');
-    expect(outcome.meta.runId).toBeTruthy();
-    expect(ledgerEntries().length).toBe(1);
   });
 
-  it('classifies a plugin failure and keeps the run metadata', async () => {
+  it('classifies a plugin failure and keeps the schema context', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.code).toBe('ACCESS_DENIED');
-    expect(outcome.meta.runId).toBeTruthy();
-    expect(outcome.meta.queryMemory).toBeDefined();
+    expect(outcome.meta.schemaContext).toBeDefined();
   });
 
   it('fails when no plugin serves the datasource kind', async () => {
@@ -240,98 +216,6 @@ describe('executeQuery failure', () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).toContain('Datasource resolution failed');
-  });
-});
-
-function countingPlugin(failWith: string, calls: { count: number }): TapRootPlugin {
-  const plugin = fakePlugin({ failWith });
-  const inner = plugin.execute!;
-  plugin.execute = async (request, creds): Promise<QueryResult> => {
-    calls.count += 1;
-    return inner(request, creds);
-  };
-  return plugin;
-}
-
-describe('executeQuery repeat guard', () => {
-  it('short-circuits the same query after a syntax error and returns the prior error', async () => {
-    // arrange
-    const calls = { count: 0 };
-    const ctx = contextWith(countingPlugin("You have an error in your SQL syntax; check the manual near 'SELEC'", calls));
-    await executeQuery(queryRequest({ query: 'SELEC 1' }), { ctx, report: silentQueryReport });
-
-    // act
-    const outcome = await executeQuery(queryRequest({ query: 'SELEC 1' }), { ctx, report: silentQueryReport });
-
-    // assert
-    expect(calls.count).toBe(1);
-    if (outcome.ok) throw new Error('expected failure');
-    expect(outcome.code).toBe('SQL_SYNTAX');
-    expect(outcome.message).toContain('short-circuited');
-    expect(outcome.message).toContain("near 'SELEC'");
-    expect(outcome.details).toMatchObject({ shortCircuited: true });
-    expect(ledgerEntries().length).toBe(1);
-  });
-
-  it('short-circuits any query on a datasource after a connectivity failure', async () => {
-    // arrange
-    const calls = { count: 0 };
-    const ctx = contextWith(countingPlugin('getaddrinfo ENOTFOUND example-svc.test-ns', calls));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // act
-    const outcome = await executeQuery(queryRequest({ query: 'SELECT 2 AS ok' }), { ctx, report: silentQueryReport });
-
-    // assert
-    expect(calls.count).toBe(1);
-    if (outcome.ok) throw new Error('expected failure');
-    expect(outcome.code).toBe('CONNECTIVITY');
-    expect(outcome.message).toContain('datasource qa-fake');
-  });
-
-  it('runs again after a connectivity failure once the endpoint answers', async () => {
-    // arrange
-    const server = net.createServer((socket) => socket.destroy());
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const port = (server.address() as net.AddressInfo).port;
-    stateRoot = await setupQueryState({ connection: { host: '127.0.0.1', port, database: 'fake' } });
-    const calls = { count: 0 };
-    const ctx = contextWith(countingPlugin('getaddrinfo ENOTFOUND example-svc.test-ns', calls));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // act
-    await executeQuery(queryRequest({ query: 'SELECT 2 AS ok' }), { ctx, report: silentQueryReport });
-    server.close();
-
-    // assert
-    expect(calls.count).toBe(2);
-  });
-
-  it('runs again after a connectivity failure when the endpoint cannot be probed', async () => {
-    // arrange
-    stateRoot = await setupQueryState({ connection: { database: 'fake' } });
-    const calls = { count: 0 };
-    const ctx = contextWith(countingPlugin('teleport proxy path unavailable', calls));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // act
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // assert
-    expect(calls.count).toBe(2);
-  });
-
-  it('runs a repeated query again when the prior failure is not deterministic', async () => {
-    // arrange
-    const calls = { count: 0 };
-    const ctx = contextWith(countingPlugin('access denied for user', calls));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // act
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
-
-    // assert
-    expect(calls.count).toBe(2);
   });
 });
 

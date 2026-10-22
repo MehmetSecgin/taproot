@@ -56,7 +56,6 @@ export const mysqlPlugin: TapRootPlugin = {
       const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
       const columns = Array.isArray(fields) ? fields.map((f: any) => str(f.name)) : Object.keys(normalizedRows[0] || {});
       return {
-        runId: '',
         datasource: request.datasource.name,
         plugin: 'mysql',
         capability: request.capability,

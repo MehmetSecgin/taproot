@@ -1,7 +1,7 @@
 import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
-import { missingPartitionPredicate, redundantIntrospection } from './error-classification.js';
+import { missingPartitionPredicate } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
 import type { SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
@@ -51,39 +51,6 @@ function isHardPartitionKind(partition: SchemaPartition): boolean {
 
 function isWarnOnlyPartitionKind(partition: SchemaPartition): boolean {
   return ['HASH', 'KEY'].includes(partitionKind(partition));
-}
-
-const REDUNDANT_INTROSPECTION_RE = /^\s*(show\s+create\s+table|show\s+(full\s+)?columns\s+from|show\s+index(es)?\s+from|describe\s+|desc\s+)/i;
-
-export function isRedundantIntrospectionQuery(sql: string): boolean {
-  return REDUNDANT_INTROSPECTION_RE.test(str(sql));
-}
-
-export function enforceSchemaIntrospectionPolicy(input: {
-  sql: string;
-  service: string;
-  hasRefreshedSchema: boolean;
-  allowSchemaIntrospection?: boolean;
-}): string[] {
-  const warnings: string[] = [];
-  if (!input.service || !input.hasRefreshedSchema) return warnings;
-  if (!isRedundantIntrospectionQuery(input.sql)) return warnings;
-
-  const allowByEnv = process.env.TAPROOT_ALLOW_SCHEMA_INTROSPECTION === '1';
-  const allow = Boolean(input.allowSchemaIntrospection || allowByEnv);
-  if (allow) {
-    warnings.push('schema_introspection_bypassed');
-    return warnings;
-  }
-
-  throw redundantIntrospection(
-    `service ${input.service} schema is already cached; use 'taproot learn ensure-schema --service ${input.service}' to read cached metadata, or pass --allow-schema-introspection to force re-introspection`,
-    {
-      service: input.service,
-      nextAction: `taproot learn ensure-schema --service ${input.service}`,
-      nextCommand: `taproot learn ensure-schema --service ${input.service}`,
-    },
-  );
 }
 
 const DATE_LITERAL_RE = /'(\d{4}-\d{2}-\d{2})(?:[ T][\d:.]+)?'/g;

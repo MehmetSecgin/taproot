@@ -31,19 +31,6 @@ describe('KbStore relations', () => {
     expect(store.typedRelations().map((r) => r.id).sort()).toEqual(['a', 'b']);
   });
 
-  it('relationsForTables surfaces edges touching referenced tables, cross-service first', () => {
-    seed([
-      { id: 'cross', from: { service: 'orders', table: 'order', column: 'category_id' }, to: { service: 'catalog', table: 'category', column: 'id' } },
-      { id: 'intra', from: { service: 'orders', table: 'order', column: 'parent_id' }, to: { service: 'orders', table: 'order', column: 'id' } },
-      { id: 'elsewhere', from: { service: 'billing', table: 'invoice', column: 'id' }, to: { service: 'billing', table: 'customer', column: 'invoice_id' } },
-    ]);
-    const store = new KbStore(dir);
-    const edges = store.relationsForTables('orders', ['order']);
-    expect(edges).toHaveLength(2);
-    expect(edges[0].crossService).toBe(true);
-    expect(edges[0].to).toBe('catalog.category.id');
-  });
-
   it('typedRelations returns empty when relations.json is absent', () => {
     expect(new KbStore(dir).typedRelations()).toEqual([]);
   });

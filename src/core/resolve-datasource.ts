@@ -7,7 +7,7 @@ import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
 
-export type ResolutionSource = 'explicit' | 'store' | 'learning' | 'kb' | 'unknown';
+export type ResolutionSource = 'explicit' | 'store' | 'kb' | 'unknown';
 
 export interface ResolutionAsk {
   rawDs?: string;
@@ -82,7 +82,6 @@ export interface ResolveWithFallbacksInput {
   service: string;
   query?: string;
   allowDiscovery: boolean;
-  deterministicRequired: boolean;
   policy: EnvironmentPolicy;
 }
 
@@ -113,7 +112,7 @@ function discoverTargets(input: { env: string; service: string; accessMethods: s
 }
 
 export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacksInput): Promise<DatasourceResolution> {
-  const { ctx, rawDs, optsEnv, env, namespace, service, allowDiscovery, deterministicRequired, policy } = input;
+  const { ctx, rawDs, optsEnv, env, namespace, service, allowDiscovery, policy } = input;
   const verboseLogs: string[] = [];
   const preferKinds = datasourceKindsForQuery(str(input.query));
 
@@ -127,27 +126,6 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
   if (!datasource && env && service) {
     datasource = ctx.datasourceStore.resolveByEnvService(env, service, namespace || undefined, preferKinds);
     if (datasource) source = 'store';
-  }
-  if (!datasource && env && service && (!deterministicRequired || allowDiscovery)) {
-    const learned = ctx.learningStore.resolveConnection(env, service, namespace || undefined);
-    if (learned) {
-      datasource = ctx.datasourceStore.save({
-        name: learned.datasourceName,
-        kind: learned.kind,
-        env: learned.env,
-        namespace: learned.namespace,
-        service: learned.service,
-        tags: ['learning-derived'],
-        connection: learned.connection,
-        credentialRef: learned.credentialRef,
-        connectors: learned.connectors,
-        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-        resolverHints: learned.resolverHints || {},
-        updatedAt: new Date().toISOString(),
-        confidence: learned.confidence,
-      });
-      source = 'learning';
-    }
   }
   if (!datasource && env && service) {
     const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined);

@@ -1,5 +1,5 @@
 import { readJsonFile, writeJsonFile } from '../core/json.js';
-import type { EnvironmentPolicy, LedgerRedactionTier, RuntimeConfig } from '../types/core.js';
+import type { EnvironmentPolicy, RuntimeConfig } from '../types/core.js';
 import { RuntimeConfigSchema } from './schemas.js';
 import { str } from '../core/strings.js';
 
@@ -38,19 +38,6 @@ export class RuntimeConfigStore {
       ...DEFAULT_ENVIRONMENT_POLICY,
       ...(current || {}),
     };
-  }
-
-  ledgerRedactionTier(env?: string): LedgerRedactionTier {
-    const config = this.get();
-    const key = normalizeKey(env);
-    const policyTier = key ? (config.environmentPolicies || {})[key]?.ledgerRedactionTier : undefined;
-    const defaultTier = config.defaults?.ledger?.redactionTier;
-    if (policyTier) return policyTier;
-    if (defaultTier) return defaultTier;
-    if (/^(prod|production)$/.test(key)) return 'strict';
-    if (/^(qa|stage|staging|uat|preprod|pre-prod)$/.test(key)) return 'redact';
-    if (/^(dev|develop|development|local|sandbox)$/.test(key)) return 'raw';
-    return 'redact';
   }
 
   serviceAliases(): Record<string, string> {

@@ -14,7 +14,6 @@ This is the frozen prerelease JSON contract for agent-facing CLI outputs.
   "data": {},
   "meta": {
     "requestId": "uuid",
-    "runId": "optional-string",
     "sessionId": "optional-string",
     "timings": { "durationMs": 123 }
   }
@@ -33,7 +32,6 @@ Error envelope:
   },
   "meta": {
     "requestId": "optional-uuid",
-    "runId": "optional-string",
     "sessionId": "optional-string",
     "timings": { "durationMs": 123 }
   }
@@ -44,7 +42,7 @@ Error envelope:
 - `query`
   - Success must include `data.columns`, `data.rows`, `data.datasource`, `data.plugin`, `data.classification`
   - Success/failure via daemon must include `meta.requestId`
-  - Successful daemon execution should include `meta.runId` and `meta.sessionId`
+  - Successful daemon execution should include `meta.sessionId`
 - `daemon status`
   - Must use shared envelope with `meta.requestId`
   - `data` includes daemon runtime status payload

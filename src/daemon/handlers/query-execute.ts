@@ -15,13 +15,11 @@ function buildRequest(params: Record<string, unknown>, target: { env: string; na
     env: target.env,
     namespace: target.namespace,
     service: target.service,
-    reason: str(params.reason) || undefined,
     query: str(params.query),
     params: rawParams,
     allowDiscovery: Boolean(params.allowDiscovery),
     allowMutate: Boolean(params.allowMutate),
     allowPartitionScan: Boolean(params.allowPartitionScan),
-    allowSchemaIntrospection: Boolean(params.allowSchemaIntrospection),
     explain: Boolean(params.explain),
     rowsObject: Boolean(params.rowsObject),
     jsonExtract: Array.isArray(params.jsonExtract) ? (params.jsonExtract as unknown[]).map((v) => String(v)) : [],
@@ -78,9 +76,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
 
     const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, { ctx, report: silentQueryReport });
     const meta = outcome.meta;
-    if (meta.runId) base.meta.runId = meta.runId;
     if (meta.schemaContext) base.meta.schemaContext = meta.schemaContext;
-    if (meta.queryMemory) base.meta.queryMemory = meta.queryMemory;
     if (meta.phases) (base.meta as Record<string, unknown>).phases = meta.phases;
     if (meta.resolved) (base.meta as Record<string, unknown>).resolved = meta.resolved;
     if (meta.timings) (base.meta as Record<string, unknown>).timings = meta.timings;

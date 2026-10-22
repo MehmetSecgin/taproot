@@ -3,29 +3,30 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PluginRegistry } from '../src/plugins/registry.js';
-import { LearningStore } from '../src/store/learning.js';
+import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
 import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import type { AppContext } from '../src/core/app.js';
 
-function makeContext() {
-  const learningDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-'));
+type Rows = Array<Record<string, unknown>>;
+
+const ORDERS_COLUMNS: Rows = [
+  { table_name: 'orders', column_name: 'id' },
+  { table_name: 'orders', column_name: 'order_date' },
+  { table_name: 'customers', column_name: 'id' },
+  { table_name: 'shipments', column_name: 'id' },
+];
+
+function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('information_schema.columns') ? ORDERS_COLUMNS : [])) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-'));
   const seen: string[] = [];
   const registry = new PluginRegistry();
   registry.register({
     manifest: { name: 'mysql', version: '0.1.0', kind: 'executor', capabilities: ['executeRead'] },
     async execute(request) {
       seen.push(request.query);
-      const rows = request.query.includes('information_schema.columns')
-        ? [
-            { table_name: 'orders', column_name: 'id' },
-            { table_name: 'orders', column_name: 'order_date' },
-            { table_name: 'customers', column_name: 'id' },
-            { table_name: 'shipments', column_name: 'id' },
-          ]
-        : [];
+      const rows = rowsFor(request.query);
       return {
-        runId: '',
         datasource: request.datasource.name,
         plugin: 'mysql',
         capability: request.capability,
@@ -37,28 +38,12 @@ function makeContext() {
       };
     },
   });
-  const ctx: AppContext = {
-    paths: {
-      stateRoot: learningDir,
-      configDir: learningDir,
-      configSnapshotsDir: path.join(learningDir, 'config-snapshots'),
-      runtimeConfigFile: path.join(learningDir, 'deterministic-config.json'),
-      datasourceFile: path.join(learningDir, 'datasources.json'),
-      credentialFile: path.join(learningDir, 'credentials.json.enc'),
-      cacheDir: path.join(learningDir, 'cache'),
-      runsDir: path.join(learningDir, 'runs'),
-      runsLedgerDir: path.join(learningDir, 'runs-ledger'),
-      learningDir,
-      kbDir: path.join(learningDir, 'kb'),
-    },
-    datasourceStore: {} as any,
-    credentialStore: { get: async () => ({ user: 'reader', password: 'secret' }) } as any,
-    kbStore: {} as any,
-    learningStore: new LearningStore(learningDir),
-    runtimeConfigStore: {} as any,
+  const ctx = {
+    paths: { cacheDir: path.join(root, 'cache') },
+    credentialStore: { get: async () => ({ user: 'reader', password: 'secret' }) },
+    schemaCatalogStore: new SchemaCatalogStore(path.join(root, 'cache', 'schema')),
     pluginRegistry: registry,
-    verbose: false,
-  };
+  } as unknown as AppContext;
   return { ctx, seen };
 }
 
@@ -86,10 +71,9 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource());
 
     // assert
-    expect(out.outcome).toBe('fetched');
-    expect(out.tableCount).toBe(3);
+    expect(out).toEqual({ outcome: 'fetched', tableCount: 3 });
     expect(seen.some((sql) => sql.includes('information_schema.columns'))).toBe(true);
-    expect(seen.every((sql) => !/table_name IN \(/i.test(sql))).toBe(true);
+    expect(Object.keys(ctx.schemaCatalogStore.get('qa-orders')!.tables)).toEqual(['customers', 'orders', 'shipments']);
   });
 
   it('serves the second call from cache without re-introspecting', async () => {
@@ -102,8 +86,7 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource());
 
     // assert
-    expect(out.outcome).toBe('cached');
-    expect(out.tableCount).toBe(3);
+    expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
     expect(seen.length).toBe(afterFirst);
   });
 
@@ -112,10 +95,10 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
     await ensureDatasourceCatalog(ctx, datasource());
     const afterFirst = seen.length;
-    const catalogFile = path.join(ctx.paths.learningDir, 'schema-catalog.json');
-    const rows = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
-    rows[0].fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
-    fs.writeFileSync(catalogFile, JSON.stringify(rows));
+    const catalogFile = path.join(ctx.paths.cacheDir, 'schema', 'qa-orders.json');
+    const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
+    catalog.fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+    fs.writeFileSync(catalogFile, JSON.stringify(catalog));
 
     // act
     const out = await ensureDatasourceCatalog(ctx, datasource());
@@ -139,12 +122,8 @@ describe('eager schema catalog', () => {
 
   it('never fails the query when introspection throws', async () => {
     // arrange
-    const { ctx } = makeContext();
-    ctx.pluginRegistry.register({
-      manifest: { name: 'mysql', version: '0.1.0', kind: 'executor', capabilities: ['executeRead'] },
-      async execute() {
-        throw new Error('connection refused');
-      },
+    const { ctx } = makeContext(() => {
+      throw new Error('connection refused');
     });
 
     // act
@@ -155,32 +134,71 @@ describe('eager schema catalog', () => {
     expect(out.error).toContain('connection refused');
   });
 
-  it('surfaces the catalog summary in schemaContext', async () => {
+  it('keeps indexes without BTREE and non-unique defaults, and parses the partition key', async () => {
     // arrange
-    const { ctx } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    const { ctx } = makeContext((sql) => {
+      if (sql.includes('information_schema.columns')) {
+        return [
+          { table_name: 'order_items', column_name: 'id' },
+          { table_name: 'order_items', column_name: 'order_date' },
+          { table_name: 'order_items', column_name: 'customer_id' },
+        ];
+      }
+      if (sql.includes('information_schema.statistics')) {
+        return [
+          { table_name: 'order_items', index_name: 'PRIMARY', seq_in_index: 1, column_name: 'id', non_unique: '0', index_type: 'BTREE' },
+          { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 1, column_name: 'order_date', non_unique: '1', index_type: 'BTREE' },
+          { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 2, column_name: 'customer_id', non_unique: '1', index_type: 'BTREE' },
+        ];
+      }
+      if (sql.includes('information_schema.partitions')) {
+        return [{ table_name: 'order_items', partition_method: 'RANGE', partition_expression: '`order_date`' }];
+      }
+      return [];
+    });
 
     // act
-    const context = buildSchemaContext(
-      'SELECT id FROM orders',
-      { service: 'orders', datasource: 'qa-orders', dialect: 'mysql' },
-      ctx.learningStore,
-    );
+    await ensureDatasourceCatalog(ctx, datasource());
 
     // assert
-    expect(context.catalog?.tables).toBe(3);
-    expect(context.tables.orders.columns).toContain('order_date');
+    expect(ctx.schemaCatalogStore.get('qa-orders')!.tables.order_items).toEqual({
+      database: 'orders',
+      columns: ['id', 'order_date', 'customer_id'],
+      primaryKey: ['id'],
+      indexes: [
+        { name: 'PRIMARY', columns: ['id'], unique: true },
+        { name: 'idx_order_customer', columns: ['order_date', 'customer_id'] },
+      ],
+      partition: { kind: 'RANGE', expr: '`order_date`', key: 'order_date', keys: ['order_date'] },
+    });
   });
 
-  it('omits the catalog summary when no datasource is named', async () => {
+  it('returns only the referenced tables plus the catalog summary', async () => {
     // arrange
     const { ctx } = makeContext();
     await ensureDatasourceCatalog(ctx, datasource());
 
     // act
-    const context = buildSchemaContext('SELECT id FROM orders', { service: 'orders', dialect: 'mysql' }, ctx.learningStore);
+    const context = buildSchemaContext('SELECT id FROM ORDERS', 'mysql', ctx.schemaCatalogStore.get('qa-orders'));
 
     // assert
-    expect(context.catalog).toBeUndefined();
+    expect(Object.keys(context.tables)).toEqual(['orders']);
+    expect(context.tables.orders.columns).toContain('order_date');
+    expect(context.catalog?.tables).toBe(3);
+  });
+
+  it('lists and clears cached catalogs', async () => {
+    // arrange
+    const { ctx } = makeContext();
+    await ensureDatasourceCatalog(ctx, datasource());
+
+    // act
+    const listed = ctx.schemaCatalogStore.list();
+    const cleared = ctx.schemaCatalogStore.clear();
+
+    // assert
+    expect(listed).toEqual([{ datasource: 'qa-orders', fetchedAt: expect.any(String), tables: 3 }]);
+    expect(cleared).toBe(1);
+    expect(ctx.schemaCatalogStore.get('qa-orders')).toBeUndefined();
   });
 });

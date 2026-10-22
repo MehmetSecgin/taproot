@@ -1,5 +1,5 @@
-import type { SchemaCatalogSummary, SchemaContext, TableContext } from '../types/core.js';
-import { schemaObservationHasCurrentMetadata, type LearningStore, type SchemaObservationEntry } from '../store/learning.js';
+import type { SchemaContext, TableContext } from '../types/core.js';
+import type { SchemaCatalog } from '../store/schema-catalog.js';
 import { astifySql, type SqlDialect } from './sql-dialect.js';
 import { str } from './strings.js';
 
@@ -169,52 +169,13 @@ export function isSchemaMetadataQuery(sql: string): boolean {
   return /^(show\s+(create\s+(table|view)\b|tables\b|(full\s+)?(columns|fields)\b|(index(es)?|keys)\b)|describe\b|desc\b|explain\b)/.test(text);
 }
 
-function matchesTable(row: SchemaObservationEntry, table: string): boolean {
-  return bareName(row.table).toLowerCase() === bareName(table).toLowerCase();
-}
-
-function catalogSummary(store: LearningStore, datasourceName: string): SchemaCatalogSummary | undefined {
-  const entry = datasourceName ? store.schemaCatalog(datasourceName) : undefined;
-  if (!entry) return undefined;
-  return { tables: entry.tableCount, fetchedAt: entry.fetchedAt };
-}
-
-export function buildSchemaContext(
-  sql: string,
-  target: { service?: string; datasource?: string; dialect: SqlDialect },
-  store: LearningStore,
-): SchemaContext {
-  const referenced = collectReferencedTables(sql, target.dialect);
-  const catalog = catalogSummary(store, str(target.datasource));
-  if (!referenced.length) return catalog ? { tables: {}, catalog } : { tables: {} };
-  const service = str(target.service);
-  const rows = store.schemaTables(service || undefined);
-  const out: Record<string, TableContext> = {};
-  for (const table of referenced) {
-    const row = rows
-      .filter((item) => matchesTable(item, table))
-      .sort((a, b) => {
-        const completeDelta = Number(schemaObservationHasCurrentMetadata(b)) - Number(schemaObservationHasCurrentMetadata(a));
-        if (completeDelta) return completeDelta;
-        return b.columns.length - a.columns.length || String(b.lastSeenAt).localeCompare(String(a.lastSeenAt));
-      })[0];
-    if (!row) continue;
-    const trimmedIndexes = (row.indexes || []).map((index) => {
-      const o: { name: string; columns: string[]; unique?: boolean; type?: string } = {
-        name: index.name,
-        columns: index.columns || [],
-      };
-      if (index.unique) o.unique = true;
-      if (index.type && String(index.type).toUpperCase() !== 'BTREE') o.type = index.type;
-      return o;
-    });
-    out[row.table] = {
-      database: row.database,
-      columns: row.columns.map((column) => column.column),
-      primaryKey: row.primaryKey || [],
-      indexes: trimmedIndexes,
-      partition: row.partition,
-    };
+export function buildSchemaContext(sql: string, dialect: SqlDialect, catalog: SchemaCatalog | undefined): SchemaContext {
+  if (!catalog) return { tables: {} };
+  const byName = new Map(Object.keys(catalog.tables).map((table) => [table.toLowerCase(), table]));
+  const tables: Record<string, TableContext> = {};
+  for (const referenced of collectReferencedTables(sql, dialect)) {
+    const table = byName.get(referenced.toLowerCase());
+    if (table) tables[table] = catalog.tables[table];
   }
-  return catalog ? { tables: out, catalog } : { tables: out };
+  return { tables, catalog: { tables: byName.size, fetchedAt: catalog.fetchedAt } };
 }

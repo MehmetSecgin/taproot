@@ -21,13 +21,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
     .option('--env <env>')
     .option('--namespace <namespace>')
     .option('--service <service>')
-    .option('--reason <reason>', 'why this query runs; recorded in the runs ledger for future agents')
     .option('--sql <native>', 'native query text: SQL, Redis command, or gRPC Service/Method')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility.', false)
     .option('--allow-mutate', 'allow mutating query', false)
     .option('--allow-partition-scan', 'allow querying RANGE/LIST partitioned tables without partition predicates', false)
-    .option('--allow-schema-introspection', 'allow SHOW CREATE/DESCRIBE/SHOW COLUMNS even when the service schema is already cached', false)
     .option('--explain', 'wrap query with EXPLAIN; reports the plan instead of running the query', false)
     .option('--rows-object', 'emit rows as objects keyed by column name (legacy). Default JSON output uses compact array form paired with the columns array.', false)
     .option('--proto <Message>', 'decode binary reply payloads as the given protobuf message (e.g. OrderProto). Used by the redis plugin; requires --proto-root or a datasource-level default in resolverHints.protoRoot.')
@@ -72,13 +70,11 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
         env,
         namespace: target.namespace,
         service: target.service,
-        reason: opts.reason,
         query: opts.sql || '',
         params: opts.param || [],
         allowDiscovery,
         allowMutate: Boolean(opts.allowMutate),
         allowPartitionScan: Boolean(opts.allowPartitionScan),
-        allowSchemaIntrospection: Boolean(opts.allowSchemaIntrospection),
         explain: Boolean(opts.explain),
         rowsObject: Boolean(opts.rowsObject),
         jsonExtract: opts.jsonExtract || [],

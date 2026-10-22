@@ -38,10 +38,9 @@ describe('error classification', () => {
     expect(exitCodeForClass('UNKNOWN_DATASOURCE')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
-  it('points schema errors at a cached-schema command', () => {
-    expect(nextAction('UNKNOWN_COLUMN')).not.toContain('this envelope');
-    expect(nextAction('UNKNOWN_COLUMN')).toContain('learn ensure-schema --datasource');
-    expect(nextAction('UNKNOWN_TABLE')).toContain('learn tables --datasource');
+  it('points schema errors at the schema context and SHOW statements', () => {
+    expect(nextAction('UNKNOWN_COLUMN')).toContain('meta.schemaContext.tables');
+    expect(nextAction('UNKNOWN_TABLE')).toContain('SHOW TABLES');
   });
 
   it('keeps the class named by a code prefix', () => {

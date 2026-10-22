@@ -29,8 +29,7 @@ Current TapRoot is a stateless one-shot CLI process:
 4. Resolve datasource/query path.
 5. Run connector checks/connectors.
 6. Execute query.
-7. Persist artifacts/learning.
-8. Exit.
+7. Exit.
 
 Implication:
 - Each query command repeats setup work.
@@ -47,19 +46,17 @@ Implication:
   - datasources: `src/store/datasources.ts`
   - credentials: `src/store/credentials.ts`
   - KB adapters: `src/store/kb.ts`
-  - learning: `src/store/learning.ts`
-- Run artifacts: `src/core/artifacts.ts`
+  - schema catalog: `src/core/schema-refresh.ts`
 
 ### 3.3 Query Lifecycle (Current)
 `taproot query ...`:
-1. Resolve datasource from explicit profile, env/service, learning cache, or KB bootstrap.
+1. Resolve datasource from explicit profile, datasource store by env/service, KB bootstrap, then discovery when allowed.
 2. Resolve query from `--sql`.
 3. Enforce mutation policy (`src/core/safety.ts`).
 4. Execute connector `connect` hooks.
 5. Execute datasource plugin query.
-6. Write run artifacts (`summary.json`, `events.log`).
-7. Update learning caches.
-8. Return table or JSON.
+6. Attach `meta.schemaContext` from the cached schema catalog.
+7. Return the JSON envelope.
 
 ### 3.4 State Layout (Current)
 Default root: `~/.taproot`
@@ -68,12 +65,7 @@ Subpaths:
 - `config/datasources.json`
 - `config/credentials.json.enc`
 - `cache/`
-- `runs/<run-id>/`
-- `learning/resolution-cache.json`
-- `learning/schema-catalog.json`
-- `learning/schema-observations.json`
-- `learning/schema-joins.json`
-- `learning/grpc-schemas.json`
+- `cache/schema/<datasource>.json`
 
 ### 3.5 Credential Storage
 - Preferred: OS keychain (`keytar`).
@@ -91,19 +83,17 @@ Current builtins:
 - Executors: `mysql`, `postgres`, `teleport-mysql`
 - Connectors: `openvpn`, `teleport`, `kubectl-portforward`
 
-### 3.7 Learning Topology (Current)
-Learning is deterministic and upsert-based:
-- Resolution cache key: `env|service`
-- Schema catalog key: `datasource`
-- Schema observation key: `service|table`
-- Schema join key: `service|leftTable|rightTable|normalizedCondition`
+### 3.7 Schema Catalog (Current)
+Catalog is one JSON file per SQL datasource (`mysql`, `postgres`, `teleport-mysql`) at `~/.taproot/cache/schema/<datasource>.json`:
+- `information_schema` columns, plus indexes and partitions (MySQL/TiDB only).
+- Fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24).
 
 Behavior:
-- A query with no fresh catalog row triggers one unfiltered `information_schema` pass, then stamps the catalog.
-- Success updates resolution plus schema observations and joins from the executed SQL.
-- Failure updates resolution failure counters and confidence.
-- `learn compact` deduplicates by stable keys.
-- `cache prune` TTL-prunes learning files and run artifact directories.
+- The first query against a datasource fetches the catalog once, bounded by `TAPROOT_CATALOG_TIMEOUT_MS`.
+- A stale catalog is refetched in the background while the query runs.
+- A failed fetch never fails the query.
+- The partition guard and range warnings read the cached catalog.
+- `cache show` lists cached catalogs; `cache clear` deletes them all.
 
 ### 3.8 Current Performance Shape
 Dominant latency today (for transport-backed queries):
@@ -224,7 +214,6 @@ Degraded semantics (explicit):
 3. Daemon ensures required resources.
 4. Query executes on warm resource path.
 5. Result + timings returned.
-6. Learning updates asynchronously or in post-step.
 
 ### 4.8 Feedback Model (User + Agent Friendly)
 Default (compact):
@@ -249,7 +238,7 @@ Layer 1 (process memory, short TTL):
 - recent datasource resolution
 
 Layer 2 (persistent deterministic):
-- learning files (`resolution-cache`, `schema-catalog`, `schema-observations`, `schema-joins`, `grpc-schemas`)
+- schema catalog files (`cache/schema/<datasource>.json`)
 
 Rule:
 - memory cache is optimization only.
@@ -279,8 +268,7 @@ Default TTLs (initial):
 ### 4.12 Safety Model in Session Runtime
 - Mutation gating remains enforced server-side.
 - Session capabilities derive from datasource policy; never widened at runtime.
-- Secrets never written to run/learning/session metadata.
-- Query text persisted only as policy-allowed artifacts.
+- Secrets never written to schema catalog or session metadata.
 
 ### 4.13 Observability and Auditing
 Daemon telemetry per session:
@@ -293,13 +281,11 @@ Daemon telemetry per session:
 
 Correlation contract:
 - Every request gets `requestId` (uuidv7).
-- Every query run gets `runId`.
 - If session-backed, response includes `sessionId`.
-- Daemon logs, run artifacts, and JSON responses must carry these IDs.
+- Daemon logs and JSON responses must carry these IDs.
 
 Persistent logs:
 - bounded rotating logs under `~/.taproot/run/logs/`.
-- run artifacts remain per query for replay/debug.
 
 ### 4.14 Session Persistence Across Daemon Restarts
 Session metadata is checkpointed (no secrets):
@@ -340,7 +326,6 @@ Envelope (v1):
 - `meta:`
   - `envelopeVersion: 1`
   - `requestId`
-  - `runId?`
   - `sessionId?`
   - `timings?`
 
@@ -375,8 +360,7 @@ For power users/agents:
 - File boundary: state root owned by user.
 - No outbound telemetry by default.
 - No secret material in:
-  - learning files
-  - run summaries/events
+  - schema catalog files
   - datasource definitions
   - session checkpoint files
 
@@ -410,8 +394,8 @@ Phase 4:
 - Session metadata reflects true lease/resource state.
 - JSON mode remains deterministic and clean.
 - Mutation guardrails enforced identically in daemon and CLI paths.
-- Learning remains deterministic and secret-safe.
-- Correlation IDs (`requestId`, `runId`) are present and traceable end-to-end.
+- Schema catalog remains secret-safe.
+- Correlation IDs (`requestId`, `sessionId`) are present and traceable end-to-end.
 - Degraded sessions fail fast after retry budget exhaustion.
 
 ## 11) Open Design Decisions

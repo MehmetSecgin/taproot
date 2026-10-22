@@ -72,8 +72,8 @@ taproot connector status --datasource <name> --connector teleport
 ## Common Commands
 - Preferred order for routine query tasks:
 ```bash
-# known datasource + explicit SQL. --reason is a ledger note, not a query source.
-taproot query --datasource <name> --sql "<sql>" --reason "<why>"
+# known datasource + explicit SQL
+taproot query --datasource <name> --sql "<sql>"
 ```
 
 - Avoid this by default:
@@ -182,7 +182,7 @@ taproot grpc describe --datasource qa-<svc>-grpc \
 taproot grpc describe --datasource qa-<svc>-grpc \
   --service <Service> --method <Method> --skeleton
 # every grpc query also returns the called method's shape under
-# meta.schemaContext.services / .messages / .enums — read that after the call
+# meta.schemaContext.services / .messages / .enums: read that after the call
 # instead of re-running describe.
 
 # unary call. Either --request-json or --param.
@@ -210,7 +210,7 @@ taproot query --datasource qa-catalog-grpc \
 # enable mutate on the profile (one-time, off by default)
 taproot datasource add --name qa-cache-redis ... --allow-mutate
 
-# write — needs --allow-mutate at query time too
+# write: needs --allow-mutate at query time too
 taproot query --datasource qa-cache-redis --sql "SET k v" --allow-mutate
 taproot query --datasource qa-cache-redis --sql "DEL k" --allow-mutate
 taproot query --datasource qa-cache-redis --sql "EXPIRE k 60" --allow-mutate
@@ -224,18 +224,20 @@ taproot query --datasource qa-cache-redis --sql "FLUSHDB" --allow-mutate --allow
 # - FLUSHDB with only --allow-mutate -> "FLUSH-tier command 'FLUSHDB' requires --allow-flush..."
 ```
 
-- MySQL/TiDB schema discovery:
+- SQL schema discovery:
 ```bash
 taproot query --datasource <name> --sql "SHOW TABLES"
 taproot query --datasource <name> --sql "SHOW TABLES FROM <database>"
+# columns, indexes, and partition key of one table, from the cached catalog
+taproot query --datasource <name> --sql "SHOW CREATE TABLE <table>" --pluck meta.schemaContext.tables.<table>
+# full DDL when the catalog fields are not enough
 taproot query --datasource <name> --sql "SHOW CREATE TABLE <table>"
-taproot query --datasource <name> --sql "SHOW FULL COLUMNS FROM <table>"
 ```
 
 - Cache maintenance:
 ```bash
 taproot cache show
-taproot cache prune --ttl-hours 168
+taproot cache clear
 ```
 
 - Session-backed repeated access:
@@ -243,15 +245,6 @@ taproot cache prune --ttl-hours 168
 taproot daemon start
 taproot session open --datasource <name>
 taproot session ls
-```
-
-- Learning inspection:
-```bash
-taproot learn status
-taproot learn replay --run-id <id>
-taproot learn refresh-schema --datasource <name>
-taproot learn tables --datasource <name> --limit 50
-taproot learn joins --datasource <name> --limit 50
 ```
 
 - Repo safety:
@@ -265,7 +258,7 @@ taproot sanitize check-repo
   - `ok`
   - `data`
   - `error.code`, `error.message`, `error.details`
-  - `meta.requestId`, `meta.sessionId`, `meta.runId`
+  - `meta.requestId`, `meta.sessionId`
   - `resolved.source`, `resolved.accessMethod`, `resolved.target`, `resolved.database`, `resolved.engine`
   - `readiness`, `missing`, `nextCommand`, `target` from `self-check --agent`
   - `nextActions`, `nextActionDetails` from `init` and `self-check --agent`
@@ -273,12 +266,13 @@ taproot sanitize check-repo
 
 ## Safety
 - Keep DB operations read-only unless the user explicitly requests mutation and TapRoot policy allows it.
-- Never read TapRoot’s learning, cache, or credential files directly.
+- Never read TapRoot’s cache or credential files directly.
 - Let config decide which environments require deterministic resolution; do not assume special env names like `prod`, `stg`, or `qa`.
 - Prefer canonical service names in saved artifacts; aliases from `serviceAliases` are for input normalization, not storage.
 - If TapRoot is blocked, report the gap instead of falling back to direct `mysql`, `psql`, or `tsh` commands unless the user explicitly asks for that fallback.
 - Prefer existing datasource/query knowledge over rediscovery. If the user already gave the datasource or query shape, use it.
+- Never resend identical SQL that just failed; change the cause first.
 - Use `doctor` for diagnosis, not as a mandatory pre-query ritual.
-- For MySQL/TiDB introspection, prefer `SHOW TABLES` and `SHOW CREATE TABLE` before reaching for `information_schema`.
+- For MySQL/TiDB introspection, prefer `meta.schemaContext`, `SHOW TABLES`, and `SHOW CREATE TABLE` before reaching for `information_schema`.
 - Never use `LIKE`-based table discovery. Enumerate tables first and inspect exact names.
 - Reserve `information_schema` queries for explicit cross-table metadata search, audits, or machine-readable bulk inspection.

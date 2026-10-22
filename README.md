@@ -9,7 +9,7 @@ v1 ships executor plugins (`mysql`, `postgres`, `redis`, `grpc`) and connector a
 - Plugin-native query syntax with explicit SQL only.
 - Operator mode with explicit mutation gates.
 - Agent-safe secrets and minimal output exposure.
-- Self-learning/documenting local runtime.
+- Schema-aware local runtime: each SQL query returns the columns, keys and indexes of the tables it touches.
 - Reuse-first: prefer preexisting tools/libs over custom reinvention.
 
 ---
@@ -56,7 +56,7 @@ taproot --version   # prints the installed version
 taproot init
 ```
 
-Creates `~/.taproot/` (config, cache, runs, learning). Idempotent.
+Creates `~/.taproot/` (config, cache). Idempotent.
 
 On an unconfigured machine it also prints an ordered `next actions` list of runnable commands (add a datasource, store its credentials, verify with `doctor`). Each entry is a real command with every required flag, so you can fill in the placeholders and paste it. The list shrinks as you complete each step, and `taproot self-check` reprints it at any time.
 
@@ -124,7 +124,7 @@ Redis plugin notes:
 - Output shape: single column `value`, one row per reply line (multi-bulk replies → multiple rows).
 - Protobuf decoding (Redis only): pass `--proto <MessageName> --proto-root <dir>` to decode binary replies with `protobufjs`. `--proto-root` is loaded recursively; all `.proto` files inside are registered and imports resolve by basename. Decoded rows carry the message object as `value`; text replies (`SCAN` keys, `(nil)`, integers, `INFO` blocks) pass through unchanged. Printable-ASCII fallback prevents `SCAN`/`KEYS` from being misdecoded. Per-datasource defaults via `resolverHints.protoRoot` / `resolverHints.protoMessage` (set with `--hint key=value` on `datasource add`).
 - Without `--proto`, binary payloads pass through raw — `redis-cli` is not asked to decode them.
-- No schema cache, no partition checks — Redis bypasses the MySQL/Postgres learning paths.
+- No schema catalog, no partition checks: Redis bypasses the MySQL/Postgres schema catalog.
 - Discovery (`taproot discover`) does **not** yet propose Redis datasources; register them with `datasource add`.
 - TLS: pass `--ssl true` on the datasource to add `--tls` to `redis-cli`.
 
@@ -240,7 +240,6 @@ taproot query --datasource qa-catalog-grpc \
 
 gRPC plugin notes:
 - Discovery: `grpc find <pattern>` searches every service/method by substring; `grpc list [pattern]` filters the method table; `grpc describe --service/--method` accept short names or unambiguous substrings (no need to copy the fully-qualified name). `grpc describe --method <m> --skeleton` prints an editable request JSON plus the exact `query` call line.
-- Learned schema cache (mirrors the SQL `learn` flow): `taproot learn refresh-schema --datasource <grpc>` introspects the proto root once and caches the full descriptor (services/methods/messages/enums) keyed by service. `taproot learn schema --datasource <grpc>` reads it back (no proto-root needed in cwd) and `taproot learn ensure-schema --datasource <grpc>` introspects on first use then serves cache; add `--refresh` after a proto change, `--detailed` to include message/enum shapes. The cache shows up in `learn status` as `grpc schema entries`.
 - Service/method typos in a call return a "did you mean" suggestion and the list of available methods; method names are matched case-insensitively.
 - Streaming calls run as a batch: every request message is sent, the stream is half-closed, and every response is collected. Up to 1000 messages each way (`TAPROOT_GRPC_STREAM_MESSAGE_LIMIT`). A server-side stream failure fails the query; `error.details.receivedRows` keeps the rows that arrived first.
 - Plaintext h2c by default. Set `--ssl true` on the datasource to switch to TLS.
@@ -292,6 +291,16 @@ taproot query --datasource prod-orders \
   --json-extract payload:order.status --json-extract payload:order.total
 ```
 
+### Schema catalog
+
+The first query against a SQL datasource (`mysql`, `postgres`, `teleport-mysql`) reads `information_schema` columns once, plus indexes and partitions on MySQL/TiDB, and caches them at `~/.taproot/cache/schema/<datasource>.json`. The cache is fresh for `TAPROOT_CATALOG_TTL_HOURS` (default 24). When it is stale, TapRoot refetches it in the background while the query runs. A failed fetch never fails the query.
+
+Each SQL query returns `meta.schemaContext.tables[<table>]` for the tables it references: `database`, `columns`, `primaryKey`, `indexes` (`unique` appears only when true, `type` only when not `BTREE`) and `partition`. `meta.schemaContext.catalog` carries `{ tables, fetchedAt }`.
+
+The partition guard (`MISSING_PARTITION_PREDICATE`, bypass with `--allow-partition-scan`) and the range warnings (`TAPROOT_MAX_RANGE_DAYS`) read the same cached catalog.
+
+`taproot cache show` prints `{"catalogs":[{"datasource","fetchedAt","tables"}]}`. `taproot cache clear` deletes every cached catalog and prints `{"cleared":<count>}`.
+
 ### Output
 
 Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version` alike. `--pluck <dot.path>` is a global option that prints only that subtree of the envelope.
@@ -317,7 +326,9 @@ taproot query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT
 | `TAPROOT_QA_CONTEXT` | Default `kubectl` context for `qa-portforward` | env-name |
 | `TAPROOT_QA_LOCAL_PORT` | Default local port for `qa-portforward` | `4406` |
 | `TAPROOT_QUERY_TIMEOUT_MS` | Default query statement timeout (ms). Override per-query with `--timeout`, or globally via `defaults.query.timeoutMs` in runtime config. | `15000` |
-| `TAPROOT_ALLOW_SCHEMA_INTROSPECTION` | Allow heavy introspection queries | unset (gated) |
+| `TAPROOT_CATALOG_TTL_HOURS` | Hours a cached schema catalog stays fresh | `24` |
+| `TAPROOT_CATALOG_TIMEOUT_MS` | Timeout for one schema catalog fetch (ms) | `20000` |
+| `TAPROOT_MAX_RANGE_DAYS` | Widest date range before the range warning | `90` |
 | `TAPROOT_ALLOW_PARTITION_SCAN` | Allow partition scans | unset (gated) |
 
 ---
@@ -413,12 +424,11 @@ Reads `tsh db ls --format=json` and produces `teleport-mysql` / `postgres` profi
 - `taproot discover <kb|kubectl|teleport> --env <env> [--namespace <ns>] [--service <s>] [--host-pattern service-name|tiproxy] [--shared-credential-ref] [--no-vpn] [--apply] [--force]`
 - `taproot self-check` or `taproot self-check --agent [--datasource <name> | --env <env> --service <service>]`
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions, `--all` for full check list)
-- `taproot query --datasource <name> --sql <sql> [--param k=v] [--reason <why>] [--allow-discovery]`
+- `taproot query --datasource <name> --sql <sql> [--param k=v] [--allow-discovery]`
 - `taproot datasource <list|show <name>|add|remove <name>|resolve>`
 - `taproot connector <setup|status>`
-- `taproot kb <resolve|tables|related|list-services>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
-- `taproot cache <show|prune|clear>`
-- `taproot learn <status|compact|replay|refresh-schema|schema|ensure-schema|tables|joins|relations>` — `refresh-schema`/`schema`/`ensure-schema` also handle `grpc` datasources (proto descriptor cached per service)
+- `taproot kb <resolve|tables|related|list-services|relations list|relations import>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
+- `taproot cache <show|clear>`
 - `taproot creds <set|show|unset>`
 - `taproot daemon <start|status|stop|restart>`
 - `taproot session <open|ls|inspect|close|close-all>`
@@ -510,9 +520,7 @@ Structure:
     datasources.json
     credentials.json.enc       # encrypted-file fallback when no keychain
   cache/
-  runs/
-  learning/
-    runs-ledger/
+    schema/<datasource>.json
 ```
 
 ---
@@ -525,7 +533,7 @@ Structure:
 - `taproot init datasource --env <env> --service <service>` is the explicit KB-backed create/repair path for stale datasource profiles.
 - `taproot self-check --agent` is the preferred machine-readable readiness contract, especially with `--datasource` or `--env` + `--service`.
 - Secrets are never printed and are redacted from JSON output envelopes.
-- Learning uses deterministic local caches (`resolution-cache`, `schema-observations`, `schema-joins`, `grpc-schemas`) and excludes secret values.
+- The schema catalog is a deterministic local cache and excludes secret values.
 - Connection commands for connectors are provided via local credential refs (`--connect-command`, `--login-command`) and never committed to repo by default.
 - Credentials contain auth/connector material; connection topology (`host`, `port`, `database`, `target`) lives in datasource profiles.
 - `taprootd`/`session` commands are available for Phase 1 runtime scaffolding.
@@ -533,7 +541,6 @@ Structure:
 - Use global `--verbose` for step-by-step diagnostics (also on stderr).
 
 ### Contracts
-- Learning contract: `references/learning-contract.md`
 - Runtime architecture: `references/runtime-architecture.md`
 - Phase 1 runtime contract: `references/phase1-runtime-contract.md`
 - JSON envelope contract: `references/json-envelope-contract.md`

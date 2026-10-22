@@ -4,7 +4,7 @@ import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { printJson, respondOk } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
-import { normalizeRelations, validateRelations } from '../core/relations.js';
+import { normalizeRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
@@ -91,27 +91,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       let rows = ctx.kbStore.typedRelations();
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
       printJson(rows);
-    });
-
-  relations.command('validate')
-    .description('Check curated relation endpoints against the learned schema cache; reports ok/stale/unknown')
-    .option('--service <service>', 'only relations touching this service')
-    .option('--stale-only', 'only show edges whose table/column no longer exists', false)
-    .action((opts) => {
-      const ctx = getCtx();
-      let rels = ctx.kbStore.typedRelations();
-      if (opts.service) {
-        const s = normalizeService(String(opts.service), ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
-        rels = rels.filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
-      }
-      let results = validateRelations(rels, ctx.learningStore.schemaTables());
-      if (opts.staleOnly) results = results.filter((r) => r.stale);
-      const summary = {
-        total: results.length,
-        stale: results.filter((r) => r.stale).length,
-        unknown: results.filter((r) => !r.stale && (r.fromStatus === 'unknown_service' || r.toStatus === 'unknown_service')).length,
-      };
-      printJson({ summary, results });
     });
 
   relations.command('import')

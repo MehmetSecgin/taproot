@@ -32,8 +32,6 @@ export const RUNTIME_CONSTANTS = {
     maxRangeDays: intFromEnv('TAPROOT_MAX_RANGE_DAYS', 90),
     catalogTtlHours: intFromEnv('TAPROOT_CATALOG_TTL_HOURS', 24),
     catalogTimeoutMs: intFromEnv('TAPROOT_CATALOG_TIMEOUT_MS', 20 * 1000),
-    repeatFailureWindowMs: 60 * 1000,
-    connectivityProbeTimeoutMs: 1000,
   },
   connector: {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),
@@ -44,11 +42,6 @@ export const RUNTIME_CONSTANTS = {
     dbConnectTimeoutMs: 5_000,
     openvpnStatusTimeoutMs: 1_500,
     openvpnCommandTimeoutMs: 3_000,
-  },
-  runs: {
-    ttlHours: 168,
-    pruneIntervalMs: 24 * 60 * 60 * 1000,
-    storedRowLimit: 1000,
   },
   grpc: {
     streamMessageLimit: intFromEnv('TAPROOT_GRPC_STREAM_MESSAGE_LIMIT', 1000),

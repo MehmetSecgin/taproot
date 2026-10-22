@@ -28,7 +28,6 @@ export function fakePlugin(options: FakePluginOptions = {}): TapRootPlugin {
       if (options.failWith) throw new Error(options.failWith);
       const startedAt = new Date().toISOString();
       return {
-        runId: '',
         datasource: request.datasource.name,
         plugin: kind,
         capability: request.capability,

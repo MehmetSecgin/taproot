@@ -20,7 +20,7 @@ All responses:
 - `ok: boolean`
 - `data?: object`
 - `error?: { code: string; message: string; details?: object }`
-- `meta: { runId?: string; sessionId?: string; timings?: { durationMs: number } }`
+- `meta: { sessionId?: string; timings?: { durationMs: number } }`
 
 Required methods (Phase 1):
 - `daemon.status`
@@ -61,7 +61,6 @@ Response success:
     "rows": [{"ok": 1}]
   },
   "meta": {
-    "runId": "20260302-...",
     "sessionId": "sess_...",
     "timings": {"durationMs": 124}
   }
@@ -80,7 +79,6 @@ Response failure:
     "details": {"nextAction": "Check datasource credentialRef and credential values."}
   },
   "meta": {
-    "runId": "20260302-...",
     "sessionId": "sess_..."
   }
 }

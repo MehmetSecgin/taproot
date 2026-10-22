@@ -52,30 +52,11 @@ function setupState() {
 }
 
 describe('runtime policy and KB state', () => {
-  it('reports learning store counts without the removed manual cache stores', () => {
+  it('reports an empty schema catalog cache', () => {
     const { env } = setupState();
     const out = runCli(['cache', 'show'], env);
     expect(out.status).toBe(0);
-    expect(Object.keys(JSON.parse(out.stdout).learning.files).sort()).toEqual([
-      'grpcSchemas',
-      'resolution',
-      'schemaCatalog',
-      'schemaJoins',
-      'schemaObservations',
-    ]);
-  });
-
-  it('reports the same learning stores from learn status', () => {
-    const { env } = setupState();
-    const out = runCli(['learn', 'status'], env);
-    expect(out.status).toBe(0);
-    expect(Object.keys(JSON.parse(out.stdout).files).sort()).toEqual([
-      'grpcSchemas',
-      'resolution',
-      'schemaCatalog',
-      'schemaJoins',
-      'schemaObservations',
-    ]);
+    expect(JSON.parse(out.stdout)).toEqual({ catalogs: [] });
   });
 
   it('lists KB services', () => {

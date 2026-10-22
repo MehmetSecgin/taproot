@@ -27,11 +27,11 @@ For each capability:
 ## Secrets approach
 - Preferred path: OS keychain via optional `keytar` when available.
 - Fallback: encrypted local credential file (AES-GCM with PBKDF2-derived key).
-- Secret values are redacted in output and excluded from learning/artifacts.
+- Secret values are redacted in output and excluded from the schema catalog.
 
-## Learning model
-- Deterministic local caches only (`resolution-cache`, `schema-catalog`, `schema-observations`, `schema-joins`, `grpc-schemas`).
-- Upsert by stable keys; avoid append-only duplicates.
+## Schema catalog
+- One cached catalog per SQL datasource at `~/.taproot/cache/schema/<datasource>.json`.
+- Fetched on the first query, refreshed in the background when older than `TAPROOT_CATALOG_TTL_HOURS`.
 
 ## Config boundaries
 - Datasource profiles own connection topology (`host`, `port`, `database`, `target`).

@@ -15,7 +15,7 @@ function successOutcome(overrides: Partial<Extract<QueryOutcome, { ok: true }>> 
       classification: 'success',
     },
     meta: {
-      runId: 'run-1',
+      sessionId: 'session-1',
       resolved: { source: 'store', env: 'qa', service: 'fake', engine: 'fake', target: 'host', database: 'db' },
       phases: { resolveMs: 1, connectMs: 2, executeMs: 3, totalMs: 6 },
       timings: { durationMs: 3 },
@@ -46,7 +46,7 @@ describe('presentQueryOutcome', () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.data.columns).toEqual(['id', 'name']);
     expect(envelope.meta.requestId).toBe('req-9');
-    expect(envelope.meta.runId).toBe('run-1');
+    expect(envelope.meta.sessionId).toBe('session-1');
   });
 
   it('honours a pluck path', () => {
@@ -64,14 +64,14 @@ describe('presentQueryOutcome', () => {
 describe('presentQueryOutcome on failure', () => {
   it('throws a prefixed error carrying details and meta', () => {
     const call = () =>
-      presentQueryOutcome({ ok: false, code: 'ACCESS_DENIED', message: 'access denied', details: { hint: 'check creds' }, meta: { runId: 'run-2' } }, 'req-9');
+      presentQueryOutcome({ ok: false, code: 'ACCESS_DENIED', message: 'access denied', details: { hint: 'check creds' }, meta: { sessionId: 'session-2' } }, 'req-9');
     expect(call).toThrowError('ACCESS_DENIED: access denied');
     try {
       call();
     } catch (error) {
       const typed = error as Error & { details?: Record<string, unknown>; meta?: Record<string, unknown> };
       expect(typed.details).toEqual({ hint: 'check creds' });
-      expect(typed.meta).toMatchObject({ runId: 'run-2', requestId: 'req-9' });
+      expect(typed.meta).toMatchObject({ sessionId: 'session-2', requestId: 'req-9' });
     }
   });
 });

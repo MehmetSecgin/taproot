@@ -35,7 +35,7 @@ Edit, run `npm test`, commit. Tests should pass before every commit. If a test i
 
 - Every behavioral change ships with a test (passing path + at least one failure mode).
 - Tests live under `test/` and follow the existing naming pattern (`<feature>.test.ts`).
-- Use real files via `os.tmpdir()` rather than mocking `fs`; learning/credential paths assume real I/O.
+- Use real files via `os.tmpdir()` rather than mocking `fs`; state and credential paths assume real I/O.
 - Daemon-touching tests start a daemon on a per-test socket path (see `test/daemon-deterministic.test.ts`).
 
 ## Contracts You Must Not Break Silently
@@ -44,7 +44,6 @@ Changes to these require a doc update in the same PR:
 
 - JSON envelope shape — `references/json-envelope-contract.md`
 - Plugin contract — `references/plugin-contract.md`
-- Learning store schema — `references/learning-contract.md`
 - Daemon RPC shape — `references/phase1-runtime-contract.md`
 
 If you have to break a contract during prerelease, bump the version field referenced by the doc and call it out in the PR body.

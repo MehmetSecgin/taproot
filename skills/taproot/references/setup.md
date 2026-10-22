@@ -80,10 +80,9 @@ taproot query --datasource qa-orders --sql "SELECT 1 AS ok"
 
 ## Smoke test against an existing Teleport datasource
 
-Cache read only, no `SHOW CREATE`, no DDL on the wire:
+The first query caches the datasource's table catalog and returns the referenced table's schema:
 
 ```bash
 taproot daemon start
-taproot learn ensure-schema --env prod --service order-processor
-taproot learn ensure-schema --env prod --service order-processor | jq '.tables[] | select(.table=="order_items")'
+taproot query --env prod --service order-processor --sql "SHOW CREATE TABLE order_items" --pluck meta.schemaContext.tables.order_items
 ```

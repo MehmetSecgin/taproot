@@ -20,7 +20,6 @@ type ErrorClassDef = {
 const ERROR_CLASS_DEFS = {
   BAD_INPUT: { exitCode: EXIT_CODES.BAD_INPUT, match: /^bad_input:/ },
   MISSING_PARTITION_PREDICATE: { exitCode: EXIT_CODES.BAD_INPUT, match: /missing_partition_predicate/ },
-  REDUNDANT_INTROSPECTION: { exitCode: EXIT_CODES.BAD_INPUT, match: /redundant_introspection/ },
   QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout/ },
   MISCONFIGURED_DATASOURCE: {
     exitCode: EXIT_CODES.BAD_INPUT,
@@ -54,7 +53,6 @@ export const ERROR_CLASSES = ERROR_CLASS_DEFS as Record<ErrorClass, ErrorClassDe
 const CLASSIFY_ORDER: ErrorClass[] = [
   'BAD_INPUT',
   'MISSING_PARTITION_PREDICATE',
-  'REDUNDANT_INTROSPECTION',
   'QUERY_TIMEOUT',
   'MISCONFIGURED_DATASOURCE',
   'DETERMINISTIC_REQUIRED',
@@ -111,7 +109,6 @@ const makeThrower = (cls: ErrorClass) => (message: string, details?: Record<stri
 
 export const badInput = makeThrower('BAD_INPUT');
 export const missingPartitionPredicate = makeThrower('MISSING_PARTITION_PREDICATE');
-export const redundantIntrospection = makeThrower('REDUNDANT_INTROSPECTION');
 export const queryTimeoutErr = makeThrower('QUERY_TIMEOUT');
 export const misconfiguredDatasource = makeThrower('MISCONFIGURED_DATASOURCE');
 export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');

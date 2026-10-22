@@ -63,7 +63,6 @@ export function queryRequest(overrides: Partial<QueryExecutionRequest> = {}): Qu
     allowDiscovery: false,
     allowMutate: false,
     allowPartitionScan: false,
-    allowSchemaIntrospection: false,
     explain: false,
     rowsObject: false,
     jsonExtract: [],

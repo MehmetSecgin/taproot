@@ -1,4 +1,4 @@
-import type { QueryMemory, QueryPhaseTimings, SchemaContext } from '../types/core.js';
+import type { QueryPhaseTimings, SchemaContext } from '../types/core.js';
 
 export const RpcMethod = {
   DaemonStatus: 'daemon.status',
@@ -35,10 +35,8 @@ export interface RpcResponse {
   data?: Record<string, unknown>;
   error?: RpcError;
   meta: {
-    runId?: string;
     sessionId?: string;
     schemaContext?: SchemaContext;
-    queryMemory?: QueryMemory;
     timings?: {
       durationMs: number;
     };

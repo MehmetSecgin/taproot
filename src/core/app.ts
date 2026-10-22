@@ -4,7 +4,7 @@ import { ensurePaths, resolveFallbackPaths, resolvePaths } from './paths.js';
 import { DatasourceStore } from '../store/datasources.js';
 import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
-import { LearningStore } from '../store/learning.js';
+import { SchemaCatalogStore } from '../store/schema-catalog.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
 import { PluginRegistry } from '../plugins/registry.js';
 import { loadBuiltins } from '../plugins/load-builtins.js';
@@ -19,7 +19,7 @@ export interface AppContext {
   datasourceStore: DatasourceStore;
   credentialStore: CredentialStore;
   kbStore: KbStore;
-  learningStore: LearningStore;
+  schemaCatalogStore: SchemaCatalogStore;
   runtimeConfigStore: RuntimeConfigStore;
   pluginRegistry: PluginRegistry;
   verbose: boolean;
@@ -44,7 +44,7 @@ export function buildContext(opts: {
     datasourceStore: new DatasourceStore(paths.datasourceFile),
     credentialStore: new CredentialStore(paths.credentialFile),
     kbStore: new KbStore(paths.kbDir),
-    learningStore: new LearningStore(paths.learningDir),
+    schemaCatalogStore: new SchemaCatalogStore(path.join(paths.cacheDir, 'schema')),
     runtimeConfigStore,
     pluginRegistry,
     verbose: Boolean(opts.verbose),
@@ -84,7 +84,6 @@ export function nextAction(errorCode: string): string {
     BAD_INPUT: 'Fix the request payload to match the proto schema, or pass --skip-proto-validate to bypass local validation.',
     QUERY_TIMEOUT: 'Retry with a narrower query or raise --timeout if the longer runtime is intentional.',
     MISSING_PARTITION_PREDICATE: 'Add the table partition column to WHERE or JOIN predicates and retry through TapRoot.',
-    REDUNDANT_INTROSPECTION: 'Read the cached schema with "taproot learn ensure-schema --service <svc>" instead of re-issuing SHOW CREATE/DESCRIBE/SHOW COLUMNS. Pass --allow-schema-introspection to force re-introspection.',
     MISCONFIGURED_DATASOURCE: 'Repair or recreate the datasource profile so it matches KB-backed routing before retrying.',
     ACCESS_DENIED: 'Check datasource credentialRef and credential values.',
     UNKNOWN_DATABASE: 'Resolve canonical database name via datasource/kb resolve.',
@@ -94,12 +93,12 @@ export function nextAction(errorCode: string): string {
     OVERLOADED: 'Retry shortly; daemon query queue is saturated.',
     SESSION_BUSY: 'Wait for in-flight queries on this datasource session to finish, then retry.',
     DETERMINISTIC_REQUIRED: 'Provide --datasource or --env+--service with KB/profile-backed resolution, or enable discovery explicitly for that environment.',
-    DISCOVERY_UNAVAILABLE: 'Populate datasource store, KB, or TapRoot learning with deterministic routing data before retrying.',
+    DISCOVERY_UNAVAILABLE: 'Populate the datasource store or KB with deterministic routing data before retrying.',
     KB_MISSING: 'Point TapRoot at the KB directory with "taproot init --kb-dir <dir>" (saved in TapRoot config), or register the datasource with "taproot datasource add".',
     AMBIGUOUS_DB_USER: 'Ask the user which of the listed db users this datasource should use, then save it with the creds set or --hint dbUser= command in the message.',
     UNKNOWN_DATASOURCE: 'Use a datasource name suggested in the message, or pass --env and --service instead. List profiles with "taproot datasource list".',
-    UNKNOWN_COLUMN: 'Check column names against the cached schema (meta.schemaContext.tables, or "taproot learn ensure-schema --datasource <name>"), fix the query, then retry.',
-    UNKNOWN_TABLE: 'Check table names against the cached schema (meta.schemaContext.tables, or "taproot learn tables --datasource <name>"), then fix the query.',
+    UNKNOWN_COLUMN: 'Check column names against meta.schemaContext.tables (or SHOW COLUMNS FROM <table>), fix the query, then retry.',
+    UNKNOWN_TABLE: 'Check table names with SHOW TABLES, then fix the query.',
     SQL_SYNTAX: 'Fix the SQL syntax near the position the error names. The same SQL fails the same way, so do not retry it unchanged.',
     GENERIC: 'Read the error message; verify datasource resolution (--datasource or --env+--service) and query syntax, then retry.',
   };

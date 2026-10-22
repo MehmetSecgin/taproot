@@ -33,14 +33,6 @@ export const DoctorStatus = {
 } as const;
 export type DoctorStatus = (typeof DoctorStatus)[keyof typeof DoctorStatus];
 
-export const EnsuredBy = {
-  CachedLearning: 'cached-learning',
-  RefreshedIntrospection: 'refreshed-introspection',
-  Unresolved: 'unresolved',
-  Empty: 'empty',
-} as const;
-export type EnsuredBy = (typeof EnsuredBy)[keyof typeof EnsuredBy];
-
 export const KbRelationSource = {
   Curated: 'curated',
   Derived: 'derived',
@@ -90,7 +82,6 @@ export interface EnvironmentPolicy {
   allowDiscoveryByDefault: boolean;
   preferredAccessMethods: string[];
   targetPreference: string[];
-  ledgerRedactionTier?: LedgerRedactionTier;
 }
 
 export interface RuntimeConfig {
@@ -100,15 +91,6 @@ export interface RuntimeConfig {
     query?: {
       timeoutMs?: number;
       timeZone?: string;
-    };
-    learning?: {
-      enabled?: boolean;
-      sampleRowsMax?: number;
-      sampleCellMax?: number;
-      ttlHours?: number;
-    };
-    ledger?: {
-      redactionTier?: LedgerRedactionTier;
     };
   };
   environmentPolicies?: Record<string, Partial<EnvironmentPolicy>>;
@@ -133,7 +115,6 @@ export interface QueryPhaseTimings {
 }
 
 export interface QueryResult {
-  runId: string;
   datasource: string;
   plugin: string;
   capability: Capability;
@@ -152,7 +133,6 @@ export interface QueryResult {
   classification: 'success' | 'error';
   meta?: {
     schemaContext?: SchemaContext;
-    queryMemory?: QueryMemory;
   };
   resolved?: {
     source?: string;
@@ -165,8 +145,6 @@ export interface QueryResult {
     engine?: string;
   };
 }
-
-export type SchemaProvenance = 'observed-query' | 'refreshed-metadata' | 'manual';
 
 export interface SchemaIndex {
   name: string;
@@ -188,7 +166,6 @@ export interface TableContext {
   primaryKey?: string[];
   indexes: SchemaIndex[];
   partition?: SchemaPartition;
-  lastSeenAt?: string;
 }
 
 export interface RpcFieldShape {
@@ -238,27 +215,6 @@ export interface KbRelation {
   source?: KbRelationSource;
 }
 
-export interface SchemaRelationEdge {
-  from: string;
-  to: string;
-  relationship?: string;
-  crossService: boolean;
-  notes?: string;
-  stale?: boolean;
-  staleReason?: string;
-}
-
-export type RelationEndpointStatus = 'ok' | 'missing_table' | 'missing_column' | 'unknown_service';
-
-export interface RelationValidation {
-  id: string;
-  from: string;
-  to: string;
-  fromStatus: RelationEndpointStatus;
-  toStatus: RelationEndpointStatus;
-  stale: boolean;
-}
-
 export interface SchemaCatalogSummary {
   tables: number;
   fetchedAt: string;
@@ -270,28 +226,6 @@ export interface SchemaContext {
   services?: Record<string, RpcServiceShape>;
   messages?: Record<string, RpcMessageShape>;
   enums?: Record<string, RpcEnumShape>;
-  relations?: SchemaRelationEdge[];
-}
-
-export type LedgerRedactionTier = 'raw' | 'redact' | 'strict';
-
-export interface QueryMemoryPastRun {
-  runId: string;
-  ts: string;
-  datasource?: string;
-  reason?: string;
-  fingerprint?: string;
-  outcomeCode: string;
-  errorClass?: string;
-  lesson?: string;
-  tables: string[];
-  durationMs?: number;
-  rowCount?: number;
-}
-
-export interface QueryMemory {
-  similarPastRuns?: QueryMemoryPastRun[];
-  hints?: string[];
 }
 
 export type DoctorCheckCode =
@@ -344,10 +278,8 @@ export interface CliOutputEnvelope<T = unknown> {
   data?: T;
   meta?: {
     requestId?: string;
-    runId?: string;
     sessionId?: string;
     schemaContext?: SchemaContext;
-    queryMemory?: QueryMemory;
     timings?: {
       durationMs: number;
     };

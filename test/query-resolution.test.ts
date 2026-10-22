@@ -200,11 +200,13 @@ describe('query resolution', () => {
     });
   });
 
-  it('reason alone does not resolve a query', () => {
+  it('rejects the removed --reason and --allow-schema-introspection flags', () => {
     const { env } = setupState();
-    const out = runCli(['query', '--datasource', 'qa-orders', '--reason', 'latest orders'], env);
-    expect(out.status).toBe(1);
-    expect(out.stdout).toContain('No query resolved. Provide --sql.');
+    for (const flag of [['--reason', 'why'], ['--allow-schema-introspection']]) {
+      const out = runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1', ...flag], env);
+      expect(out.status).not.toBe(0);
+      expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
+    }
   });
 
   it('malformed --param fails as bad input', () => {
