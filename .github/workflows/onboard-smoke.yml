@@ -1,0 +1,19 @@
+name: Onboard Smoke
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run clean-machine onboarding smoke
+        run: bash scripts/smoke-onboard.sh

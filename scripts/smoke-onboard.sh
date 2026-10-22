@@ -75,9 +75,6 @@ docker exec "$APP_CT" bash -c '
   echo "   sh:   $(ls -l /bin/sh)"
 '
 
-echo "== smoke: install mysql client (needed by mysql plugin executor) =="
-docker exec "$APP_CT" bash -lc 'apt-get update -qq && apt-get install -y -qq --no-install-recommends default-mysql-client >/dev/null'
-
 echo "== smoke: copy repo into writable workdir and install =="
 docker exec "$APP_CT" bash -lc '
   set -euo pipefail

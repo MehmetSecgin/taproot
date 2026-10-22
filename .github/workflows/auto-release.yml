@@ -51,13 +51,18 @@ jobs:
             echo "bump=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          SUBJECTS="$(git log "$RANGE" --format=%s)"
           MESSAGES="$(git log "$RANGE" --format=%B)"
-          BUMP=minor
+          BUMP=
           if grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE:' <<<"$MESSAGES"; then
             BUMP=major
+          elif grep -qE '^feat(\([^)]*\))?:' <<<"$SUBJECTS"; then
+            BUMP=minor
+          elif grep -qE '^(fix|perf)(\([^)]*\))?:' <<<"$SUBJECTS"; then
+            BUMP=patch
           fi
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
-          echo "Selected bump: $BUMP"
+          echo "Selected bump: ${BUMP:-none, no feat, fix, perf or breaking commit}"
 
       - name: Install dependencies
         if: steps.bump.outputs.bump != ''
