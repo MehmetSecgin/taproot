@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PluginRegistry } from '../src/plugins/registry.js';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
 import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import type { AppContext } from '../src/core/app.js';
+import type { TapRootPlugin } from '../src/types/core.js';
 
 type Rows = Array<Record<string, unknown>>;
 
@@ -20,8 +20,8 @@ const ORDERS_COLUMNS: Rows = [
 function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('information_schema.columns') ? ORDERS_COLUMNS : [])) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-'));
   const seen: string[] = [];
-  const registry = new PluginRegistry();
-  registry.register({
+  const registry = new Map<string, TapRootPlugin>();
+  registry.set('mysql', {
     manifest: { name: 'mysql', version: '0.1.0', kind: 'executor', capabilities: ['executeRead'] },
     async execute(request) {
       seen.push(request.query);

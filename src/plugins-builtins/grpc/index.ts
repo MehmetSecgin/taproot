@@ -9,7 +9,6 @@ import type {
   TapRootPlugin,
 } from '../../types/core.js';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
-import type { GrpcPluginParams } from '../../types/plugin-params.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -78,7 +77,7 @@ function parseQuery(input: string): ParsedQuery {
 }
 
 function resolveProtoRoot(request: QueryRequest): string {
-  const pp = (request.pluginParams || {}) as GrpcPluginParams;
+  const pp = request.pluginParams || {};
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
   const root = str(pp.protoRoot || hints.protoRoot).trim();
   if (!root) {
@@ -88,7 +87,7 @@ function resolveProtoRoot(request: QueryRequest): string {
 }
 
 function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> | unknown[] {
-  const pp = (request.pluginParams || {}) as GrpcPluginParams;
+  const pp = request.pluginParams || {};
   const raw = pp.requestJson;
   if (typeof raw === 'string' && raw.trim()) {
     try {
@@ -228,7 +227,7 @@ export const grpcPlugin: TapRootPlugin = {
     const start = Date.now();
     const { service, method } = parseQuery(request.query);
     const protoRoot = resolveProtoRoot(request);
-    const pp = (request.pluginParams || {}) as GrpcPluginParams;
+    const pp = request.pluginParams || {};
     const paramPairs = pp.params || {};
     const payload = resolveRequestPayload(request, paramPairs);
     const bundle = await loadGrpcPackage(protoRoot);
@@ -257,8 +256,7 @@ export const grpcPlugin: TapRootPlugin = {
     }
     const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod)!;
     const messages = requestMessages(payload, service, methodShape);
-    const skipProtoValidate = pp.skipProtoValidate === true || pp.skipProtoValidate === 'true';
-    if (!skipProtoValidate) {
+    if (!pp.skipProtoValidate) {
       for (const [index, message] of messages.entries()) {
         const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, message);
         if (validationError) {

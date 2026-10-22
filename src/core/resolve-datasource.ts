@@ -1,8 +1,8 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
-import { bootstrapDatasource, saveKbBootstrapCandidate } from './bootstrap.js';
+import { saveKbBootstrapCandidate } from './bootstrap.js';
 import { suggestNames } from './grpc-introspect.js';
-import { discoverKubernetesTargets, discoverTeleportTargets, inferDatabaseCandidates } from './discovery.js';
+import { discoverKubernetesTargets } from './discovery.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
@@ -92,23 +92,8 @@ function preferredAccessMethods(policy: EnvironmentPolicy, kbAccessMethod?: stri
 }
 
 function discoverTargets(input: { env: string; service: string; accessMethods: string[]; namespace?: string; policy: EnvironmentPolicy }): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const method of input.accessMethods) {
-    const current = str(method).trim().toLowerCase();
-    let next: string[] = [];
-    if (current === AccessMethod.QaPortforward) {
-      next = discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, input.policy);
-    } else if (current === AccessMethod.Tsh) {
-      next = discoverTeleportTargets(input.service, input.env, input.policy);
-    }
-    for (const target of next) {
-      if (seen.has(target)) continue;
-      seen.add(target);
-      out.push(target);
-    }
-  }
-  return out;
+  if (!input.accessMethods.some((method) => str(method).trim().toLowerCase() === AccessMethod.QaPortforward)) return [];
+  return discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, input.policy);
 }
 
 export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacksInput): Promise<DatasourceResolution> {
@@ -128,9 +113,9 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
     if (datasource) source = 'store';
   }
   if (!datasource && env && service) {
-    const bootstrapped = await bootstrapDatasource(ctx, env, service, rawDs || defaultDatasourceName(env, service, namespace || undefined), namespace || undefined);
-    if (bootstrapped) {
-      datasource = bootstrapped.profile;
+    const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
+    datasource = kb ? await saveKbBootstrapCandidate(ctx, env, service, defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined), kb) : undefined;
+    if (datasource) {
       source = 'kb';
       verboseLogs.push(`auto-bootstrapped datasource from KB (${datasource.name})`);
     }
@@ -143,7 +128,7 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
     const targets = discoverTargets({ env, service, accessMethods, namespace: targetNamespace, policy });
     if (targets.length) {
       const target = targets[0];
-      const database = str(kb?.database || inferDatabaseCandidates(service)[0]);
+      const database = str(kb?.database || service.replace(/-/g, '_'));
       const dbUser = str(kb?.db_user);
       const accessMethod = accessMethods[0] || kbAccessMethod;
       const syntheticKb = {

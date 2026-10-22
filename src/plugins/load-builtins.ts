@@ -4,13 +4,11 @@ import { grpcPlugin } from '../plugins-builtins/grpc/index.js';
 import { teleportPlugin } from '../plugins-builtins/teleport/index.js';
 import { teleportMysqlPlugin } from '../plugins-builtins/teleport-mysql/index.js';
 import { kubectlPortforwardPlugin } from '../plugins-builtins/kubectl-portforward/index.js';
-import { PluginRegistry } from './registry.js';
+import type { TapRootPlugin } from '../types/core.js';
 
-export function loadBuiltins(registry: PluginRegistry): void {
-  registry.register(mysqlPlugin);
-  registry.register(redisPlugin);
-  registry.register(grpcPlugin);
-  registry.register(kubectlPortforwardPlugin);
-  registry.register(teleportPlugin);
-  registry.register(teleportMysqlPlugin);
+export type PluginRegistry = Map<string, TapRootPlugin>;
+
+export function builtinPlugins(): PluginRegistry {
+  const plugins = [mysqlPlugin, redisPlugin, grpcPlugin, teleportMysqlPlugin, teleportPlugin, kubectlPortforwardPlugin];
+  return new Map(plugins.map((plugin) => [plugin.manifest.name, plugin]));
 }

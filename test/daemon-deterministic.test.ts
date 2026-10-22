@@ -124,7 +124,7 @@ describe('daemon deterministic resolution', () => {
     const daemon = await startDaemon({
       stateRoot,
       socketPath,
-      configurePlugins: (registry) => registry.register(fakePlugin({ holdMs: 100 })),
+      configurePlugins: (registry) => registry.set('fake', fakePlugin({ holdMs: 100 })),
     });
     try {
       const res = await rpcCall({

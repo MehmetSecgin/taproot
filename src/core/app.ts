@@ -6,8 +6,7 @@ import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { SchemaCatalogStore } from '../store/schema-catalog.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
-import { PluginRegistry } from '../plugins/registry.js';
-import { loadBuiltins } from '../plugins/load-builtins.js';
+import { builtinPlugins, type PluginRegistry } from '../plugins/load-builtins.js';
 import { DoctorStatus } from '../types/core.js';
 import type { DatasourceProfile, DoctorCheck, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
@@ -36,17 +35,14 @@ export function buildContext(opts: {
     paths = resolveFallbackPaths(opts.kbDir);
     ensurePaths(paths);
   }
-  const pluginRegistry = new PluginRegistry();
-  const runtimeConfigStore = new RuntimeConfigStore(paths.runtimeConfigFile);
-  loadBuiltins(pluginRegistry);
   return {
     paths,
     datasourceStore: new DatasourceStore(paths.datasourceFile),
     credentialStore: new CredentialStore(paths.credentialFile),
     kbStore: new KbStore(paths.kbDir),
     schemaCatalogStore: new SchemaCatalogStore(path.join(paths.cacheDir, 'schema')),
-    runtimeConfigStore,
-    pluginRegistry,
+    runtimeConfigStore: new RuntimeConfigStore(paths.runtimeConfigFile),
+    pluginRegistry: builtinPlugins(),
     verbose: Boolean(opts.verbose),
   };
 }
@@ -114,7 +110,7 @@ export async function runDatasourceConnectors(input: {
   datasource: DatasourceProfile;
   credentialStore: { get: (ref: string) => Promise<Record<string, string>> };
   pluginRegistry: PluginRegistry;
-  mode: 'doctor' | 'connect' | 'disconnect';
+  mode: 'doctor' | 'connect';
 }): Promise<DoctorCheck[]> {
   const connectors = input.datasource.connectors || [];
   const perCheckTimeoutMs =
@@ -139,11 +135,6 @@ export async function runDatasourceConnectors(input: {
       if (input.mode === 'connect' && plugin.connect) {
         return await withConnectorTimeout(name, 'connect', perCheckTimeoutMs, () =>
           plugin.connect!({ datasource: input.datasource, credentials: creds }),
-        );
-      }
-      if (input.mode === 'disconnect' && plugin.disconnect) {
-        return await withConnectorTimeout(name, 'disconnect', perCheckTimeoutMs, () =>
-          plugin.disconnect!({ datasource: input.datasource, credentials: creds }),
         );
       }
       return [

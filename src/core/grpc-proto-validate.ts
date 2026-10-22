@@ -1,29 +1,5 @@
 import type { ProtobufRoot } from './proto-loader.js';
-import { suggestNames } from './grpc-introspect.js';
-
-interface PbField {
-  name: string;
-  jsonName?: string;
-  type: string;
-  repeated?: boolean;
-  rule?: string;
-  map?: boolean;
-  keyType?: string;
-  resolvedType?: unknown;
-  resolve?: () => void;
-}
-
-interface PbType {
-  fullName: string;
-  name: string;
-  fieldsArray: PbField[];
-  resolve?: () => void;
-}
-
-interface PbEnum {
-  fullName: string;
-  values: Record<string, number>;
-}
+import { isEnum, isType, stripLeadingDot, suggestNames, type PbEnum, type PbField, type PbType } from './grpc-introspect.js';
 
 export interface ValidationError {
   field: string;
@@ -31,11 +7,7 @@ export interface ValidationError {
   message: string;
 }
 
-export interface ValidateOptions {
-  maxDepth?: number;
-}
-
-const DEFAULT_MAX_DEPTH = 8;
+const MAX_DEPTH = 8;
 
 const INT_SCALARS = new Set([
   'int32', 'int64', 'uint32', 'uint64',
@@ -43,20 +15,6 @@ const INT_SCALARS = new Set([
   'sfixed32', 'sfixed64',
 ]);
 const FLOAT_SCALARS = new Set(['float', 'double']);
-
-function isType(node: unknown): node is PbType {
-  return !!node && typeof node === 'object' && Array.isArray((node as PbType).fieldsArray);
-}
-
-function isEnum(node: unknown): node is PbEnum {
-  if (!node || typeof node !== 'object') return false;
-  const obj = node as Record<string, unknown>;
-  return !!obj.values && !Array.isArray((obj as Record<string, unknown>).fieldsArray);
-}
-
-function stripLeadingDot(name: string): string {
-  return name.startsWith('.') ? name.slice(1) : name;
-}
 
 function scalarOk(type: string, value: unknown): boolean {
   if (type === 'bool') return typeof value === 'boolean';
@@ -91,9 +49,7 @@ export function validateGrpcRequest(
   root: ProtobufRoot,
   typeName: string,
   payload: unknown,
-  opts: ValidateOptions = {},
 ): ValidationError | null {
-  const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
 
   function walkMessage(typeFq: string, value: unknown, path: string, depth: number): ValidationError | null {
     if (value === null || value === undefined) return null;
@@ -127,7 +83,7 @@ export function validateGrpcRequest(
         message: `unknown field '${k}' on ${stripLeadingDot(resolved.fullName)}.${hint}`,
       };
     }
-    if (depth >= maxDepth) return null;
+    if (depth >= MAX_DEPTH) return null;
     for (const f of fields) {
       const value = obj[f.name] !== undefined
         ? obj[f.name]

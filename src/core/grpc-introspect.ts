@@ -1,4 +1,4 @@
-import { loadProtobufRoot, type ProtobufRoot } from './proto-loader.js';
+import type { ProtobufRoot } from './proto-loader.js';
 import { str } from './strings.js';
 import type {
   RpcEnumShape,
@@ -8,8 +8,9 @@ import type {
   RpcServiceShape,
 } from '../types/core.js';
 
-interface PbField {
+export interface PbField {
   name: string;
+  jsonName?: string;
   type: string;
   rule?: string;
   repeated?: boolean;
@@ -22,14 +23,14 @@ interface PbField {
   resolve?: () => void;
 }
 
-interface PbType {
+export interface PbType {
   fullName: string;
   name: string;
   fieldsArray: PbField[];
   resolve?: () => void;
 }
 
-interface PbEnum {
+export interface PbEnum {
   fullName: string;
   name: string;
   values: Record<string, number>;
@@ -70,17 +71,16 @@ export interface ProtoDescriptor {
 
 export interface ExpandOptions {
   maxDepth?: number;
-  maxMessages?: number;
 }
 
 const DEFAULT_MAX_DEPTH = 4;
-const DEFAULT_MAX_MESSAGES = 256;
+const MAX_MESSAGES = 256;
 
-function isType(node: unknown): node is PbType {
+export function isType(node: unknown): node is PbType {
   return !!node && typeof node === 'object' && Array.isArray((node as PbType).fieldsArray);
 }
 
-function isEnum(node: unknown): node is PbEnum {
+export function isEnum(node: unknown): node is PbEnum {
   if (!node || typeof node !== 'object') return false;
   const obj = node as Record<string, unknown>;
   return !!obj.values && !Array.isArray(obj.fieldsArray) && !Array.isArray(obj.methodsArray);
@@ -90,7 +90,7 @@ function isService(node: unknown): node is PbService {
   return !!node && typeof node === 'object' && Array.isArray((node as PbService).methodsArray);
 }
 
-function stripLeadingDot(name: string): string {
+export function stripLeadingDot(name: string): string {
   return name.startsWith('.') ? name.slice(1) : name;
 }
 
@@ -148,14 +148,13 @@ export function expandMessage(
   opts: ExpandOptions = {},
 ): { messages: Record<string, RpcMessageShape>; enums: Record<string, RpcEnumShape> } {
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
-  const maxMessages = opts.maxMessages ?? DEFAULT_MAX_MESSAGES;
   const messages: Record<string, RpcMessageShape> = {};
   const enums: Record<string, RpcEnumShape> = {};
   const queue: Array<{ name: string; depth: number }> = [{ name: stripLeadingDot(messageName), depth: 0 }];
   while (queue.length) {
     const { name, depth } = queue.shift()!;
     if (messages[name]) continue;
-    if (Object.keys(messages).length >= maxMessages) break;
+    if (Object.keys(messages).length >= MAX_MESSAGES) break;
     let resolved: unknown = null;
     try { resolved = root.lookup(name); } catch { resolved = null; }
     if (!resolved) continue;
@@ -229,11 +228,6 @@ export function describeProto(root: ProtobufRoot, opts: DescribeOptions = {}): P
     }
   }
   return { services, messages, enums };
-}
-
-export async function describeProtoRoot(protoRoot: string, opts: DescribeOptions = {}): Promise<ProtoDescriptor> {
-  const { protobufRoot } = await loadProtobufRoot(protoRoot);
-  return describeProto(protobufRoot, opts);
 }
 
 function shortName(fq: string): string {
@@ -333,7 +327,7 @@ export function buildRequestSkeleton(
   messageName: string,
   opts: ExpandOptions = {},
 ): unknown {
-  const { messages, enums } = expandMessage(root, messageName, { maxDepth: opts.maxDepth ?? 6, maxMessages: opts.maxMessages });
+  const { messages, enums } = expandMessage(root, messageName, { maxDepth: opts.maxDepth ?? 6 });
   const seen = new Set<string>();
 
   const valueForType = (type: string): unknown => {

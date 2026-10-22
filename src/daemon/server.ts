@@ -7,7 +7,7 @@ import { buildContext, classifyError } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
 import type { RpcRequest, RpcResponse } from './types.js';
-import type { PluginRegistry } from '../plugins/registry.js';
+import type { PluginRegistry } from '../plugins/load-builtins.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';

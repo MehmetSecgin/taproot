@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/app.js';
 import { reconcileDatasource } from '../core/bootstrap.js';
 import { printEnvelope } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';
@@ -39,8 +39,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       ctx.kbStore.requirePresent();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const namespace = normalizeNamespace(opts.namespace);
-      const datasourceName = defaultDatasourceName(opts.env, service, namespace || undefined);
-      const result = await reconcileDatasource(ctx, opts.env, service, datasourceName, namespace || undefined);
+      const result = await reconcileDatasource(ctx, opts.env, service, namespace || undefined);
       if (!result) {
         throw new Error(`No KB data found for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       }

@@ -35,20 +35,4 @@ export const kubectlPortforwardPlugin: TapRootPlugin = {
     const r = run(connectCommand);
     return [{ check: 'kubectl-portforward connect', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_connect_blocked' }) }];
   },
-
-  async disconnect(input): Promise<DoctorCheck[]> {
-    const disconnectCommand = input.credentials.disconnectCommand || '';
-    if (!disconnectCommand) {
-      return [
-        {
-          check: 'kubectl-portforward disconnect',
-          status: DoctorStatus.Warn,
-          detail: 'No disconnectCommand configured.',
-          code: 'connector_disconnect_command_missing',
-        },
-      ];
-    }
-    const r = run(disconnectCommand);
-    return [{ check: 'kubectl-portforward disconnect', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_disconnect_blocked' }) }];
-  },
 };

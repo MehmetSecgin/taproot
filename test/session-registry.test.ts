@@ -41,7 +41,6 @@ describe('session registry', () => {
       sessions: [
         {
           sessionId: 'sess_abc123',
-          fingerprintVersion: RUNTIME_CONSTANTS.fingerprintVersion,
           fingerprint: buildFingerprint({ datasourceName: 'qa-sample', kind: 'mysql', env: 'qa', service: 'sample' }),
           datasourceName: 'qa-sample',
           env: 'qa',
@@ -53,9 +52,6 @@ describe('session registry', () => {
           idleTtlMs: RUNTIME_CONSTANTS.session.idleTtlMs,
           hardTtlMs: RUNTIME_CONSTANTS.session.hardTtlMs,
           leaseCount: 0,
-          resources: [],
-          metrics: { queryCount: 0, successCount: 0, failureCount: 0, p50DurationMs: 0 },
-          degraded: { attempts: 0, nextRevalidateAt: now, lastErrorCode: '' },
         },
       ],
     };

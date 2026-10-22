@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
-import type { RedisPluginParams } from '../../types/plugin-params.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
@@ -238,8 +237,6 @@ function splitReplies(stdout: string): ReplyEntry[] {
   return entries;
 }
 
-type ProtoRoot = ProtobufRoot;
-
 function looksPrintableAscii(buf: Buffer): boolean {
   if (!buf.length) return true;
   for (const b of buf) {
@@ -249,7 +246,7 @@ function looksPrintableAscii(buf: Buffer): boolean {
   return true;
 }
 
-function decodeWith(root: ProtoRoot, message: string, buf: Buffer): Record<string, unknown> {
+function decodeWith(root: ProtobufRoot, message: string, buf: Buffer): Record<string, unknown> {
   const Type = root.lookupType(message);
   const decoded = Type.decode(buf);
   return Type.toObject(decoded, {
@@ -262,7 +259,7 @@ function decodeWith(root: ProtoRoot, message: string, buf: Buffer): Record<strin
 }
 
 function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoMessage?: string } {
-  const pp = (request.pluginParams || {}) as RedisPluginParams;
+  const pp = request.pluginParams || {};
   const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
   const protoRoot = str(pp.protoRoot || hints.protoRoot).trim() || undefined;
   const protoMessage = str(pp.protoMessage || hints.protoMessage).trim() || undefined;
@@ -293,7 +290,7 @@ export const redisPlugin: TapRootPlugin = {
     const startedAt = nowIso();
     const start = Date.now();
     const tokens = tokenize(request.query);
-    const pp = (request.pluginParams || {}) as RedisPluginParams;
+    const pp = request.pluginParams || {};
     const policy = request.datasource.policy;
     const tier = assertCommandAllowed(tokens, {
       capability: request.capability,
@@ -316,7 +313,7 @@ export const redisPlugin: TapRootPlugin = {
       throw new Error(r.stdout.trim());
     }
     const warnings: string[] = [];
-    let columns: string[] = ['value'];
+    const columns = ['value'];
     let rows: Array<Record<string, unknown>> = [];
     if (decode) {
       const root = (await loadProtobufRoot(protoRoot as string)).protobufRoot;

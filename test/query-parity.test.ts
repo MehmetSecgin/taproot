@@ -52,15 +52,19 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
 }
 
 async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => TapRootPlugin = () => fakePlugin()) {
+  const addPlugin = (registry: Map<string, TapRootPlugin>) => {
+    const plugin = makePlugin();
+    registry.set(plugin.manifest.name, plugin);
+  };
   const ctx = buildContext({});
-  ctx.pluginRegistry.register(makePlugin());
+  addPlugin(ctx.pluginRegistry);
   const direct = await executeQuery(request, { ctx, report: silentQueryReport });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-parity.sock');
   const daemon = await startDaemon({
     stateRoot,
     socketPath,
-    configurePlugins: (registry) => registry.register(makePlugin()),
+    configurePlugins: addPlugin,
   });
   try {
     const rpc = await rpcCall({ socketPath, method: 'query.execute', params: { ...request }, timeoutMs: 10_000 });

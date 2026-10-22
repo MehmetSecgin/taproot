@@ -48,7 +48,7 @@ export function restoreQueryEnv(): void {
 
 export function contextWith(plugin: TapRootPlugin): AppContext {
   const ctx = buildContext({});
-  ctx.pluginRegistry.register(plugin);
+  ctx.pluginRegistry.set(plugin.manifest.name, plugin);
   return ctx;
 }
 

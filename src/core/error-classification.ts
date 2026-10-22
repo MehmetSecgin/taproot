@@ -17,7 +17,7 @@ type ErrorClassDef = {
   match: RegExp;
 };
 
-const ERROR_CLASS_DEFS = {
+const ERROR_CLASSES = {
   BAD_INPUT: { exitCode: EXIT_CODES.BAD_INPUT, match: /^bad_input:/ },
   MISSING_PARTITION_PREDICATE: { exitCode: EXIT_CODES.BAD_INPUT, match: /missing_partition_predicate/ },
   QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout/ },
@@ -37,70 +37,39 @@ const ERROR_CLASS_DEFS = {
   SESSION_BUSY: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /session_busy|session .*active leases/ },
   ACCESS_DENIED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /access denied|permission denied/ },
   UNKNOWN_DATABASE: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /unknown database|does not exist/ },
-  UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
   CONNECTIVITY: {
     exitCode: EXIT_CODES.CONNECTIVITY,
     match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|spawn tsh enoent|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
   },
+  UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
   AUTH_EXPIRED: { exitCode: EXIT_CODES.AUTH, match: /auth|login|expired|unauthorized/ },
   GENERIC: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /.*/ },
 } as const satisfies Record<string, ErrorClassDef>;
 
-export type ErrorClass = keyof typeof ERROR_CLASS_DEFS;
-
-export const ERROR_CLASSES = ERROR_CLASS_DEFS as Record<ErrorClass, ErrorClassDef>;
-
-const CLASSIFY_ORDER: ErrorClass[] = [
-  'BAD_INPUT',
-  'MISSING_PARTITION_PREDICATE',
-  'QUERY_TIMEOUT',
-  'MISCONFIGURED_DATASOURCE',
-  'DETERMINISTIC_REQUIRED',
-  'DISCOVERY_UNAVAILABLE',
-  'KB_MISSING',
-  'UNKNOWN_DATASOURCE',
-  'AMBIGUOUS_DB_USER',
-  'UNKNOWN_COLUMN',
-  'UNKNOWN_TABLE',
-  'SQL_SYNTAX',
-  'OVERLOADED',
-  'SESSION_BUSY',
-  'ACCESS_DENIED',
-  'UNKNOWN_DATABASE',
-  'CONNECTIVITY',
-  'UNKNOWN_TARGET',
-  'AUTH_EXPIRED',
-];
+export type ErrorClass = keyof typeof ERROR_CLASSES;
 
 export function classifyError(message: string): ErrorClass {
   const prefix = message.match(/^([A-Z_]+):/)?.[1];
   if (prefix && prefix in ERROR_CLASSES) return prefix as ErrorClass;
   const text = message.toLowerCase();
-  for (const cls of CLASSIFY_ORDER) {
-    if (ERROR_CLASSES[cls].match.test(text)) return cls;
+  for (const [cls, def] of Object.entries(ERROR_CLASSES) as Array<[ErrorClass, ErrorClassDef]>) {
+    if (def.match.test(text)) return cls;
   }
   return 'GENERIC';
 }
 
-export function exitCodeFor(cls: ErrorClass): number {
-  return ERROR_CLASSES[cls].exitCode;
-}
-
 export function exitCodeForClass(code: string): number {
-  return code in ERROR_CLASSES ? exitCodeFor(code as ErrorClass) : EXIT_CODES.GENERAL_ERROR;
+  return code in ERROR_CLASSES ? ERROR_CLASSES[code as ErrorClass].exitCode : EXIT_CODES.GENERAL_ERROR;
 }
 
 export class TaprootError extends Error {
-  readonly cls: ErrorClass;
+  readonly code: ErrorClass;
   details?: Record<string, unknown>;
-  constructor(cls: ErrorClass, message: string, details?: Record<string, unknown>) {
-    super(`${cls}: ${message}`);
-    this.cls = cls;
+  constructor(code: ErrorClass, message: string, details?: Record<string, unknown>) {
+    super(`${code}: ${message}`);
+    this.code = code;
     this.name = 'TaprootError';
     if (details) this.details = details;
-  }
-  get code(): ErrorClass {
-    return this.cls;
   }
 }
 

@@ -21,7 +21,6 @@ export interface GrpcModule {
 }
 
 export interface LoadedProtoBundle {
-  roots: string[];
   files: string[];
   includeDirs: string[];
   protobufRoot: ProtobufRoot;
@@ -85,7 +84,7 @@ function importResolves(target: string, importerDir: string, roots: string[], ba
   return basenames.has(path.basename(target));
 }
 
-export interface UnresolvedImport {
+interface UnresolvedImport {
   importPath: string;
   importedBy: string;
 }
@@ -161,7 +160,7 @@ export async function loadProtobufRoot(protoRoot: string): Promise<LoadedProtoBu
       return target;
     };
     await root.load(files, { keepCase: true });
-    return { roots, files, includeDirs, protobufRoot: root as unknown as ProtobufRoot };
+    return { files, includeDirs, protobufRoot: root as unknown as ProtobufRoot };
   })();
   protobufCache.set(key, promise);
   try {

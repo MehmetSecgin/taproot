@@ -121,7 +121,7 @@ export async function collectReadinessSnapshot(
   ctx: AppContext,
   input?: { createdConfig?: boolean },
 ): Promise<ReadinessSnapshot> {
-  const pluginNames = ctx.pluginRegistry.list().map((plugin) => plugin.manifest.name);
+  const pluginNames = [...ctx.pluginRegistry.keys()];
   const datasources = ctx.datasourceStore.list();
   const checks: DoctorCheck[] = [
     { check: 'node_version', status: DoctorStatus.Ok, detail: process.version },

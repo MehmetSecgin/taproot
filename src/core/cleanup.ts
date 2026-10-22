@@ -1,41 +1,24 @@
 type CleanupFn = () => void | Promise<void>;
 
-interface CleanupEntry {
-  key: string;
-  fn: CleanupFn;
-}
-
-class CleanupRegistry {
-  private readonly entries = new Map<string, CleanupEntry>();
-  private running = false;
-
-  register(key: string, fn: CleanupFn): () => void {
-    this.entries.set(key, { key, fn });
-    return () => this.entries.delete(key);
-  }
-
-  async runAll(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    const entries = [...this.entries.values()];
-    this.entries.clear();
-    for (const entry of entries.reverse()) {
-      try {
-        await entry.fn();
-      } catch {
-        // best-effort cleanup
-      }
-    }
-    this.running = false;
-  }
-}
-
-const registry = new CleanupRegistry();
+const entries = new Map<string, CleanupFn>();
+let running = false;
 
 export function registerCleanup(key: string, fn: CleanupFn): () => void {
-  return registry.register(key, fn);
+  entries.set(key, fn);
+  return () => entries.delete(key);
 }
 
 export async function runRegisteredCleanup(): Promise<void> {
-  await registry.runAll();
+  if (running) return;
+  running = true;
+  const fns = [...entries.values()].reverse();
+  entries.clear();
+  for (const fn of fns) {
+    try {
+      await fn();
+    } catch {
+      // best-effort cleanup
+    }
+  }
+  running = false;
 }

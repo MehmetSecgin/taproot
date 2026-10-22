@@ -55,12 +55,3 @@ export function discoverKubernetesTargets(namespace: string, service: string, en
   return sortTargets(names, service, env, policy);
 }
 
-export function discoverTeleportTargets(service: string, env: string, policy: EnvironmentPolicy): string[] {
-  return [];
-}
-
-export function inferDatabaseCandidates(service: string, explicit?: string): string[] {
-  if (explicit) return [explicit];
-  const base = service.replace(/-/g, '_');
-  return [...new Set([base].filter(Boolean))];
-}

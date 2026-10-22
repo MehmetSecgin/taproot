@@ -28,12 +28,8 @@ export class KbStore {
     return readJsonFile<any[]>(this.file('services.json'), []);
   }
 
-  relations(): any[] {
-    return readJsonFile<any[]>(this.file('relations.json'), []);
-  }
-
   typedRelations(): KbRelation[] {
-    return normalizeRelations(this.relations());
+    return normalizeRelations(readJsonFile<unknown[]>(this.file('relations.json'), []));
   }
 
   promoteRelations(candidates: KbRelation[]): { added: number; total: number } {
@@ -76,5 +72,4 @@ export class KbStore {
     if (!active.length) return null;
     return active.sort((a: any, b: any) => str(b.verified_at_utc).localeCompare(str(a.verified_at_utc)))[0];
   }
-
 }

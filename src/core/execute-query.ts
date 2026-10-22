@@ -13,8 +13,7 @@ import { ensureDatasourceCatalog } from './schema-refresh.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
 import { str } from './strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
-import type { DatasourceProfile, QueryResult, SchemaContext } from '../types/core.js';
-import type { BuiltinPluginParams } from '../types/plugin-params.js';
+import type { DatasourceProfile, PluginParams, QueryResult, SchemaContext } from '../types/core.js';
 
 export interface QueryExecutionRequest {
   datasource?: string;
@@ -99,8 +98,8 @@ export function deriveQueryTarget(
   };
 }
 
-function buildPluginParams(request: QueryExecutionRequest, params: Record<string, string>, kind: string): BuiltinPluginParams | undefined {
-  const pluginParams: BuiltinPluginParams = {};
+function buildPluginParams(request: QueryExecutionRequest, params: Record<string, string>, kind: string): PluginParams | undefined {
+  const pluginParams: PluginParams = {};
   if (request.proto) pluginParams.protoMessage = String(request.proto);
   if (request.protoRoot) pluginParams.protoRoot = String(request.protoRoot);
   if (request.allowFlush) pluginParams.allowFlush = true;
@@ -235,7 +234,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return failure(new Error(`Plugin '${plugin.manifest.name}' does not support capability ${capability}.`), { schemaContext });
   }
 
-  let creds = await ctx.credentialStore.get(datasource.credentialRef);
+  const creds = await ctx.credentialStore.get(datasource.credentialRef);
   const meta: QueryOutcomeMeta = { sessionId, schemaContext };
 
   try {
@@ -276,24 +275,21 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     const executeStart = Date.now();
     const executedQuery = request.explain ? `EXPLAIN ${query}` : query;
     const pluginParams = buildPluginParams(request, params, datasource.kind);
-    const runExecute = (): Promise<QueryResult> =>
-      withQueryTimeout({
-        timeoutMs: remainingMs(),
-        run: () =>
-          execute(
-            {
-              datasource,
-              query: executedQuery,
-              capability: capability as any,
-              timeoutMs: remainingMs(),
-              sessionTimeZone,
-              pluginParams,
-            },
-            sessionId ? { ...creds, __sessionId: sessionId } : creds,
-          ),
-      });
-
-    const result: QueryResult = await runExecute();
+    const result: QueryResult = await withQueryTimeout({
+      timeoutMs: remainingMs(),
+      run: () =>
+        execute(
+          {
+            datasource,
+            query: executedQuery,
+            capability: capability as any,
+            timeoutMs: remainingMs(),
+            sessionTimeZone,
+            pluginParams,
+          },
+          sessionId ? { ...creds, __sessionId: sessionId } : creds,
+        ),
+    });
     phaseExecuteMs = Date.now() - executeStart;
 
     if (warnings.length) result.warnings = [...(result.warnings || []), ...warnings];

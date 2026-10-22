@@ -51,14 +51,6 @@ export class SessionRegistry {
     this.loadCheckpoint();
   }
 
-  private checkpointPayload(): SessionCheckpoint {
-    return {
-      schemaVersion: 1,
-      updatedAt: nowIso(),
-      sessions: this.list(),
-    };
-  }
-
   private loadCheckpoint(): void {
     if (!fs.existsSync(this.checkpointFile)) return;
     try {
@@ -79,7 +71,7 @@ export class SessionRegistry {
   }
 
   persist(): void {
-    const payload = this.checkpointPayload();
+    const payload: SessionCheckpoint = { schemaVersion: 1, updatedAt: nowIso(), sessions: this.list() };
     const tmp = `${this.checkpointFile}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     fs.renameSync(tmp, this.checkpointFile);
@@ -93,11 +85,6 @@ export class SessionRegistry {
     return this.sessionsById.get(sessionId);
   }
 
-  findByFingerprint(fingerprint: string): SessionRecord | undefined {
-    const id = this.sessionIdByFingerprint.get(fingerprint);
-    return id ? this.sessionsById.get(id) : undefined;
-  }
-
   open(input: {
     datasourceName: string;
     env?: string;
@@ -108,7 +95,8 @@ export class SessionRegistry {
     connectors?: string[];
   }): SessionRecord {
     const fingerprint = buildFingerprint(input);
-    const existing = this.findByFingerprint(fingerprint);
+    const existingId = this.sessionIdByFingerprint.get(fingerprint);
+    const existing = existingId ? this.sessionsById.get(existingId) : undefined;
     if (existing && existing.state !== 'closed') {
       existing.lastUsedAt = nowIso();
       if (existing.state === 'recovering' || existing.state === 'opening') existing.state = 'ready';
@@ -120,7 +108,6 @@ export class SessionRegistry {
     const sessionId = `sess_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
     const created: SessionRecord = {
       sessionId,
-      fingerprintVersion: RUNTIME_CONSTANTS.fingerprintVersion,
       fingerprint,
       datasourceName: input.datasourceName,
       env: input.env,
@@ -133,18 +120,6 @@ export class SessionRegistry {
       idleTtlMs: RUNTIME_CONSTANTS.session.idleTtlMs,
       hardTtlMs: RUNTIME_CONSTANTS.session.hardTtlMs,
       leaseCount: 0,
-      resources: [],
-      metrics: {
-        queryCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        p50DurationMs: 0,
-      },
-      degraded: {
-        attempts: 0,
-        nextRevalidateAt: now,
-        lastErrorCode: '',
-      },
     };
     this.sessionsById.set(created.sessionId, created);
     this.sessionIdByFingerprint.set(created.fingerprint, created.sessionId);

@@ -49,7 +49,7 @@ async function setupDaemon(datasourceCount = 1, holdMs = 0) {
   const daemon = await startDaemon({
     stateRoot,
     socketPath,
-    configurePlugins: (registry) => registry.register(fakePlugin({ holdMs })),
+    configurePlugins: (registry) => registry.set('fake', fakePlugin({ holdMs })),
   });
   return { daemon, socketPath };
 }

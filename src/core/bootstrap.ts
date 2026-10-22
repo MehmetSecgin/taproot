@@ -46,7 +46,7 @@ function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapRes
   };
 }
 
-export async function ensureCredentialDefaults(
+async function ensureCredentialDefaults(
   ctx: AppContext,
   ref: string,
   defaults: Record<string, string>,
@@ -173,7 +173,7 @@ const BOOTSTRAP_STRATEGIES: BootstrapStrategy[] = [
   { accessMethod: AccessMethod.Tsh, build: buildTshCandidate },
 ];
 
-export function buildKbBootstrapCandidate(
+function buildKbBootstrapCandidate(
   env: string,
   service: string,
   datasourceName: string,
@@ -199,12 +199,6 @@ export function buildKbBootstrapCandidate(
   return strategy.build(c);
 }
 
-async function applyCredentialDefaults(ctx: AppContext, specs: CredentialDefaultSpec[]): Promise<void> {
-  for (const spec of specs) {
-    await ensureCredentialDefaults(ctx, spec.ref, spec.defaults, spec.overwrite);
-  }
-}
-
 export async function saveKbBootstrapCandidate(
   ctx: AppContext,
   env: string,
@@ -217,77 +211,27 @@ export async function saveKbBootstrapCandidate(
   // all persist the same canonical routing shape instead of drifting through ad-hoc saves.
   const candidate = buildKbBootstrapCandidate(env, service, datasourceName, kb, options);
   if (!candidate) return undefined;
-  await applyCredentialDefaults(ctx, candidate.credentialDefaults);
+  for (const spec of candidate.credentialDefaults) await ensureCredentialDefaults(ctx, spec.ref, spec.defaults, spec.overwrite);
   return ctx.datasourceStore.save(candidate.profile);
-}
-
-export async function bootstrapDatasource(
-  ctx: AppContext,
-  env: string,
-  service: string,
-  datasourceName: string,
-  namespace?: string,
-): Promise<BootstrapResult | undefined> {
-  const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
-  if (existing) {
-    return {
-      profile: existing,
-      source: 'store-existing',
-      ...collectBootstrapMetadata(existing),
-    };
-  }
-
-  const kb = ctx.kbStore.resolveConnection(service, env, namespace);
-  if (!kb) return undefined;
-  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
-  const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
-  if (!profile) return undefined;
-  return {
-    profile,
-    source: 'kb-bootstrap',
-    ...collectBootstrapMetadata(profile),
-  };
 }
 
 export async function reconcileDatasource(
   ctx: AppContext,
   env: string,
   service: string,
-  datasourceName: string,
   namespace?: string,
 ): Promise<BootstrapResult | undefined> {
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
   if (!kb) return undefined;
 
   const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
-  const candidate = buildKbBootstrapCandidate(env, service, resolvedName, kb);
-  if (!candidate) return undefined;
+  if (!buildKbBootstrapCandidate(env, service, resolvedName, kb)) return undefined;
 
   const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
-  if (!existing) {
-    const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
-    if (!profile) return undefined;
-    return {
-      profile,
-      source: 'kb-bootstrap',
-      ...collectBootstrapMetadata(profile),
-    };
-  }
-
-  const critical = criticalDatasourceKbConflicts(existing, kb);
-  if (!critical.length) {
-    return {
-      profile: existing,
-      source: 'store-existing',
-      ...collectBootstrapMetadata(existing),
-    };
-  }
+  const critical = existing ? criticalDatasourceKbConflicts(existing, kb) : [];
+  if (existing && !critical.length) return { profile: existing, source: 'store-existing', ...collectBootstrapMetadata(existing) };
 
   const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
   if (!profile) return undefined;
-  return {
-    profile,
-    source: 'kb-repaired',
-    ...collectBootstrapMetadata(profile),
-  };
+  return { profile, source: existing ? 'kb-repaired' : 'kb-bootstrap', ...collectBootstrapMetadata(profile) };
 }

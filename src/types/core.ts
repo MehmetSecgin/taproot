@@ -44,7 +44,6 @@ export interface PluginManifest {
   kind: PluginKind;
   capabilities: Capability[];
   accessMethods?: AccessMethod[];
-  configSchema?: Record<string, unknown>;
   priority?: number;
 }
 
@@ -95,13 +94,22 @@ export interface RuntimeConfig {
   serviceAliases?: Record<string, string>;
 }
 
+export interface PluginParams {
+  protoRoot?: string;
+  protoMessage?: string;
+  requestJson?: string;
+  skipProtoValidate?: boolean;
+  allowFlush?: boolean;
+  params?: Record<string, string>;
+}
+
 export interface QueryRequest {
   datasource: DatasourceProfile;
   query: string;
   capability: 'executeRead' | 'executeMutate';
   timeoutMs?: number;
   sessionTimeZone: string;
-  pluginParams?: Record<string, unknown>;
+  pluginParams?: PluginParams;
 }
 
 export interface QueryPhaseTimings {
@@ -230,11 +238,9 @@ export type DoctorCheckCode =
   | 'connector_mode_unsupported'
   | 'connector_status_command_missing'
   | 'connector_connect_command_missing'
-  | 'connector_disconnect_command_missing'
   | 'connector_login_command_missing'
   | 'connector_status_blocked'
   | 'connector_connect_blocked'
-  | 'connector_disconnect_blocked'
   | 'connector_check_failed'
   | 'connector_timeout'
   | 'executor_configuration_missing'
@@ -256,8 +262,6 @@ export interface TapRootPlugin {
   manifest: PluginManifest;
   doctor?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
   connect?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
-  disconnect?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
-  resolve?: (input: { datasource: Partial<DatasourceProfile>; env?: string; service?: string }) => Promise<Partial<DatasourceProfile>>;
   execute?: (request: QueryRequest, creds: Record<string, string>) => Promise<QueryResult>;
 }
 

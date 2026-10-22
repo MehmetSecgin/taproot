@@ -47,9 +47,6 @@ function partitionSql(datasource: DatasourceProfile): string {
 }
 
 async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
-  if (!isSqlDatasource(datasource.kind)) {
-    throw new Error(`datasource kind '${datasource.kind}' has no schema catalog`);
-  }
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
   const creds = await ctx.credentialStore.get(datasource.credentialRef);
@@ -74,10 +71,7 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
 }
 
 function executeCatalogRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
-  return withQueryTimeout({
-    timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs,
-    run: () => executeRead(ctx, datasource, sql),
-  });
+  return withQueryTimeout({ timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs, run: () => executeRead(ctx, datasource, sql) });
 }
 
 function extractBacktickColumns(value: string): string[] {
@@ -148,7 +142,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const indexesByTable = new Map<string, Map<string, SchemaIndex>>();
-  for (const row of indexResult?.result.rows || []) {
+  for (const row of indexResult.result.rows) {
     const table = String(row.table_name || '').trim();
     const name = String(row.index_name || '').trim();
     const column = String(row.column_name || '').trim();
@@ -164,7 +158,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const partitionsByTable = new Map<string, SchemaPartition>();
-  for (const row of partitionResult?.result.rows || []) {
+  for (const row of partitionResult.result.rows) {
     const table = String(row.table_name || '').trim();
     if (!table || partitionsByTable.has(table)) continue;
     const method = String(row.partition_method || row.subpartition_method || '').trim();

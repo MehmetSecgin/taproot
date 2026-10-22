@@ -53,6 +53,13 @@ function eachAst(ast: unknown): unknown[] {
   return Array.isArray(ast) ? ast : [ast];
 }
 
+function eachChild(obj: Record<string, unknown>, visit: (child: unknown) => void): void {
+  for (const value of Object.values(obj)) {
+    if (Array.isArray(value)) value.forEach(visit);
+    else visit(value);
+  }
+}
+
 function collectCteNames(node: unknown, out: Set<string>): void {
   if (!node || typeof node !== 'object') return;
   const obj = node as Record<string, unknown>;
@@ -63,13 +70,7 @@ function collectCteNames(node: unknown, out: Set<string>): void {
     const value = nameNode && typeof nameNode === 'object' ? (nameNode as Record<string, unknown>).value : undefined;
     if (typeof value === 'string') out.add(bareName(value));
   }
-  for (const value of Object.values(obj)) {
-    if (Array.isArray(value)) {
-      for (const item of value) collectCteNames(item, out);
-    } else {
-      collectCteNames(value, out);
-    }
-  }
+  eachChild(obj, (child) => collectCteNames(child, out));
 }
 
 function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set<string>, aliasToTable: Map<string, string>): void {
@@ -90,24 +91,22 @@ function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set
   const showTable = safeTableName(obj.table);
   if (showTable && !cteNames.has(bareName(showTable))) tables.add(bareName(showTable));
 
-  for (const value of Object.values(obj)) {
-    if (Array.isArray(value)) {
-      for (const item of value) collectTablesFromNode(item, cteNames, tables, aliasToTable);
-    } else {
-      collectTablesFromNode(value, cteNames, tables, aliasToTable);
-    }
-  }
+  eachChild(obj, (child) => collectTablesFromNode(child, cteNames, tables, aliasToTable));
 }
 
-export function collectReferencedTables(sql: string): string[] {
-  const ast = parseAst(sql);
-  if (!ast) return [];
+function scanTables(ast: unknown): { tables: Set<string>; aliasToTable: Map<string, string> } {
   const cteNames = new Set<string>();
   const tables = new Set<string>();
   const aliasToTable = new Map<string, string>();
   for (const item of eachAst(ast)) collectCteNames(item, cteNames);
   for (const item of eachAst(ast)) collectTablesFromNode(item, cteNames, tables, aliasToTable);
-  return [...tables].sort((a, b) => a.localeCompare(b));
+  return { tables, aliasToTable };
+}
+
+export function collectReferencedTables(sql: string): string[] {
+  const ast = parseAst(sql);
+  if (!ast) return [];
+  return [...scanTables(ast).tables].sort((a, b) => a.localeCompare(b));
 }
 
 function collectColumnRefs(expr: unknown, aliasToTable: Map<string, string>, out: PredicateColumnRefs): void {
@@ -128,13 +127,7 @@ function collectColumnRefs(expr: unknown, aliasToTable: Map<string, string>, out
     return;
   }
 
-  for (const value of Object.values(obj)) {
-    if (Array.isArray(value)) {
-      for (const item of value) collectColumnRefs(item, aliasToTable, out);
-    } else {
-      collectColumnRefs(value, aliasToTable, out);
-    }
-  }
+  eachChild(obj, (child) => collectColumnRefs(child, aliasToTable, out));
 }
 
 function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string, string>, out: PredicateColumnRefs): void {
@@ -143,24 +136,14 @@ function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string
   if (obj.where) collectColumnRefs(obj.where, aliasToTable, out);
   if (obj.on) collectColumnRefs(obj.on, aliasToTable, out);
 
-  for (const value of Object.values(obj)) {
-    if (Array.isArray(value)) {
-      for (const item of value) collectPredicateColumnsFromNode(item, aliasToTable, out);
-    } else {
-      collectPredicateColumnsFromNode(value, aliasToTable, out);
-    }
-  }
+  eachChild(obj, (child) => collectPredicateColumnsFromNode(child, aliasToTable, out));
 }
 
 export function collectPredicateColumns(sql: string): PredicateColumnRefs {
   const out: PredicateColumnRefs = { byTable: new Map(), bare: new Set() };
   const ast = parseAst(sql);
   if (!ast) return out;
-  const cteNames = new Set<string>();
-  const aliasToTable = new Map<string, string>();
-  const tables = new Set<string>();
-  for (const item of eachAst(ast)) collectCteNames(item, cteNames);
-  for (const item of eachAst(ast)) collectTablesFromNode(item, cteNames, tables, aliasToTable);
+  const { aliasToTable } = scanTables(ast);
   for (const item of eachAst(ast)) collectPredicateColumnsFromNode(item, aliasToTable, out);
   return out;
 }

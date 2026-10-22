@@ -5,7 +5,6 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import { _resetProtoCachesForTest, loadProtobufRoot, loadGrpcPackage } from '../src/core/proto-loader.js';
 import {
   describeProto,
-  describeProtoRoot,
   listServices,
   expandMessage,
   resolveName,
@@ -191,10 +190,10 @@ describe('grpc-introspect', () => {
     expect(shallow.messages['taproot.test.Address']).toBeUndefined();
   });
 
-  it('describeProtoRoot end-to-end loads + describes', async () => {
+  it('loads and describes a proto root end-to-end', async () => {
     const dir = tmpDir('introspect-e2e');
     writeFixtureProto(dir);
-    const descriptor = await describeProtoRoot(dir, { service: 'taproot.test.ProfileService' });
+    const descriptor = describeProto((await loadProtobufRoot(dir)).protobufRoot, { service: 'taproot.test.ProfileService' });
     expect(descriptor.services[0].methods).toHaveLength(2);
     expect(descriptor.messages['taproot.test.Profile']).toBeTruthy();
   });

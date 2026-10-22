@@ -6,7 +6,6 @@ function intFromEnv(name: string, fallback: number): number {
 
 export const RUNTIME_CONSTANTS = {
   protocolVersion: 1,
-  fingerprintVersion: 'fpv1',
   session: {
     idleTtlMs: 45 * 60 * 1000,
     hardTtlMs: 6 * 60 * 60 * 1000,

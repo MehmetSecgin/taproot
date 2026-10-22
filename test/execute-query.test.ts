@@ -249,7 +249,7 @@ describe('executeQuery datasource kind routing', () => {
 
   function bothKinds() {
     const ctx = contextWith(fakePlugin({ kind: 'grpc' }));
-    ctx.pluginRegistry.register(fakePlugin({ kind: 'mysql' }));
+    ctx.pluginRegistry.set('mysql', fakePlugin({ kind: 'mysql' }));
     return ctx;
   }
 

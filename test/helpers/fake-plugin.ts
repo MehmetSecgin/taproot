@@ -22,7 +22,6 @@ export function fakePlugin(options: FakePluginOptions = {}): TapRootPlugin {
       priority: 100,
     },
     connect: async () => [],
-    disconnect: async () => [],
     execute: async (request): Promise<QueryResult> => {
       if (options.holdMs) await new Promise((resolve) => setTimeout(resolve, options.holdMs));
       if (options.failWith) throw new Error(options.failWith);
