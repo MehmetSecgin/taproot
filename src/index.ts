@@ -38,7 +38,6 @@ program
   .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
   .option('-V, --version', 'Print the version')
   .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
-  .option('--profile <name>', 'Runtime profile name')
   .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')
   .option('--verbose', 'Diagnostics on stderr as JSON lines', false)
   .configureHelp({ formatHelp: helpJson })

@@ -1,6 +1,5 @@
 {
   "defaults": {
-    "profile": "default",
     "json": false,
     "noColor": false,
     "noAnimations": true,

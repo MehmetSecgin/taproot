@@ -86,7 +86,6 @@ export interface EnvironmentPolicy {
 export interface RuntimeConfig {
   kbDir?: string;
   defaults?: {
-    profile?: string;
     query?: {
       timeoutMs?: number;
       timeZone?: string;
