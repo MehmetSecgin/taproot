@@ -121,23 +121,9 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
         }
       }
       const creds = await ctx.credentialStore.get(datasource.credentialRef);
-      const connectorChecks = await runDatasourceConnectors({
-        datasource,
-        credentialStore: ctx.credentialStore,
-        pluginRegistry: ctx.pluginRegistry,
-        mode: 'doctor',
-      });
-      const checks = [...connectorChecks];
-      if (opts.connect) {
-        checks.push(
-          ...(await runDatasourceConnectors({
-            datasource,
-            credentialStore: ctx.credentialStore,
-            pluginRegistry: ctx.pluginRegistry,
-            mode: 'connect',
-          })),
-        );
-      }
+      const connectorInput = { datasource, credentialStore: ctx.credentialStore, pluginRegistry: ctx.pluginRegistry };
+      const checks = opts.connect ? await runDatasourceConnectors({ ...connectorInput, mode: 'connect' }) : [];
+      checks.push(...(await runDatasourceConnectors({ ...connectorInput, mode: 'doctor' })));
       checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
 
       const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
