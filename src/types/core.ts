@@ -245,6 +245,7 @@ export type DoctorCheckCode =
   | 'connector_timeout'
   | 'executor_configuration_missing'
   | 'executor_connectivity'
+  | 'executor_missing_tool'
   | 'executor_access_denied'
   | 'executor_auth_expired'
   | 'executor_unknown_target'

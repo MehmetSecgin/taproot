@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { AccessMethod, DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
-import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
+import { classifyExecutorDoctorCode, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
@@ -170,7 +170,7 @@ async function runRedis(args: string[], tokens: string[], timeoutMs?: number): P
     proc.stdout.on('data', (c) => { stdout += String(c); });
     proc.stderr.on('data', (c) => { stderr += String(c); });
     proc.once('error', (e) => {
-      finish({ stdout, stderr: String((e as Error).message || 'spawn error'), code: -1, timedOut });
+      finish({ stdout, stderr: spawnErrorMessage(e), code: -1, timedOut });
     });
     proc.once('exit', (code) => {
       finish({ stdout, stderr, code: code ?? -1, timedOut });

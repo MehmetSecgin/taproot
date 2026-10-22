@@ -235,7 +235,7 @@ function shortName(fq: string): string {
   return i >= 0 ? fq.slice(i + 1) : fq;
 }
 
-function levenshtein(a: string, b: string): number {
+export function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   if (!m) return n;

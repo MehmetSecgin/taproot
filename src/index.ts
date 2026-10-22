@@ -36,7 +36,7 @@ const program = new Command();
 
 program
   .name('taproot')
-  .description('Universal query orchestration CLI with plugin runtime (DB-first v1)')
+  .description('Query MySQL/TiDB, Redis and gRPC datasources through one CLI. Every command prints one line of JSON.')
   .option('-V, --version', 'Print the version')
   .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
   .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')

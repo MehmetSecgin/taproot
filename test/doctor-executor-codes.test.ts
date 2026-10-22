@@ -52,7 +52,7 @@ describe('doctor executor codes', () => {
     expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
   });
 
-  it('returns executor_connectivity for teleport-mysql proxy bootstrap failures', () => {
+  it('returns executor_missing_tool when tsh is not on PATH', () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-executor-teleport-'));
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
@@ -86,10 +86,10 @@ describe('doctor executor codes', () => {
     expect(seed.status).toBe(0);
 
     const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
-    expect(out.status).toBe(3);
+    expect(out.status).toBe(7);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
-      'executor_connectivity',
+      'executor_missing_tool',
     );
   });
 

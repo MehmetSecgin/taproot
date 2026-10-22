@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyError } from '../src/core/app.js';
-import { classifyExecutorDoctorCode } from '../src/core/error-classification.js';
+import { classifyExecutorDoctorCode, spawnErrorMessage } from '../src/core/error-classification.js';
 import { EXIT_CODES, exitCodeForClass } from '../src/core/exit-codes.js';
 
 describe('error classification', () => {
@@ -57,5 +57,14 @@ describe('error classification', () => {
     expect(classifyExecutorDoctorCode('missing target/dbUser/database in datasource+credentials')).toBe(
       'executor_configuration_missing',
     );
+  });
+
+  it('maps a missing binary to MISSING_TOOL with the not-ready exit code', () => {
+    const message = spawnErrorMessage(new Error('spawn tsh ENOENT'));
+    expect(message).toBe('MISSING_TOOL: tsh is not installed or not on PATH; install it, then retry.');
+    expect(classifyError(message)).toBe('MISSING_TOOL');
+    expect(classifyError('/bin/sh: kubectl: command not found')).toBe('MISSING_TOOL');
+    expect(exitCodeForClass('MISSING_TOOL')).toBe(EXIT_CODES.NOT_READY);
+    expect(classifyExecutorDoctorCode(message)).toBe('executor_missing_tool');
   });
 });

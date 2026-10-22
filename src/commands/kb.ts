@@ -14,9 +14,9 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
   kb.command('resolve')
     .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')
     .option('--datasource <name>', 'take env, namespace and service from this datasource profile')
-    .option('--service <service>')
-    .option('--env <env>')
-    .option('--namespace <namespace>')
+    .option('--service <service>', 'service name')
+    .option('--env <env>', 'environment (e.g. qa, stg)')
+    .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .action((opts) => {
     const ctx = getCtx();
     const profile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
@@ -46,8 +46,9 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
   });
 
   kb.command('tables')
-    .requiredOption('--service <service>')
-    .option('--env <env>')
+    .description('Tables the KB records for a service')
+    .requiredOption('--service <service>', 'service name')
+    .option('--env <env>', 'environment; omit for every environment')
     .option('--text <text>', 'substring filter on table names (alias: --match)')
     .option('--match <text>', 'substring filter on table names (alias of --text)')
     .option('--list', 'render flat list of matching table names instead of per-database counts', false)
@@ -100,6 +101,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     });
 
   kb.command('list-services')
+    .description('List the services the KB knows')
     .action(() => {
       const ctx = getCtx();
       printEnvelope(true, ctx.kbStore.listServices());

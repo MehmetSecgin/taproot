@@ -1,10 +1,10 @@
-# Output: JSON envelope, pluck, benchmarking
+# Output: JSON envelope, pluck, timing
 
 ## Envelope
 - Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version`. stderr stays empty unless `--verbose` is set.
 - Stable envelope shape: `{ ok, data, meta, error }`. `meta.requestId` on daemon-routed commands, `meta.sessionId` where applicable.
 - The JSON envelope is compacted across all surfaces (rows as positional arrays, schema-context indexes stripped of defaults, empty arrays omitted).
-- Frozen envelope shape: `references/json-envelope-contract.md` in the project repo.
+- The envelope shape is frozen since 1.0. Parse it with the paths on this page; do not probe for `rows` or `data` with fallbacks.
 
 ## Rows
 `data.rows` is an array of arrays paired with `data.columns`, confirmed by the `data.rowsForm: "array"` marker. Index by column name: `data.rows[i][data.columns.indexOf("id")]`. The shape is identical for daemon-routed and direct queries. Pass `--rows-object` only when a downstream consumer needs the legacy object form keyed by column name.

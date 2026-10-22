@@ -36,9 +36,10 @@ const ERROR_CLASSES = {
   OVERLOADED: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /overloaded|queue limit/ },
   ACCESS_DENIED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /access denied|permission denied/ },
   UNKNOWN_DATABASE: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /unknown database|does not exist/ },
+  MISSING_TOOL: { exitCode: EXIT_CODES.NOT_READY, match: /missing_tool|spawn \S+ enoent|command not found/ },
   CONNECTIVITY: {
     exitCode: EXIT_CODES.CONNECTIVITY,
-    match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|spawn tsh enoent|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
+    match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
   },
   UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
   AUTH_EXPIRED: { exitCode: EXIT_CODES.AUTH, match: /auth|login|expired|unauthorized/ },
@@ -86,6 +87,12 @@ export const overloaded = makeThrower('OVERLOADED');
 export const accessDenied = makeThrower('ACCESS_DENIED');
 export const connectivity = makeThrower('CONNECTIVITY');
 
+export function spawnErrorMessage(error: unknown): string {
+  const message = str((error as Error)?.message || error);
+  const bin = message.match(/spawn (\S+) ENOENT/)?.[1];
+  return bin ? `MISSING_TOOL: ${bin} is not installed or not on PATH; install it, then retry.` : message;
+}
+
 export function classifyExecutorDoctorCode(message: string): DoctorCheckCode | undefined {
   const normalized = str(message).trim();
   if (!normalized) return undefined;
@@ -93,6 +100,8 @@ export function classifyExecutorDoctorCode(message: string): DoctorCheckCode | u
   switch (classifyError(normalized)) {
     case 'CONNECTIVITY':
       return 'executor_connectivity';
+    case 'MISSING_TOOL':
+      return 'executor_missing_tool';
     case 'ACCESS_DENIED':
       return 'executor_access_denied';
     case 'AUTH_EXPIRED':

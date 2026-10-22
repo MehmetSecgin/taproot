@@ -103,8 +103,8 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .command('list')
     .description('Services + methods only (no message expansion). --service accepts a partial name; optional [pattern] filters methods by substring.')
     .argument('[pattern]', 'substring matched against service/method/request/response names')
-    .option('--datasource <name>')
-    .option('--proto-root <dir>')
+    .option('--datasource <name>', 'grpc datasource whose protoRoot hint to read')
+    .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .option('--service <name>', 'restrict to one service (fully-qualified, short name, or unambiguous substring)')
     .action(async (pattern, opts) => {
       const ctx = getCtx();
@@ -136,8 +136,8 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .command('find')
     .description('Search every service/method in the proto root by substring (matches service, method, request, and response names). Discovery shortcut when you do not know the exact name.')
     .argument('<pattern>', 'substring to search for, case-insensitive')
-    .option('--datasource <name>')
-    .option('--proto-root <dir>')
+    .option('--datasource <name>', 'grpc datasource whose protoRoot hint to read')
+    .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .action(async (pattern, opts) => {
       const ctx = getCtx();
       const { root, source } = resolveProtoRoot(ctx, opts);

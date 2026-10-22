@@ -16,7 +16,6 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 | SQL schema catalog, partitions, relations | `references/sql.md` |
 | JSON envelope, `--pluck`, rows shape | `references/output.md` |
 | Symptom-to-command map | `references/troubleshooting.md` |
-| Command patterns and decision points | `references/workflows.md` |
 
 ## Hard Rules
 - **Never guess column or table names.** If the user, the code, or the migration files do not name them, look them up with the question-to-command table in `references/sql.md` (`SHOW TABLES`, `SHOW CREATE TABLE <t> --pluck meta.schemaContext.tables.<t>`, `information_schema.columns ... LIKE`). There is no separate schema step: the catalog caches itself in the background on the first query. A response without `meta.schemaContext.catalog` means it is not cached yet, so the partition guard did not check that query: keep the partition column in `WHERE` yourself.
@@ -32,8 +31,8 @@ TapRoot is the canonical path for DB, cache, and RPC access. Read the reference 
 - Environment safety and service aliases come from `~/.taproot/config/deterministic-config.json`, not hardcoded env names. Use the canonical service name when known; aliases resolve transparently but should not be stored.
 
 ## Everywhere invariants
-- Envelope: `{ ok, data, meta, error }`.
-- `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form.
+- Envelope: `{ ok, data, meta, error }`, frozen since 1.0. Do not guess at other shapes or write fallbacks for `rows`/`data`.
+- `data.rows` is positional, paired with `data.columns` and marked `data.rowsForm: "array"`. Index via `data.columns.indexOf("<col>")`. `--rows-object` only for a consumer that needs the legacy form. To read a result as lines, print the columns then one row per line: `taproot query ... | jq -c '.data.columns, .data.rows[]'`.
 - Every command prints exactly one line of compact JSON on stdout, errors and `--help` included. stderr stays empty unless `--verbose`.
 - `--pluck <dot.path>` projects a subtree in-process on any command; prefer it over piping to jq. For rows, `--pluck data.rows`. On failure it prints the full error envelope instead and exits non-zero, so always gate on exit code.
 - The query text goes in `--sql "<native>"` or its synonym `--query "<native>"` (pass one, not both), never as a positional argument. `--query` reads better for a Redis command or a gRPC `Service/Method`. Example: `taproot query --datasource <name> --sql "<sql>"`
@@ -59,6 +58,7 @@ One recovery action each. Do not loop. If it does not resolve, return the error 
 - `UNKNOWN_TARGET`: verify the datasource name, then rerun resolution.
 - `MISCONFIGURED_DATASOURCE`: repair with `taproot init datasource --env <env> --service <service>`.
 - `DETERMINISTIC_REQUIRED` / `DISCOVERY_UNAVAILABLE`: populate deterministic routing via datasource profiles or the KB. `--allow-discovery` is a last resort and needs explicit authorization.
+- `MISSING_TOOL`: a binary TapRoot runs (`tsh`, `redis-cli`, `kubectl`) is not installed or not on PATH. Tell the user to install it; do not install it yourself.
 - `OVERLOADED`: daemon queue full. Wait and retry once, or set `TAPROOT_FORCE_DIRECT=1`.
 
 ## Readiness in one line

@@ -70,7 +70,23 @@ describe('describeResolutionFailure', () => {
     // act
     const message = describeResolutionFailure(profiles, { rawDs: 'qa-ordres' });
     // assert
-    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders, stg-orders, prod-orders? Use --datasource or --env+--service; list profiles with taproot datasource list.");
+    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders? Use --datasource or --env+--service; list profiles with taproot datasource list.");
+  });
+
+  it('suggests nothing for a name unlike every profile', () => {
+    const message = describeResolutionFailure(profiles, { rawDs: 'nope' });
+    expect(message).not.toContain('Did you mean');
+  });
+
+  it('suggests profiles that contain a partial name, closest env first', () => {
+    const message = describeResolutionFailure([profile('prod-billing', 'prod', 'billing'), ...profiles], { rawDs: 'billin' });
+    expect(message).toContain('Did you mean qa-billing, prod-billing?');
+  });
+
+  it('lists prod profiles after non-prod ones unless the name asks for prod', () => {
+    const names = [profile('prod-billing', 'prod', 'billing'), profile('stg-billing', 'stg', 'billing')];
+    expect(describeResolutionFailure(names, { rawDs: 'billin' })).toContain('Did you mean stg-billing, prod-billing?');
+    expect(describeResolutionFailure(names, { rawDs: 'prod-billng' })).toContain('Did you mean prod-billing?');
   });
 
   it('points at the list command without suggestions when no name is asked', () => {

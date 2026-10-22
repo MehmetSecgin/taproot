@@ -2,7 +2,7 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { registerCleanup } from '../../core/cleanup.js';
 import { leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
-import { classifyExecutorDoctorCode, connectivity } from '../../core/error-classification.js';
+import { classifyExecutorDoctorCode, connectivity, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
@@ -199,7 +199,7 @@ async function startProxy(key: string, sessionId: string, target: string, user: 
     // ignore
   });
   proc.once('error', (error) => {
-    spawnError = str((error as Error)?.message || error);
+    spawnError = spawnErrorMessage(error);
   });
   proc.once('exit', (code, signal) => {
     exitState.value = { code, signal };
@@ -217,7 +217,7 @@ async function startProxy(key: string, sessionId: string, target: string, user: 
   };
 
   const abortReason = (): string => {
-    if (spawnError) return `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`;
+    if (spawnError) return spawnError.startsWith('MISSING_TOOL:') ? spawnError : `CONNECTIVITY: teleport proxy path unavailable; ${spawnError}`;
     const exit = exitState.value;
     if (exit) {
       const detail = stderr.trim() || `tsh proxy db exited code=${exit.code} signal=${exit.signal ?? 'none'}`;
@@ -231,6 +231,7 @@ async function startProxy(key: string, sessionId: string, target: string, user: 
     return runtime;
   } catch (error) {
     await stopProxy(runtime);
+    if (spawnError.startsWith('MISSING_TOOL:')) throw new Error(spawnError);
     if (spawnError) throw connectivity(`teleport proxy path unavailable; ${spawnError}`);
     const exit = exitState.value;
     if (exit) {
@@ -350,7 +351,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         await release();
       }
     } catch (proxyError) {
-      if (proxyReady || str((proxyError as Error).message).startsWith('QUERY_TIMEOUT:')) {
+      if (proxyReady || /^(QUERY_TIMEOUT|MISSING_TOOL):/.test(str((proxyError as Error).message))) {
         throw proxyError;
       }
       throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);

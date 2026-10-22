@@ -46,11 +46,11 @@ function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
 export function registerDoctor(program: Command, getCtx: () => AppContext): void {
   program
     .command('doctor')
-    .description('Preflight checks against resolved datasource/plugin')
-    .option('--datasource <name>')
-    .option('--env <env>')
-    .option('--namespace <namespace>')
-    .option('--service <service>')
+    .description('Check one datasource: connectors, credentials and connection. Not needed before a routine query.')
+    .option('--datasource <name>', 'datasource profile name; find one with taproot datasource list <pattern>')
+    .option('--env <env>', 'environment (e.g. qa, stg); pair with --service when no --datasource is given')
+    .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
+    .option('--service <service>', 'service name; pair with --env')
     .option('--connect', 'run connector connect steps during doctor', false)
     .action(async (opts) => {
       const ctx = getCtx();

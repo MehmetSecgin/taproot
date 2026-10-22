@@ -31,9 +31,9 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
 
   init.command('datasource')
     .description('Create a datasource profile from KB-backed connection metadata')
-    .requiredOption('--env <env>')
-    .option('--namespace <namespace>')
-    .requiredOption('--service <service>')
+    .requiredOption('--env <env>', 'environment (e.g. qa, stg)')
+    .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
+    .requiredOption('--service <service>', 'service name')
     .action(async (opts) => {
       const ctx = getCtx();
       ctx.kbStore.requirePresent();

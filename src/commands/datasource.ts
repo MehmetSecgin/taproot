@@ -83,6 +83,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     });
 
   ds.command('show')
+    .description('Print one datasource profile')
     .argument('<name>')
     .action((name: string) => {
     const ctx = getCtx();
@@ -91,7 +92,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     printEnvelope(true, item);
   });
 
-  ds.command('remove').argument('<name>').action((name: string) => {
+  ds.command('remove').description('Delete a datasource profile').argument('<name>').action((name: string) => {
     const ctx = getCtx();
     const ok = ctx.datasourceStore.remove(name);
     if (!ok) throw new Error(`Datasource not found: ${name}`);
@@ -99,21 +100,22 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   });
 
   ds.command('add')
-    .requiredOption('--name <name>')
-    .requiredOption('--kind <kind>')
+    .description('Save a datasource profile; re-running with the same --name replaces it')
+    .requiredOption('--name <name>', 'profile name, by convention <env>-<service>[-<namespace>]')
+    .requiredOption('--kind <kind>', 'mysql, teleport-mysql, redis or grpc')
     .option('--credential-ref <ref>', 'defaults to --env')
-    .option('--env <env>')
-    .option('--namespace <namespace>')
-    .option('--service <service>')
-    .option('--host <host>')
-    .option('--port <port>')
-    .option('--database <db>')
-    .option('--target <target>')
+    .option('--env <env>', 'environment (e.g. qa, stg)')
+    .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
+    .option('--service <service>', 'service name')
+    .option('--host <host>', 'hostname')
+    .option('--port <port>', 'port')
+    .option('--database <db>', 'database name (redis: database number)')
+    .option('--target <target>', 'Teleport database name (teleport-mysql)')
     .option('--ssl', 'connect over TLS (grpc: use TLS instead of plaintext h2c)', false)
     .option('--connector <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--connector-ref <name=ref>', 'repeatable connector credential refs', (v, p: string[]) => (p || []).concat(v), [])
     .option('--hint <key=value>', 'repeatable resolverHints key/value (e.g. protoRoot=/path, protoMessage=OrderProto)', (v, p: string[]) => (p || []).concat(v), [])
-    .option('--teleport-ref <ref>')
+    .option('--teleport-ref <ref>', 'shorthand for --connector-ref teleport=<ref>')
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
     .option('--confidence <n>', 'confidence 0..1', '0.8')
@@ -191,9 +193,10 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     });
 
   ds.command('resolve')
-    .requiredOption('--env <env>')
-    .option('--namespace <namespace>')
-    .requiredOption('--service <service>')
+    .description('Find the datasource profile for an env and service')
+    .requiredOption('--env <env>', 'environment (e.g. qa, stg)')
+    .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
+    .requiredOption('--service <service>', 'service name')
     .action(async (opts) => {
       const ctx = getCtx();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());

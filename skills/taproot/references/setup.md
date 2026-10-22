@@ -64,8 +64,8 @@ taproot init
 taproot init datasource --env qa --service orders
 taproot creds set --ref qa:orders --user reader --password <password>
 taproot doctor --datasource qa-orders --connect
-taproot query --datasource qa-orders --sql "SELECT 1 AS ok"
-# data.rows is positional: data.rows[i][data.columns.indexOf("ok")] === 1
+taproot query --datasource qa-orders --sql "SHOW TABLES"
+# data.rows is positional: data.rows[i][0] is a table name
 ```
 
 ## Smoke test against an existing Teleport datasource

@@ -1,7 +1,7 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
 import { saveKbBootstrapCandidate } from './bootstrap.js';
-import { suggestNames } from './grpc-introspect.js';
+import { levenshtein, suggestNames } from './grpc-introspect.js';
 import { discoverKubernetesTargets } from './discovery.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
@@ -27,6 +27,16 @@ function splitDatasourceName(rawDs: string, services: string[]): { service: stri
   return undefined;
 }
 
+function closeDatasourceNames(rawDs: string, names: string[]): string[] {
+  const q = rawDs.toLowerCase();
+  const maxDistance = Math.max(2, Math.floor(q.length / 3));
+  const demoted = (n: string) => !q.startsWith('prod') && n.toLowerCase().startsWith('prod');
+  return suggestNames(rawDs, names, names.length)
+    .filter((n) => n.toLowerCase().includes(q) || levenshtein(q, n.toLowerCase()) <= maxDistance)
+    .sort((a, b) => Number(demoted(a)) - Number(demoted(b)))
+    .slice(0, 3);
+}
+
 export function describeResolutionFailure(profiles: DatasourceProfile[], ask: ResolutionAsk): string {
   const rawDs = str(ask.rawDs).trim();
   const known = [...new Set(profiles.map((p) => str(p.service).trim()).filter(Boolean))];
@@ -38,7 +48,7 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   const head = `Datasource resolution failed: no profile for ${asked}.`;
   const matches = service ? profiles.filter((p) => str(p.service).trim() === service) : [];
   if (!matches.length) {
-    const close = rawDs ? suggestNames(rawDs, profiles.map((p) => p.name), 3) : [];
+    const close = rawDs ? closeDatasourceNames(rawDs, profiles.map((p) => p.name)) : [];
     const hint = close.length ? ` Did you mean ${close.join(', ')}?` : '';
     return `${head}${hint} Use --datasource or --env+--service; list profiles with taproot datasource list.`;
   }

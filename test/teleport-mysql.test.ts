@@ -58,7 +58,7 @@ function runQuery(stateRoot: string, pathEnv: string) {
 }
 
 describe('teleport mysql execution', () => {
-  it('fails cleanly without tsh db exec fallback when proxy path is unavailable', () => {
+  it('fails cleanly without tsh db exec fallback when tsh is missing', () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-'));
     const configDir = path.join(stateRoot, 'config');
     fs.mkdirSync(configDir, { recursive: true });
@@ -96,8 +96,8 @@ describe('teleport mysql execution', () => {
         PATH: '',
       },
     );
-    expect(out.status).toBe(3);
-    expect(out.stdout).toContain('teleport proxy path unavailable');
+    expect(out.status).toBe(7);
+    expect(out.stdout).toContain('MISSING_TOOL: tsh is not installed');
     expect(out.stdout).not.toContain('tsh db exec');
     expect(out.stdout).not.toContain('fallback');
   });
@@ -130,7 +130,7 @@ describe('teleport mysql execution', () => {
       ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok'],
       { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: '' },
     );
-    expect(out.stdout).toContain('teleport proxy path unavailable');
+    expect(out.stdout).toContain('MISSING_TOOL: tsh is not installed');
     expect(out.stdout).not.toMatch(/missing .*dbUser/);
   });
 
