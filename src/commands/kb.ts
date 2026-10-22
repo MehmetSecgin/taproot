@@ -67,20 +67,6 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       printJson(payload);
     });
 
-  kb.command('related')
-    .description('Show curated cross-service and intra-service relations touching a service')
-    .requiredOption('--service <service>')
-    .option('--cross-service', 'only relations that cross a service boundary', false)
-    .action((opts) => {
-      const ctx = getCtx();
-      const s = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases()).toLowerCase();
-      let rows = ctx.kbStore
-        .typedRelations()
-        .filter((r) => r.from.service.toLowerCase() === s || r.to.service.toLowerCase() === s);
-      if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
-      printJson(rows);
-    });
-
   const relations = kb.command('relations').description('Curated cross-service relation operations');
 
   relations.command('list')

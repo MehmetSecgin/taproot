@@ -201,9 +201,9 @@ describe('kb resolution', () => {
     expect(parsed.map((r) => r.table).sort()).toEqual(['order_items', 'orders']);
   });
 
-  it('kb related shows relationships', () => {
+  it('kb relations list shows relationships', () => {
     const { env } = setupKbState();
-    const out = runCli(['kb', 'related', '--service', 'orders'], env);
+    const out = runCli(['kb', 'relations', 'list'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout)[0]).toMatchObject({
       from: { service: 'orders', table: 'orders' },

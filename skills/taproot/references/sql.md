@@ -25,7 +25,7 @@ How the catalog works: the first query against a SQL datasource (mysql, teleport
 
 ## Cross-service relations
 Services share entity keys (a `*_id` owned by one service, referenced by others). TapRoot holds them as curated edges in KB `relations.json`. They are not added to query output; read them on demand.
-- **View per service:** `taproot kb related --service <svc>` lists curated edges touching a service; add `--cross-service` for boundary-crossing ones only. Each row carries `from`/`to` as `service.table.column`, plus `relationship`, `cross`, and `notes`. `taproot kb relations list [--cross-service]` dumps the whole set.
+- **View:** `taproot kb relations list` lists every curated edge; add `--cross-service` for boundary-crossing ones only. Each row carries `from`/`to` as `service.table.column`, plus `relationship`, `cross`, and `notes`.
 - **Bulk import:** `taproot kb relations import --file <path.json>` merges a JSON array of `{id, from:{service,table,column}, to:{...}, relationship, notes}` edges into `relations.json`, deduped by `id`. The seed file lives in your KB directory, not this repo.
 - Curated relations are static. Fix a stale edge by editing `relations.json` or correcting the seed and re-importing.
 

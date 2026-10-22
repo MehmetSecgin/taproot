@@ -351,7 +351,7 @@ If you do not have a KB, use `taproot datasource add ...` directly (see [Getting
 - `taproot doctor --datasource <name>` or `--env --service` (`--connect` to run connector login/connect actions)
 - `taproot query --datasource <name> --sql <sql> [--param k=v] [--allow-discovery]`
 - `taproot datasource <list|show <name>|add|remove <name>|resolve|import>`
-- `taproot kb <resolve|tables|related|list-services|relations list|relations import>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
+- `taproot kb <resolve|tables|list-services|relations list|relations import>`; `kb resolve` takes `--datasource <name>` or `--env <env> --service <service>`
 - `taproot creds <set|show|list|unset>`
 - `taproot daemon <status|stop>`: the first query starts the daemon, and it exits when idle
 - `taproot grpc describe [--datasource <name> | --proto-root <dir>] [--service <name>] [--method <name>] [--skeleton] [--max-depth <n>]` — `--service`/`--method` accept partial names
