@@ -5,7 +5,47 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Releases before 0.20.0 are recorded in the git history only.
+Releases before 0.20.0, and 0.25.0 to 0.47.0, are recorded in the git history only. The 1.0.0
+entry collects every breaking change released from 0.32.0 to 0.47.0.
+
+## [1.0.0]
+
+### Breaking changes since 0.31.0
+
+- 0.32.0 (#69): `--sql` is the only query text flag. `--query`, `--intent` and `--timeout-ms` are
+  removed; use `--sql` and `--timeout`, also on `bench`.
+- 0.36.0 (#73): `datasource show` and `datasource remove` take the name as a positional argument
+  instead of `--name`. `kb resolve-connection`, `kb resolve-credentials` and
+  `kb resolve-database-name` are replaced by `kb resolve`, which also accepts `--datasource <name>`.
+- 0.36.0 (#76): `--memory-root`, `OBSIDIAN_MEMORY_ROOT` and the `~/memory-root` fallback are removed.
+  Use `taproot init --kb-dir <dir>` or `TAPROOT_KB_DIR`.
+- 0.41.0 (#83): every command prints the JSON envelope. `--json`, `--no-color`, `--no-animations`,
+  `--datetime-format`, `query --full`, `doctor`/`connector` `--all` and `--verbose-detail`, and
+  `config diff --max-lines` are removed, as is the interactive password prompt.
+- 0.41.0 (#84): output is one line of compact JSON, errors and `--help` included. `--jsonl`,
+  `--skill-version` and the `completion` command are removed. A failure with `--pluck` prints the
+  full error envelope on stdout. `--verbose` diagnostics are JSON lines on stderr.
+- 0.42.0 (#85): `taproot learn`, `taproot run`, `kb relations validate`, `cache prune`,
+  `query --reason` and `query --allow-schema-introspection` are removed, along with `meta.runId`,
+  `meta.queryMemory` and relations injection. The schema catalog and the partition guard stay.
+- 0.43.0 (#86): `error.details.nextAction`, `nextActionDetails`, `nextCommand`, `phases.catalogMs`,
+  `init --kind` and the `self-check --agent` `missing` field are removed. Read `error.code`,
+  `error.message`, `readiness` and the failing checks' `code` and `detail` instead.
+- 0.44.0 (#88): the CLI keeps eight commands: `query`, `datasource`, `creds`, `doctor`, `init`,
+  `kb`, `grpc` and `daemon`. `bench`, `discover`, `session`, `sanitize`, `connector`, `cache`,
+  `config`, `self-check`, `daemon start`, `daemon restart`, `datasource export` and
+  `creds migrate-to-fallback` are removed; the first query starts the daemon, `init` reports
+  readiness and `doctor --connect` checks connectors. The `postgres` kind, the `openvpn` connector
+  and `datasource add --openvpn-ref` are removed.
+- 0.45.0 (#89): the global `--profile` option and the `defaults.profile` config field are removed.
+- 0.46.0 (#90): `kb related` is removed; use `kb relations list [--cross-service]`.
+- 0.47.0 (#91): `init`, `doctor`, `creds` and `kb` wrap success output in `{ok,data}` like every
+  other command, so their `--pluck` paths gain a `data.` prefix.
+
+### Changed
+
+- The release workflow bumps the major version when a commit since the last tag carries `!` in its
+  type or a `BREAKING CHANGE:` footer, and the minor version otherwise.
 
 ## [0.24.0]
 
