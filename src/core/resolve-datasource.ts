@@ -46,6 +46,10 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   const namespace = str(ask.namespace).trim();
   const asked = rawDs ? `datasource '${rawDs}'` : `env=${env || '?'} service=${service || '?'}`;
   const head = `Datasource resolution failed: no profile for ${asked}.`;
+  const firstToken = rawDs.split(/\s+/)[0];
+  if (firstToken !== rawDs && profiles.some((p) => p.name === firstToken)) {
+    return `${head} Datasource value contains spaces; did you mean '${firstToken}'?`;
+  }
   const matches = service ? profiles.filter((p) => str(p.service).trim() === service) : [];
   if (!matches.length) {
     const close = rawDs ? closeDatasourceNames(rawDs, profiles.map((p) => p.name)) : [];

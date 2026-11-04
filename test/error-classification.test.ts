@@ -26,6 +26,12 @@ describe('error classification', () => {
     expect(exitCodeForClass('SQL_SYNTAX')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
+  it('maps an ambiguous column reference to AMBIGUOUS_COLUMN', () => {
+    expect(classifyError("Column 'created_at' in field list is ambiguous")).toBe('AMBIGUOUS_COLUMN');
+    expect(classifyError('column reference "created_at" is ambiguous')).toBe('AMBIGUOUS_COLUMN');
+    expect(exitCodeForClass('AMBIGUOUS_COLUMN')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
   it('maps several allowed Teleport db users to AMBIGUOUS_DB_USER', () => {
     expect(classifyError("teleport-mysql found several allowed db users for 'db-a' in 'tsh db ls': reader, writer.")).toBe('AMBIGUOUS_DB_USER');
     expect(exitCodeForClass('AMBIGUOUS_DB_USER')).toBe(EXIT_CODES.BAD_INPUT);
@@ -34,6 +40,19 @@ describe('error classification', () => {
   it('maps unknown datasource names to UNKNOWN_DATASOURCE', () => {
     expect(classifyError("Datasource resolution failed: no profile for datasource 'qa-shop-develp'. Did you mean qa-shop-develop?")).toBe('UNKNOWN_DATASOURCE');
     expect(exitCodeForClass('UNKNOWN_DATASOURCE')).toBe(EXIT_CODES.BAD_INPUT);
+  });
+
+  it('maps a resource group quota rejection to RESOURCE_LIMIT', () => {
+    expect(classifyError('Exceeded resource group quota limitation')).toBe('RESOURCE_LIMIT');
+    expect(exitCodeForClass('RESOURCE_LIMIT')).toBe(EXIT_CODES.GENERAL_ERROR);
+  });
+
+  it('maps a runaway query kill to RESOURCE_LIMIT', () => {
+    expect(classifyError('Query execution was interrupted, identified as runaway query [ElapsedTime = 10s(5s)]')).toBe('RESOURCE_LIMIT');
+  });
+
+  it('maps a runaway watch list interruption to RESOURCE_LIMIT', () => {
+    expect(classifyError('Quarantined and interrupted because of being in runaway watch list')).toBe('RESOURCE_LIMIT');
   });
 
   it('keeps the class named by a code prefix', () => {

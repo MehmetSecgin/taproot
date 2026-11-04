@@ -73,6 +73,18 @@ describe('describeResolutionFailure', () => {
     expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders? Use --datasource or --env+--service; list profiles with taproot datasource list.");
   });
 
+  it('names the first token when extra words are glued into the datasource value', () => {
+    // act
+    const message = describeResolutionFailure(profiles, { rawDs: 'qa-orders 1234 56' });
+    // assert
+    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-orders 1234 56'. Datasource value contains spaces; did you mean 'qa-orders'?");
+  });
+
+  it('skips the spaces hint when the first token is not a profile', () => {
+    const message = describeResolutionFailure(profiles, { rawDs: 'nope 1234' });
+    expect(message).not.toContain('contains spaces');
+  });
+
   it('suggests nothing for a name unlike every profile', () => {
     const message = describeResolutionFailure(profiles, { rawDs: 'nope' });
     expect(message).not.toContain('Did you mean');

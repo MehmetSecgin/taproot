@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { enrichSqlSyntaxError, reservedAliasHint } from '../src/core/sql-hints.js';
+import { classifyError } from '../src/core/error-classification.js';
+import { enrichResourceLimitError, enrichSqlSyntaxError, reservedAliasHint } from '../src/core/sql-hints.js';
 
 describe('reservedAliasHint', () => {
   it('flags a bare reserved word used as an alias', () => {
@@ -38,5 +39,25 @@ describe('enrichSqlSyntaxError', () => {
   it('leaves syntax errors without a reserved alias untouched', () => {
     const message = 'You have an error in your SQL syntax near ")"';
     expect(enrichSqlSyntaxError(message, 'SELECT COUNT(*) FROM')).toBe(message);
+  });
+});
+
+describe('enrichResourceLimitError', () => {
+  it.each([
+    'Exceeded resource group quota limitation',
+    'Quarantined and interrupted because of being in runaway watch list',
+    'Query execution was interrupted, identified as runaway query [ElapsedTime = 10s(5s)]',
+  ])('appends a narrowing hint to "%s"', (message) => {
+    // act
+    const enriched = enrichResourceLimitError(message);
+    // assert
+    expect(enriched.startsWith(`${message} (taproot hint:`)).toBe(true);
+    expect(enriched).toContain('partition column or an indexed id range');
+    expect(enriched).toContain('add LIMIT');
+    expect(classifyError(enriched)).toBe('RESOURCE_LIMIT');
+  });
+
+  it('leaves other driver errors alone', () => {
+    expect(enrichResourceLimitError('Access denied for user')).toBe('Access denied for user');
   });
 });

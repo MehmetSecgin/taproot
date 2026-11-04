@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command, type Help } from 'commander';
 import { buildContext } from './core/app.js';
-import { printEnvelope, printJson, setPluck } from './core/output.js';
+import { printEnvelope, printJson, setLines, setPluck } from './core/output.js';
 import { registerDoctor } from './commands/doctor.js';
 import { registerQuery } from './commands/query.js';
 import { registerDatasource } from './commands/datasource.js';
@@ -13,6 +13,7 @@ import { registerGrpc } from './commands/grpc.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { classifyError } from './core/error-classification.js';
 import { removedCliHint } from './core/removed-cli.js';
+import { unknownOptionHint } from './core/option-hints.js';
 import { TAPROOT_VERSION } from './core/version.js';
 import { str } from './core/strings.js';
 
@@ -39,6 +40,7 @@ program
   .description('Query MySQL/TiDB, Redis and gRPC datasources through one CLI. Every command prints one line of JSON.')
   .option('-V, --version', 'Print the version')
   .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
+  .option('--lines', 'Print one JSON value per line: a query prints {ok, columns, warnings}, then one line per row; a list prints {ok}, then one line per item; with --pluck, one line per array item. A failure prints the full error envelope.', false)
   .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')
   .option('--verbose', 'Diagnostics on stderr as JSON lines', false)
   .configureHelp({ formatHelp: helpJson })
@@ -52,6 +54,7 @@ program
 function applyOutputOptions(): void {
   const opts = program.opts();
   setPluck(opts.pluck ? String(opts.pluck) : undefined);
+  setLines(Boolean(opts.lines));
 }
 
 program.hook('preAction', applyOutputOptions);
@@ -82,6 +85,17 @@ function hasCredsTopologyMisuseHint(input: string): boolean {
   if (!/unknown option/.test(m)) return false;
   if (!/(--host|--port|--database|--target)/.test(m)) return false;
   return process.argv.includes('creds') && process.argv.includes('set');
+}
+
+function optionOwners(cmd: Command, path: string[] = [], owners: Record<string, string[]> = {}): Record<string, string[]> {
+  for (const option of cmd.options) if (option.long) (owners[option.long] ||= []).push(path.join(' '));
+  for (const sub of cmd.commands) optionOwners(sub, [...path, sub.name()], owners);
+  return owners;
+}
+
+function withUnknownOptionHint(message: string): string {
+  const hint = unknownOptionHint(message, optionOwners(program), process.argv.slice(2));
+  return hint ? `${message}. ${hint}` : message;
 }
 
 function emitError(error: unknown, code: string): void {
@@ -115,7 +129,7 @@ program.parseAsync(process.argv).catch((error) => {
     const raw = (error as Error)?.message || '';
     const message = hasCredsTopologyMisuseHint(raw)
       ? `${raw}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
-      : removedCliHint(raw) ?? raw;
+      : removedCliHint(raw) ?? withUnknownOptionHint(raw);
     applyOutputOptions();
     printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
     process.exit(classifyExitCode(error));

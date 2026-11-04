@@ -59,6 +59,27 @@ describe('output mode contract', () => {
     expect(JSON.parse(runCli(['query', '--bogus']).stdout).error.message).toBe("error: unknown option '--bogus'");
   });
 
+  it('names the owning subcommand for a query option placed before it', () => {
+    const out = runCli(['--timeout', '5000', 'query', '--sql', 'SELECT 1']);
+    expect(out.status).not.toBe(0);
+    expect(JSON.parse(out.stdout).error.message).toBe("error: unknown option '--timeout'. option '--timeout' belongs to 'taproot query'; put it after the subcommand: taproot query --timeout ...");
+  });
+
+  it('names the owner without placement advice for a query option after another subcommand', () => {
+    const out = runCli(['datasource', 'list', '--timeout', '5000']);
+    expect(JSON.parse(out.stdout).error.message).toBe("error: unknown option '--timeout'. '--timeout' is an option of 'taproot query'");
+  });
+
+  it('names the owner without placement advice for a query option before another subcommand', () => {
+    const out = runCli(['--timeout', '5000', 'doctor']);
+    expect(JSON.parse(out.stdout).error.message).toBe("error: unknown option '--timeout'. '--timeout' is an option of 'taproot query'");
+  });
+
+  it('says to split an option and value that arrive as one argument', () => {
+    const out = runCli(['query', '--datasource qa-orders', '--sql', 'SELECT 1']);
+    expect(JSON.parse(out.stdout).error.message).toContain("option '--datasource' and its value arrived as one argument");
+  });
+
   it('rejects --sql and --query together', () => {
     const out = JSON.parse(runCli(['query', '--datasource', 'qa-orders', '--sql', 'SELECT 1', '--query', 'SELECT 2']).stdout);
     expect(out.error.code).toBe('BAD_INPUT');

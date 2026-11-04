@@ -5,7 +5,7 @@ import { leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
-import { enrichSqlSyntaxError } from '../../core/sql-hints.js';
+import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
 import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/tsh-databases.js';
 import { DoctorStatus } from '../../types/core.js';
@@ -342,7 +342,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           (conn as any).destroy?.();
           throw queryTimeoutError(request.timeoutMs);
         }
-        const enriched = enrichSqlSyntaxError(message, request.query);
+        const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);
         if (enriched !== message) throw new Error(enriched);
         throw error;
       } finally {

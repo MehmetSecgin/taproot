@@ -66,4 +66,31 @@ describe('query failure with --pluck', () => {
     const parsed = JSON.parse(out.stdout);
     expect(parsed.ok).toBe(false);
   });
+
+  it('prints the single-line error envelope and exits non-zero under --lines', () => {
+    const stateRoot = setupStateRoot();
+    const out = runCli(
+      ['query', '--datasource', 'prod-orders', '--sql', 'SELECT 1 AS ok', '--lines'],
+      { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: '' },
+    );
+    // act / assert
+    expect(out.status).not.toBe(0);
+    const lines = out.stdout.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0]);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBeTruthy();
+  });
+});
+
+describe('datasource list with --lines', () => {
+  it('prints a header line and one line per datasource', () => {
+    const stateRoot = setupStateRoot();
+    const out = runCli(['datasource', 'list', '--lines'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
+    // act / assert
+    expect(out.status).toBe(0);
+    const lines = out.stdout.trim().split('\n').map((line) => JSON.parse(line));
+    expect(lines[0]).toEqual({ ok: true });
+    expect(lines.slice(1).map((d) => d.name)).toEqual(['prod-orders']);
+  });
 });

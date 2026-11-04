@@ -162,7 +162,7 @@ async function resolveTargetDatasource(
       const critical = criticalDatasourceKbConflicts(datasource, kb);
       if (critical.length) {
         throw misconfiguredDatasource(
-          `datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution until the profile is repaired.`,
+          `datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution. Repair the profile with taproot init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}.`,
         );
       }
       const conflicts = datasourceKbConflicts(datasource, kb);

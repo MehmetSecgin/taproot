@@ -49,7 +49,7 @@ export class QueryLimiter {
       return this.makeRelease();
     }
     if (this.queue.length >= this.maxQueued) {
-      throw overloaded(`query queue limit reached (${this.queue.length}/${this.maxQueued})`);
+      throw overloaded(`query queue limit reached (${this.queue.length}/${this.maxQueued}); wait and retry once, or set TAPROOT_FORCE_DIRECT=1`);
     }
     return await new Promise<() => void>((resolve, reject) => {
       const entry: QueueEntry = {

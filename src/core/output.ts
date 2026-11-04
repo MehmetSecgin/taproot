@@ -2,9 +2,14 @@ import type { CliOutputEnvelope } from '../types/core.js';
 import { str } from './strings.js';
 
 let pluck: string | undefined;
+let lines = false;
 
 export function setPluck(path?: string): void {
   pluck = path;
+}
+
+export function setLines(enabled: boolean): void {
+  lines = enabled;
 }
 
 function isErrorEnvelope(data: unknown): boolean {
@@ -14,7 +19,20 @@ function isErrorEnvelope(data: unknown): boolean {
 
 export function printJson(data: unknown): void {
   const value = pluck && !isErrorEnvelope(data) ? pluckPath(data, pluck) : data;
-  process.stdout.write(`${JSON.stringify(value) ?? 'null'}\n`);
+  const out = lines && !isErrorEnvelope(value) ? toLines(value) : [value];
+  process.stdout.write(out.map((line) => `${JSON.stringify(line) ?? 'null'}\n`).join(''));
+}
+
+export function toLines(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  const env = value as { ok?: unknown; data?: unknown } | null;
+  if (!env || typeof env !== 'object' || env.ok !== true) return [value];
+  if (Array.isArray(env.data)) return [{ ok: true }, ...env.data];
+  const data = env.data as { columns?: unknown; rows?: unknown; warnings?: unknown } | undefined;
+  if (!data || !Array.isArray(data.rows)) return [value];
+  const header: Record<string, unknown> = { ok: true, columns: data.columns };
+  if (Array.isArray(data.warnings) && data.warnings.length) header.warnings = data.warnings;
+  return [header, ...data.rows];
 }
 
 export function pluckPath(obj: unknown, path: string): unknown {

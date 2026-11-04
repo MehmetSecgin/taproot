@@ -267,6 +267,8 @@ Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` 
 
 Queries abort when execution runs longer than `--timeout <ms>`, counted after connectors are ready (default `15000`; configurable via `defaults.query.timeoutMs` or `TAPROOT_QUERY_TIMEOUT_MS`). On timeout the error states the effective limit and suggests narrowing the scan (e.g. adding a partition/time predicate).
 
+A TiDB resource-group rejection (quota exceeded, a query killed by a runaway rule, or a query on the runaway watch list) fails with `RESOURCE_LIMIT`. Its hint says to narrow the scan by the partition column or an indexed id range and to add `LIMIT`.
+
 ### Extracting JSON without engine-specific SQL
 
 Prefer selecting raw JSON columns and extracting client-side with `--json-extract <column>:<dotpath>` (repeatable). It parses the raw JSON cell after fetching and adds a derived `<column>.<dotpath>` column, avoiding hand-written engine JSON functions:
@@ -287,14 +289,23 @@ The partition guard (`MISSING_PARTITION_PREDICATE`, bypass with `--allow-partiti
 
 ### Output
 
-Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version` alike. `--pluck <dot.path>` is a global option that prints only that subtree of the envelope.
+Every command prints exactly one line of compact JSON on stdout: results, errors, `--help` and `--version` alike. `--pluck <dot.path>` is a global option that prints only that subtree of the envelope. `--lines` is a global option that prints one JSON value per line instead.
 
 ```bash
 taproot query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT 3" --pluck data.rows
 [[1,"open"],[2,"paid"],[3,"open"]]
 ```
 
-- On failure the command prints the full error envelope (`{"ok":false,"error":{...}}`), even with `--pluck`, and exits non-zero.
+```bash
+taproot query --datasource dev-orders --sql "SELECT id, status FROM orders LIMIT 3" --lines
+{"ok":true,"columns":["id","status"]}
+[1,"open"]
+[2,"paid"]
+[3,"open"]
+```
+
+- `--lines` prints a header (`ok`, `columns`, and `warnings` when present), then one line per row. A list prints `{"ok":true}`, then one line per item. With `--pluck`, an array prints one line per item. Any other value stays on one line.
+- On failure the command prints the full error envelope (`{"ok":false,"error":{...}}`) on one line, even with `--pluck` or `--lines`, and exits non-zero.
 - `--verbose` adds diagnostics on stderr as JSON lines (`{"verbose":"..."}`).
 
 ---

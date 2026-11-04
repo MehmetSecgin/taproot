@@ -21,6 +21,7 @@ const ERROR_CLASSES = {
   BAD_INPUT: { exitCode: EXIT_CODES.BAD_INPUT, match: /^bad_input:/ },
   MISSING_PARTITION_PREDICATE: { exitCode: EXIT_CODES.BAD_INPUT, match: /missing_partition_predicate/ },
   QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout/ },
+  RESOURCE_LIMIT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /exceeded resource group quota limitation|runaway watch list|identified as runaway query/ },
   MISCONFIGURED_DATASOURCE: {
     exitCode: EXIT_CODES.BAD_INPUT,
     match: /misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/,
@@ -31,6 +32,7 @@ const ERROR_CLASSES = {
   UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },
   AMBIGUOUS_DB_USER: { exitCode: EXIT_CODES.BAD_INPUT, match: /found several allowed db users/ },
   UNKNOWN_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /unknown column|column \S+ does not exist/ },
+  AMBIGUOUS_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /column \S+ in .+ is ambiguous|column reference \S+ is ambiguous/ },
   UNKNOWN_TABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/ },
   SQL_SYNTAX: { exitCode: EXIT_CODES.BAD_INPUT, match: /error in your sql syntax|syntax error at or near|syntax error at end of input/ },
   OVERLOADED: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /overloaded|queue limit/ },

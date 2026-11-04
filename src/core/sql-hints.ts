@@ -1,3 +1,4 @@
+import { classifyError } from './error-classification.js';
 import { str } from './strings.js';
 
 const RESERVED_ALIAS_WORDS = new Set([
@@ -50,4 +51,13 @@ export function enrichSqlSyntaxError(message: string, sql: string): string {
   const hint = reservedAliasHint(sql);
   if (!hint) return text;
   return `${text} (taproot hint: ${hint})`;
+}
+
+export function enrichResourceLimitError(message: string): string {
+  const text = str(message);
+  if (classifyError(text) !== 'RESOURCE_LIMIT') return text;
+  return (
+    `${text} (taproot hint: the database resource group rejected this scan; ` +
+    `narrow it with a predicate on the partition column or an indexed id range, and add LIMIT, before retrying)`
+  );
 }
