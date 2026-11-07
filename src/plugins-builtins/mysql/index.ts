@@ -14,7 +14,6 @@ function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string
     ...baseConnConfig(ds, creds, RUNTIME_CONSTANTS.defaultPorts.mysql),
     ssl: ds.connection.ssl ? {} : undefined,
     connectTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
-    timezone: 'Z',
   };
 }
 

@@ -6,12 +6,16 @@ export const DEFAULT_SESSION_TIME_ZONE = '+00:00';
 const OFFSET_PATTERN = /^[+-](?:[01]\d|2[0-3]):[0-5]\d$/;
 const NAMED_ZONE_PATTERN = /^[A-Za-z][A-Za-z0-9_+\-/]*$/;
 
+export function isUtcOffset(timeZone: string): boolean {
+  return OFFSET_PATTERN.test(timeZone);
+}
+
 export function normalizeTimeZone(value?: string): string {
   const raw = str(value).trim();
   if (!raw) return DEFAULT_SESSION_TIME_ZONE;
   const lower = raw.toLowerCase();
   if (lower === 'utc' || lower === 'z' || lower === 'gmt') return DEFAULT_SESSION_TIME_ZONE;
-  if (OFFSET_PATTERN.test(raw)) return raw;
+  if (isUtcOffset(raw)) return raw;
   const signedHour = raw.match(/^([+-])(\d{1,2})$/);
   if (signedHour) {
     const sign = signedHour[1];

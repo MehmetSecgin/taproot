@@ -261,7 +261,7 @@ taproot query --datasource prod-orders \
   --sql "SELECT id, created_at FROM orders WHERE created_at BETWEEN '2026-06-24 17:00:00' AND '2026-06-24 17:05:00'"
 ```
 
-Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` or an IANA name like `Europe/Berlin`), or per-datasource via `resolverHints.timeZone`, or globally via `defaults.query.timeZone` in runtime config. Resolution order: `--tz` > datasource hint > config default > UTC.
+Override the session zone with `--tz` (accepts an offset like `+05:30`/`-08:00` or an IANA name like `Europe/Berlin`), or per-datasource via `resolverHints.timeZone`, or globally via `defaults.query.timeZone` in runtime config. Resolution order: `--tz` > datasource hint > config default > UTC. With an offset, temporal columns still print as UTC ISO-8601 instants. With an IANA name they print as the server's wall-clock text (`2026-06-24 19:00:00`), because only a fixed offset converts to an instant.
 
 ### Query timeout
 

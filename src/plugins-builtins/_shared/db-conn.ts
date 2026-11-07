@@ -1,4 +1,5 @@
 import type { Connection, ConnectionOptions, Pool } from 'mysql2/promise';
+import { isUtcOffset } from '../../core/session-timezone.js';
 import type { QueryRequest } from '../../types/core.js';
 
 export interface BaseConnConfig {
@@ -47,10 +48,15 @@ function poolFor(mysql: Awaited<ReturnType<typeof loadMysql>>, config: Connectio
   return pool;
 }
 
+function readTemporalsIn(timeZone: string): ConnectionOptions {
+  return isUtcOffset(timeZone) ? { timezone: timeZone } : { dateStrings: true };
+}
+
 export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, pooled: boolean) {
   const mysql = await loadMysql();
-  const poolConn = pooled ? await poolFor(mysql, config).getConnection() : undefined;
-  const conn = poolConn ?? (await mysql.createConnection(config));
+  const sessionConfig = { ...config, ...readTemporalsIn(timeZone) };
+  const poolConn = pooled ? await poolFor(mysql, sessionConfig).getConnection() : undefined;
+  const conn = poolConn ?? (await mysql.createConnection(sessionConfig));
   const physical = (conn as unknown as { connection: object }).connection;
   if (connectionTimeZones.get(physical) !== timeZone) {
     try {
