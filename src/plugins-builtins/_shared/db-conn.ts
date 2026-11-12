@@ -54,7 +54,7 @@ function readTemporalsIn(timeZone: string): ConnectionOptions {
 
 export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, pooled: boolean) {
   const mysql = await loadMysql();
-  const sessionConfig = { ...config, ...readTemporalsIn(timeZone) };
+  const sessionConfig = { ...config, supportBigNumbers: true, ...readTemporalsIn(timeZone) };
   const poolConn = pooled ? await poolFor(mysql, sessionConfig).getConnection() : undefined;
   const conn = poolConn ?? (await mysql.createConnection(sessionConfig));
   const physical = (conn as unknown as { connection: object }).connection;
