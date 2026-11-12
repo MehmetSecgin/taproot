@@ -114,7 +114,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--ssl', 'connect over TLS (grpc: use TLS instead of plaintext h2c)', false)
     .option('--connector <name>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--connector-ref <name=ref>', 'repeatable connector credential refs', (v, p: string[]) => (p || []).concat(v), [])
-    .option('--hint <key=value>', 'repeatable resolverHints key/value (e.g. protoRoot=/path, protoMessage=OrderProto)', (v, p: string[]) => (p || []).concat(v), [])
+    .option('--hint <key=value>', 'repeatable resolverHints key=value: protoRoot=<dir>[,<dir>] (grpc, redis), protoMessage=<Message> (redis), probeService=<pkg.Service> and metadata.<key>=<value> (grpc), timeZone=<offset|IANA name> (mysql), dbUser=<user> (teleport-mysql)', (v, p: string[]) => (p || []).concat(v), [])
     .option('--teleport-ref <ref>', 'shorthand for --connector-ref teleport=<ref>')
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)

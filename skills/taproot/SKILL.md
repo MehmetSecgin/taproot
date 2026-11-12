@@ -8,7 +8,7 @@ description: Use whenever a task runs, names, or points at the `taproot` CLI, or
 Learn commands from `taproot --help` and `taproot <command> --help`. Every error carries a code, and most messages name the fix. This page holds only the rules the CLI cannot enforce.
 
 ## Rules
-- **Every query goes through `taproot query`.** Never run `mysql`, `psql`, `redis-cli`, `grpcurl`, `tsh db exec` or `tsh proxy db` directly, even when TapRoot fails.
+- **Every query goes through `taproot query`.** Never run `mysql`, `redis-cli`, `grpcurl`, `tsh db exec` or `tsh proxy db` directly, even when TapRoot fails.
 - **Read-only unless the user asks for a write.** `--allow-mutate`, `--allow-flush`, `--allow-partition-scan` and `--allow-discovery` each need the user's explicit go-ahead for that task. On `MISSING_PARTITION_PREDICATE`, add the partition column to `WHERE` instead.
 - **Production needs a go-ahead per task.** Never run `query` or `doctor` against a production datasource (`prod-*`) unless the user authorized that task, even read-only. Default to the non-production envs and name the datasource or `--env` explicitly.
 - **Ask before changing setup.** `datasource add`, `datasource remove`, `creds set` and any `kb` write persist for every later session. State the command, what it writes and why, and wait for a yes. Before replacing or removing a profile, save `taproot datasource show <name>` so it can be added back. Read-only commands (`query`, `datasource list`, `kb tables`, `creds show`) need no prompt.
