@@ -30,15 +30,6 @@ function scalarOk(type: string, value: unknown): boolean {
   return true;
 }
 
-function knownNamesFor(fields: PbField[]): string[] {
-  const out: string[] = [];
-  for (const f of fields) {
-    out.push(f.name);
-    if (f.jsonName && f.jsonName !== f.name) out.push(f.jsonName);
-  }
-  return out;
-}
-
 function resolveType(t: PbType | undefined): void {
   if (t && typeof t.resolve === 'function') {
     try { t.resolve(); } catch { /* ignore */ }
@@ -65,17 +56,12 @@ export function validateGrpcRequest(
     if (!isType(resolved)) return null;
     resolveType(resolved);
     const fields = resolved.fieldsArray;
-    const fieldByName = new Map<string, PbField>();
-    for (const f of fields) {
-      fieldByName.set(f.name, f);
-      if (f.jsonName && f.jsonName !== f.name) fieldByName.set(f.jsonName, f);
-    }
+    const fieldNames = fields.map((f) => f.name);
     const obj = value as Record<string, unknown>;
     for (const k of Object.keys(obj)) {
-      if (fieldByName.has(k)) continue;
+      if (fieldNames.includes(k)) continue;
       const here = path ? `${path}.${k}` : k;
-      const names = knownNamesFor(fields);
-      const suggestion = suggestNames(k, names, 1)[0];
+      const suggestion = suggestNames(k, fieldNames, 1)[0];
       const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
       return {
         field: here,
@@ -85,9 +71,7 @@ export function validateGrpcRequest(
     }
     if (depth >= MAX_DEPTH) return null;
     for (const f of fields) {
-      const value = obj[f.name] !== undefined
-        ? obj[f.name]
-        : (f.jsonName ? obj[f.jsonName] : undefined);
+      const value = obj[f.name];
       if (value === undefined || value === null) continue;
       const here = path ? `${path}.${f.name}` : f.name;
       const err = checkField(f, value, here, depth);

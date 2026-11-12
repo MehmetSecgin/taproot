@@ -10,7 +10,6 @@ import type {
 
 export interface PbField {
   name: string;
-  jsonName?: string;
   type: string;
   rule?: string;
   repeated?: boolean;
