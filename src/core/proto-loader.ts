@@ -22,7 +22,6 @@ export interface GrpcModule {
 
 export interface LoadedProtoBundle {
   files: string[];
-  includeDirs: string[];
   protobufRoot: ProtobufRoot;
 }
 
@@ -58,18 +57,26 @@ function listProtoFiles(rootDir: string): string[] {
   return files;
 }
 
-function collectAndDedupe(roots: string[]): { files: string[]; includeDirs: string[] } {
-  const all: string[] = [];
-  for (const r of roots) all.push(...listProtoFiles(r));
-  if (!all.length) throw new Error(`no .proto files found under '${roots.join(', ')}'`);
-  const seen = new Map<string, string>();
-  for (const f of all) {
-    const base = path.basename(f);
-    if (!seen.has(base)) seen.set(base, f);
+function listAllProtoFiles(roots: string[]): string[] {
+  const byImportPath = new Map<string, string>();
+  for (const root of roots.map((r) => path.resolve(r))) {
+    for (const file of listProtoFiles(root)) {
+      const importPath = path.relative(root, file);
+      if (!byImportPath.has(importPath)) byImportPath.set(importPath, file);
+    }
   }
-  const files = [...seen.values()];
-  const includeDirs = [...new Set([...roots, ...files.map((f) => path.dirname(f))])];
-  return { files, includeDirs };
+  const files = [...new Set(byImportPath.values())];
+  if (!files.length) throw new Error(`no .proto files found under '${roots.join(', ')}'`);
+  return files;
+}
+
+function protoFilesStamp(files: string[]): string {
+  return files
+    .map((file) => {
+      const stat = fs.statSync(file, { throwIfNoEntry: false });
+      return `${file}:${stat?.mtimeMs}:${stat?.size}`;
+    })
+    .join('|');
 }
 
 const IMPORT_RE = /^\s*import\s+(?:public\s+|weak\s+)?"([^"]+)"\s*;/gm;
@@ -126,83 +133,80 @@ function normalizeCacheKey(roots: string[]): string {
   return roots.map((r) => path.resolve(r)).sort().join('|');
 }
 
-const protobufCache = new Map<string, Promise<LoadedProtoBundle>>();
-const grpcCache = new Map<string, Promise<GrpcPackageBundle>>();
+async function parseProtoFiles(files: string[], roots: string[]): Promise<LoadedProtoBundle> {
+  const unresolved = findUnresolvedImports(files, roots);
+  if (unresolved.length) throw unresolvedImportsError(unresolved, roots);
+  const mod = await import('protobufjs');
+  const ns = ((mod as unknown as { default?: unknown }).default ?? mod) as { Root: new () => unknown };
+  const root = new ns.Root() as unknown as ProtobufRoot & {
+    resolvePath: (origin: string, target: string) => string;
+    load: (files: string[], opts: { keepCase: boolean }) => Promise<unknown>;
+  };
+  root.resolvePath = (origin: string, target: string): string => {
+    if (path.isAbsolute(target) && fs.existsSync(target)) return target;
+    if (origin) {
+      const rel = path.resolve(path.dirname(origin), target);
+      if (fs.existsSync(rel)) return rel;
+    }
+    for (const r of roots) {
+      const absUnder = path.resolve(r, target);
+      if (fs.existsSync(absUnder)) return absUnder;
+    }
+    const byBasename = files.find((f) => path.basename(f) === path.basename(target));
+    if (byBasename) return byBasename;
+    return target;
+  };
+  await root.load(files, { keepCase: true });
+  return { files, protobufRoot: root as unknown as ProtobufRoot };
+}
+
+async function buildGrpcPackage(base: LoadedProtoBundle): Promise<GrpcPackageBundle> {
+  const grpcMod = await import('@grpc/grpc-js');
+  const grpc = ((grpcMod as unknown as { default?: unknown }).default ?? grpcMod) as unknown as GrpcModule;
+  const loaderMod = await import('@grpc/proto-loader');
+  const protoLoader = ((loaderMod as unknown as { default?: unknown }).default ?? loaderMod) as unknown as {
+    fromJSON: (json: unknown, options: Record<string, unknown>) => unknown;
+  };
+  const protobufJson = (base.protobufRoot as unknown as { toJSON: () => unknown }).toJSON();
+  const packageDef = protoLoader.fromJSON(protobufJson, {
+    keepCase: true,
+    longs: String,
+    enums: String,
+    defaults: true,
+    oneofs: true,
+  });
+  return { ...base, grpcModule: grpc, grpcPackage: grpc.loadPackageDefinition(packageDef) };
+}
+
+const protobufCache = new Map<string, { stamp: string; bundle: Promise<LoadedProtoBundle> }>();
+const grpcCache = new WeakMap<LoadedProtoBundle, Promise<GrpcPackageBundle>>();
 
 export async function loadProtobufRoot(protoRoot: string): Promise<LoadedProtoBundle> {
   const roots = splitProtoRoots(protoRoot);
   if (!roots.length) throw new Error(`empty proto root: '${protoRoot}'`);
   const key = normalizeCacheKey(roots);
+  const files = listAllProtoFiles(roots);
+  const stamp = protoFilesStamp(files);
   const cached = protobufCache.get(key);
-  if (cached) return cached;
-  const promise = (async (): Promise<LoadedProtoBundle> => {
-    const { files, includeDirs } = collectAndDedupe(roots);
-    const unresolved = findUnresolvedImports(files, roots);
-    if (unresolved.length) throw unresolvedImportsError(unresolved, roots);
-    const mod = await import('protobufjs');
-    const ns = ((mod as unknown as { default?: unknown }).default ?? mod) as { Root: new () => unknown };
-    const root = new ns.Root() as unknown as ProtobufRoot & {
-      resolvePath: (origin: string, target: string) => string;
-      load: (files: string[], opts: { keepCase: boolean }) => Promise<unknown>;
-    };
-    root.resolvePath = (origin: string, target: string): string => {
-      if (path.isAbsolute(target) && fs.existsSync(target)) return target;
-      if (origin) {
-        const rel = path.resolve(path.dirname(origin), target);
-        if (fs.existsSync(rel)) return rel;
-      }
-      for (const r of roots) {
-        const absUnder = path.resolve(r, target);
-        if (fs.existsSync(absUnder)) return absUnder;
-      }
-      const byBasename = files.find((f) => path.basename(f) === path.basename(target));
-      if (byBasename) return byBasename;
-      return target;
-    };
-    await root.load(files, { keepCase: true });
-    return { files, includeDirs, protobufRoot: root as unknown as ProtobufRoot };
-  })();
-  protobufCache.set(key, promise);
+  if (cached?.stamp === stamp) return cached.bundle;
+  const entry = { stamp, bundle: parseProtoFiles(files, roots) };
+  protobufCache.set(key, entry);
   try {
-    return await promise;
+    return await entry.bundle;
   } catch (err) {
-    protobufCache.delete(key);
+    if (protobufCache.get(key) === entry) protobufCache.delete(key);
     throw err;
   }
 }
 
 export async function loadGrpcPackage(protoRoot: string): Promise<GrpcPackageBundle> {
-  const roots = splitProtoRoots(protoRoot);
-  if (!roots.length) throw new Error(`empty proto root: '${protoRoot}'`);
-  const key = normalizeCacheKey(roots);
-  const cached = grpcCache.get(key);
-  if (cached) return cached;
-  const promise = (async (): Promise<GrpcPackageBundle> => {
-    const base = await loadProtobufRoot(protoRoot);
-    const grpcMod = await import('@grpc/grpc-js');
-    const grpc = ((grpcMod as unknown as { default?: unknown }).default ?? grpcMod) as unknown as GrpcModule;
-    const loaderMod = await import('@grpc/proto-loader');
-    const protoLoader = ((loaderMod as unknown as { default?: unknown }).default ?? loaderMod) as unknown as {
-      loadSync: (files: string[] | string, options: Record<string, unknown>) => unknown;
-    };
-    const packageDef = protoLoader.loadSync(base.files, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-      includeDirs: base.includeDirs,
-    });
-    const pkg = grpc.loadPackageDefinition(packageDef);
-    return { ...base, grpcModule: grpc, grpcPackage: pkg };
-  })();
-  grpcCache.set(key, promise);
-  try {
-    return await promise;
-  } catch (err) {
-    grpcCache.delete(key);
-    throw err;
+  const base = await loadProtobufRoot(protoRoot);
+  let grpcBundle = grpcCache.get(base);
+  if (!grpcBundle) {
+    grpcBundle = buildGrpcPackage(base);
+    grpcCache.set(base, grpcBundle);
   }
+  return grpcBundle;
 }
 
 export function lookupServiceCtor(
@@ -225,5 +229,4 @@ export function lookupServiceCtor(
 
 export function _resetProtoCachesForTest(): void {
   protobufCache.clear();
-  grpcCache.clear();
 }

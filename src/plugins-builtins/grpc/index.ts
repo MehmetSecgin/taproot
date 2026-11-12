@@ -27,40 +27,32 @@ interface GrpcClient extends Record<string, unknown> {
   close: () => void;
 }
 
-const channelCache = new Map<string, GrpcClient>();
+type ServiceConstructor = new (t: string, c: unknown) => Record<string, unknown>;
 
-function channelKey(ds: QueryRequest['datasource'], creds: Record<string, string>): string {
-  return [
-    ds.connection.host || '127.0.0.1',
-    ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.grpc,
-    ds.connection.ssl ? 'tls' : 'h2c',
-    ds.resolverHints?.protoRoot || '',
-    creds.token || '',
-  ].join('|');
+const clientCache = new Map<string, { ServiceCtor: ServiceConstructor; client: GrpcClient }>();
+
+function clientTarget(ds: QueryRequest['datasource']): string {
+  return `${ds.connection.host || '127.0.0.1'}:${ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.grpc}`;
 }
 
-function buildClient(
-  grpc: GrpcModule,
-  ServiceCtor: new (t: string, c: unknown) => Record<string, unknown>,
-  ds: QueryRequest['datasource'],
-): GrpcClient {
-  const target = `${ds.connection.host || '127.0.0.1'}:${ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.grpc}`;
+function buildClient(grpc: GrpcModule, ServiceCtor: ServiceConstructor, ds: QueryRequest['datasource']): GrpcClient {
   const creds = ds.connection.ssl ? grpc.credentials.createSsl() : grpc.credentials.createInsecure();
-  return new ServiceCtor(target, creds) as GrpcClient;
+  return new ServiceCtor(clientTarget(ds), creds) as GrpcClient;
 }
 
 function getOrCreateClient(
   grpc: GrpcModule,
-  ServiceCtor: new (t: string, c: unknown) => Record<string, unknown>,
+  ServiceCtor: ServiceConstructor,
   ds: QueryRequest['datasource'],
-  creds: Record<string, string>,
+  protoRoot: string,
   serviceName: string,
 ): GrpcClient {
-  const key = `${channelKey(ds, creds)}|${serviceName}`;
-  const existing = channelCache.get(key);
-  if (existing) return existing;
+  const key = [clientTarget(ds), ds.connection.ssl ? 'tls' : 'h2c', protoRoot, serviceName].join('|');
+  const cached = clientCache.get(key);
+  if (cached?.ServiceCtor === ServiceCtor) return cached.client;
+  cached?.client.close();
   const client = buildClient(grpc, ServiceCtor, ds);
-  channelCache.set(key, client);
+  clientCache.set(key, { ServiceCtor, client });
   return client;
 }
 
@@ -269,7 +261,7 @@ export const grpcPlugin: TapRootPlugin = {
       }
     }
     const ServiceCtor = lookupServiceCtor(bundle.grpcPackage, service);
-    const client = getOrCreateClient(bundle.grpcModule, ServiceCtor, request.datasource, creds, service);
+    const client = getOrCreateClient(bundle.grpcModule, ServiceCtor, request.datasource, protoRoot, service);
     let metadata: { add: (k: string, v: string) => void } | undefined;
     if (creds.token) {
       metadata = new bundle.grpcModule.Metadata();

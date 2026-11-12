@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it, beforeEach } from 'vitest';
+import protoLoader from '@grpc/proto-loader';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { _resetProtoCachesForTest, loadProtobufRoot, loadGrpcPackage } from '../src/core/proto-loader.js';
 import {
   describeProto,
@@ -121,6 +122,85 @@ describe('proto-loader', () => {
     );
     const bundle = await loadProtobufRoot(`${rootA},${rootB}`);
     expect(bundle.files.length).toBe(2);
+  });
+
+  it('picks up an edited .proto on the next load', async () => {
+    // arrange
+    const dir = tmpDir('proto-edit');
+    const file = path.join(dir, 'address.proto');
+    fs.writeFileSync(file, 'syntax = "proto3";\npackage taproot.test;\nmessage Address { string city = 1; }\n', 'utf8');
+    await loadProtobufRoot(dir);
+    fs.writeFileSync(file, 'syntax = "proto3";\npackage taproot.test;\nmessage Address { string city = 1; string country = 2; }\n', 'utf8');
+
+    // act
+    const { protobufRoot } = await loadProtobufRoot(dir);
+
+    // assert
+    expect(Object.keys((protobufRoot.lookup('taproot.test.Address') as { fields: object }).fields)).toEqual(['city', 'country']);
+  });
+
+  it('loads same-named files from different directories', async () => {
+    // arrange
+    const dir = tmpDir('proto-same-name');
+    fs.mkdirSync(path.join(dir, 'a', 'v1'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'b', 'v1'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'a', 'v1', 'types.proto'), 'syntax = "proto3";\npackage taproot.test.a;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'b', 'v1', 'types.proto'), 'syntax = "proto3";\npackage taproot.test.b;\nmessage Profile { string name = 1; }\n', 'utf8');
+
+    // act
+    const { files, protobufRoot } = await loadProtobufRoot(dir);
+
+    // assert
+    expect(files.length).toBe(2);
+    expect(protobufRoot.lookup('taproot.test.a.Address')).toBeTruthy();
+    expect(protobufRoot.lookup('taproot.test.b.Profile')).toBeTruthy();
+  });
+
+  it('loads an import path vendored under two roots once, from the first root', async () => {
+    // arrange
+    const rootA = tmpDir('proto-vendor-a');
+    const rootB = tmpDir('proto-vendor-b');
+    fs.mkdirSync(path.join(rootA, 'common'));
+    fs.mkdirSync(path.join(rootB, 'common'));
+    fs.writeFileSync(path.join(rootA, 'common', 'address.proto'), 'syntax = "proto3";\npackage taproot.common;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(rootB, 'common', 'address.proto'), 'syntax = "proto3";\npackage taproot.common;\nmessage Address { string city = 1; string country = 2; }\n', 'utf8');
+
+    // act
+    const { files, protobufRoot } = await loadProtobufRoot(`${rootA},${rootB}`);
+
+    // assert
+    expect(files).toEqual([path.join(rootA, 'common', 'address.proto')]);
+    expect(Object.keys((protobufRoot.lookup('taproot.common.Address') as { fields: object }).fields)).toEqual(['city']);
+  });
+
+  it('loads a file once when one root contains another', async () => {
+    // arrange
+    const dir = tmpDir('proto-nested-roots');
+    fs.mkdirSync(path.join(dir, 'profiles'));
+    writeFixtureProto(path.join(dir, 'profiles'));
+
+    // act
+    const { files } = await loadProtobufRoot(`${dir},${path.join(dir, 'profiles')}`);
+
+    // assert
+    expect(files.length).toBe(1);
+  });
+
+  it('builds the grpc package from the parsed root without parsing the files again', async () => {
+    // arrange
+    const dir = tmpDir('grpc-single-parse');
+    writeFixtureProto(dir);
+    const loadSync = vi.spyOn(protoLoader, 'loadSync');
+    const load = vi.spyOn(protoLoader, 'load');
+
+    // act
+    const bundle = await loadGrpcPackage(dir);
+
+    // assert
+    expect(bundle.protobufRoot).toBe((await loadProtobufRoot(dir)).protobufRoot);
+    expect(loadSync).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+    expect(typeof (bundle.grpcPackage as Record<string, any>).taproot?.test?.ProfileService).toBe('function');
   });
 });
 
