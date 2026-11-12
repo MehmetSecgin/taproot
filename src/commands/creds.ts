@@ -3,6 +3,8 @@ import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
 import { printEnvelope } from '../core/output.js';
 
+const PLAIN_CREDENTIAL_KEYS = new Set(['user', 'dbUser', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']);
+
 function parseKv(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const value of values) {
@@ -54,9 +56,9 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     const ctx = getCtx();
     const value = await ctx.credentialStore.get(opts.ref);
     if (!Object.keys(value).length) throw new Error(`Credential ref not found: ${opts.ref}`);
-    const redacted = { ...value };
-    if (redacted.password) redacted.password = '[REDACTED]';
-    if (redacted.token) redacted.token = '[REDACTED]';
+    const redacted = Object.fromEntries(
+      Object.entries(value).map(([key, val]) => [key, PLAIN_CREDENTIAL_KEYS.has(key) ? val : '[REDACTED]']),
+    );
     printEnvelope(true, { ref: opts.ref, values: redacted });
   });
 

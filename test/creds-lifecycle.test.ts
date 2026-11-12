@@ -70,13 +70,17 @@ describe('credential lifecycle', () => {
     expect(showOut.status).toBe(1);
   });
 
-  it('creds set with kv pairs', () => {
+  it('creds show redacts every value outside the plain-key allowlist', () => {
+    // arrange
     const { env } = setupState();
-    runCli(['creds', 'set', '--ref', 'x', '--kv', 'role=admin', '--kv', 'region=us-east-1'], env);
+    runCli(['creds', 'set', '--ref', 'x', '--user', 'qa_user', '--kv', 'apiKey=key123', '--kv', 'region=us-east-1'], env);
+
+    // act
     const out = runCli(['creds', 'show', '--ref', 'x'], env);
+
+    // assert
     expect(out.status).toBe(0);
-    expect(out.stdout).toContain('admin');
-    expect(out.stdout).toContain('us-east-1');
+    expect(JSON.parse(out.stdout).data.values).toEqual({ user: 'qa_user', apiKey: '[REDACTED]', region: '[REDACTED]' });
   });
 
   it('creds list enumerates refs without exposing secrets', () => {
@@ -111,6 +115,24 @@ describe('credential lifecycle', () => {
     expect(out.status).toBe(0);
     expect(out.stdout).toContain('tsh status');
     expect(out.stdout).toContain('tsh db login');
+  });
+});
+
+describe('credential file permissions', () => {
+  it('keeps the credential file and its directory readable by the owner only', () => {
+    // arrange
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-creds-'));
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_NO_KEYCHAIN: '1' };
+    const credentialFile = path.join(stateRoot, 'config', 'credentials.json.enc');
+    runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user'], env);
+    fs.chmodSync(credentialFile, 0o644);
+
+    // act
+    runCli(['creds', 'set', '--ref', 'qa:other', '--user', 'other'], env);
+
+    // assert
+    expect(fs.statSync(path.join(stateRoot, 'config')).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(credentialFile).mode & 0o777).toBe(0o600);
   });
 });
 
