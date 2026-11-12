@@ -141,16 +141,20 @@ function cliArgs(ds: QueryRequest['datasource'], creds: Record<string, string>, 
     args.push('-n', String(db));
   }
   if (creds.user) args.push('--user', String(creds.user));
-  if (creds.password) args.push('-a', String(creds.password));
   if (ds.connection.ssl) args.push('--tls');
   return args;
 }
 
+function cliEnv(creds: Record<string, string>): NodeJS.ProcessEnv {
+  if (!creds.password) return process.env;
+  return { ...process.env, REDISCLI_AUTH: String(creds.password) };
+}
+
 interface RunResult { stdout: string; stderr: string; code: number; timedOut: boolean }
 
-async function runRedis(args: string[], tokens: string[], timeoutMs?: number): Promise<RunResult> {
+async function runRedis(args: string[], env: NodeJS.ProcessEnv, tokens: string[], timeoutMs?: number): Promise<RunResult> {
   return await new Promise((resolve) => {
-    const proc = spawn('redis-cli', [...args, ...tokens], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn('redis-cli', [...args, ...tokens], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -276,7 +280,7 @@ export const redisPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     const args = cliArgs(input.datasource, input.credentials, false);
-    const r = await runRedis(args, ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000);
+    const r = await runRedis(args, cliEnv(input.credentials), ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000);
     if (r.code === 0 && /PONG/i.test(r.stdout)) {
       return [{ check: 'redis ping', status: DoctorStatus.Ok, detail: 'PING -> PONG' }];
     }
@@ -302,7 +306,7 @@ export const redisPlugin: TapRootPlugin = {
       throw new Error("proto decoding requested but no proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
     }
     const args = cliArgs(request.datasource, creds, decode);
-    const r = await runRedis(args, tokens, request.timeoutMs);
+    const r = await runRedis(args, cliEnv(creds), tokens, request.timeoutMs);
     if (r.timedOut) throw queryTimeoutError(request.timeoutMs || 0);
     if (r.code !== 0) {
       throw new Error((r.stderr || r.stdout || `redis-cli exit ${r.code}`).trim());
