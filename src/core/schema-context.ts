@@ -10,7 +10,7 @@ export interface PredicateColumnRefs {
 }
 
 function normalizeName(value: string): string {
-  return str(value).replace(/`/g, '').trim();
+  return str(value).replace(/`/g, '').trim().toLowerCase();
 }
 
 function bareName(value: string): string {
@@ -147,7 +147,7 @@ export function buildSchemaContext(sql: string, catalog: SchemaCatalog | undefin
   const byName = new Map(Object.keys(catalog.tables).map((table) => [table.toLowerCase(), table]));
   const tables: Record<string, TableContext> = {};
   for (const referenced of collectReferencedTables(sql)) {
-    const table = byName.get(referenced.toLowerCase());
+    const table = byName.get(referenced);
     if (table) tables[table] = catalog.tables[table];
   }
   return { tables, catalog: { tables: byName.size, fetchedAt: catalog.fetchedAt } };

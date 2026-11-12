@@ -3,7 +3,7 @@ import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { badInput, missingPartitionPredicate } from './error-classification.js';
-import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
+import { collectPredicateColumns, isSchemaMetadataQuery, type PredicateColumnRefs } from './schema-context.js';
 import { explainAnalyzeTarget, hasSecondStatement, isExplainAnalyze, maskCommentsAndLiterals, parseExecutedStatements } from './sql-parser.js';
 import { str } from './strings.js';
 
@@ -86,6 +86,12 @@ function partitionKeys(partition: SchemaPartition): string[] {
   return Array.from(new Set([...(partition.keys || []), partition.key || ''].filter(Boolean)));
 }
 
+function filtersOn(predicateColumns: PredicateColumnRefs, table: string, key: string): boolean {
+  const column = key.toLowerCase();
+  const bareTable = table.toLowerCase().split('.').pop() || '';
+  return Boolean(predicateColumns.byTable.get(bareTable)?.has(column)) || predicateColumns.bare.has(column);
+}
+
 function partitionKind(partition: SchemaPartition): string {
   return str(partition.kind).trim().toUpperCase();
 }
@@ -148,11 +154,9 @@ export function collectRangeWarnings(input: {
   for (const [table, ctx] of Object.entries(tables)) {
     const partition = ctx.partition;
     if (!partition || !isHardPartitionKind(partition)) continue;
-    const tableColumns =
-      predicateColumns.byTable.get(table) || predicateColumns.byTable.get(table.split('.').pop() || table) || new Set<string>();
 
     for (const key of partitionKeys(partition)) {
-      if (!tableColumns.has(key) && !predicateColumns.bare.has(key)) continue;
+      if (!filtersOn(predicateColumns, table, key)) continue;
       const literals = sortedDateLiteralsForColumn(input.sql, key);
       if (!literals.length) {
         warnings.push(`range_unverified:${table}.${key}`);
@@ -174,11 +178,13 @@ export function collectRangeWarnings(input: {
 
 export function enforcePartitionPredicate(input: {
   sql: string;
+  datasource: DatasourceProfile;
   schemaContext: SchemaContext;
   allowPartitionScan?: boolean;
 }): string[] {
   const warnings: string[] = [];
-  if (isSchemaMetadataQuery(input.sql)) return warnings;
+  if (!SQL_DATASOURCE_KINDS.has(input.datasource.kind) || isSchemaMetadataQuery(input.sql)) return warnings;
+  if (!input.schemaContext.catalog || !parseExecutedStatements(input.sql)) return ['partition_gate_skipped'];
   const tables = input.schemaContext.tables || {};
   if (!Object.keys(tables).length) return warnings;
 
@@ -196,9 +202,8 @@ export function enforcePartitionPredicate(input: {
     if (!isHardPartitionKind(partition)) continue;
 
     const requiredKeys = partitionKeys(partition);
-    const tableColumns = predicateColumns.byTable.get(table) || predicateColumns.byTable.get(table.split('.').pop() || table) || new Set<string>();
     const missingKeys = requiredKeys.length
-      ? requiredKeys.filter((key) => !tableColumns.has(key) && !predicateColumns.bare.has(key))
+      ? requiredKeys.filter((key) => !filtersOn(predicateColumns, table, key))
       : ['<unknown>'];
 
     if (!missingKeys.length) continue;

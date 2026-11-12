@@ -244,6 +244,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     warnings.push(
       ...enforcePartitionPredicate({
         sql: query,
+        datasource,
         schemaContext,
         allowPartitionScan: request.allowPartitionScan,
       }),

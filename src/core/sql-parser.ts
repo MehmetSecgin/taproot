@@ -48,12 +48,14 @@ export function maskCommentsAndLiterals(sql: string): string {
   while (at < sql.length) {
     if (startsLineComment(sql, at)) {
       const newline = sql.indexOf('\n', at);
-      at = newline < 0 ? sql.length : newline;
-      out += ' ';
+      const end = newline < 0 ? sql.length : newline;
+      out += ' '.repeat(end - at);
+      at = end;
     } else if (startsBlockComment(sql, at)) {
       const close = sql.indexOf('*/', at + 2);
-      at = close < 0 ? sql.length : close + 2;
-      out += ' ';
+      const end = close < 0 ? sql.length : close + 2;
+      out += ' '.repeat(end - at);
+      at = end;
     } else if (QUOTES.has(sql[at])) {
       const close = closingQuoteAt(sql, at);
       out += sql[at] + LITERAL_FILLER.repeat(Math.min(close, sql.length) - at - 1) + (close < sql.length ? sql[close] : '');
@@ -76,7 +78,7 @@ export function isExplainAnalyze(sql: string): boolean {
 }
 
 export function explainAnalyzeTarget(sql: string): string | undefined {
-  const prefix = EXPLAIN_ANALYZE_RE.exec(sql);
+  const prefix = EXPLAIN_ANALYZE_RE.exec(maskCommentsAndLiterals(sql));
   return prefix ? sql.slice(prefix[0].length) : undefined;
 }
 
