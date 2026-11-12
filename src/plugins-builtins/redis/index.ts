@@ -12,6 +12,7 @@ const READ_COMMANDS = new Set<string>([
   'GET', 'MGET', 'STRLEN', 'GETRANGE', 'EXISTS', 'TYPE', 'TTL', 'PTTL',
   'HGET', 'HMGET', 'HGETALL', 'HKEYS', 'HVALS', 'HLEN', 'HEXISTS', 'HSCAN', 'HSTRLEN', 'HRANDFIELD',
   'LRANGE', 'LLEN', 'LINDEX', 'LPOS',
+  'SORT_RO',
   'SMEMBERS', 'SCARD', 'SISMEMBER', 'SMISMEMBER', 'SRANDMEMBER', 'SINTER', 'SUNION', 'SDIFF', 'SSCAN',
   'ZRANGE', 'ZREVRANGE', 'ZRANGEBYSCORE', 'ZREVRANGEBYSCORE', 'ZRANGEBYLEX', 'ZREVRANGEBYLEX',
   'ZSCORE', 'ZMSCORE', 'ZRANK', 'ZREVRANK', 'ZCARD', 'ZCOUNT', 'ZLEXCOUNT', 'ZSCAN', 'ZRANDMEMBER',
@@ -21,6 +22,8 @@ const READ_COMMANDS = new Set<string>([
   'PFCOUNT',
   'OBJECT', 'INFO', 'PING', 'ECHO', 'TIME', 'CONFIG', 'CLIENT', 'MEMORY', 'COMMAND', 'LATENCY', 'DUMP',
 ]);
+
+const NAME_LISTING_COMMANDS = new Set<string>(['KEYS', 'SCAN', 'RANDOMKEY', 'HKEYS']);
 
 const MUTATE_COMMANDS = new Set<string>([
   // strings
@@ -307,7 +310,7 @@ export const redisPlugin: TapRootPlugin = {
       allowFlush: Boolean(pp.allowFlush),
     });
     const { protoRoot, protoMessage } = resolveProtoParams(request);
-    const decode = Boolean(protoMessage) && tier === 'read';
+    const decode = Boolean(protoMessage) && tier === 'read' && !NAME_LISTING_COMMANDS.has(str(tokens[0]).toUpperCase());
     if (Boolean(protoMessage) && !protoRoot) {
       throw new Error("proto decoding requested but no proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
     }

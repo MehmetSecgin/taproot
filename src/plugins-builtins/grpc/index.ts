@@ -280,6 +280,7 @@ export const grpcPlugin: TapRootPlugin = {
     const streaming = isStreamingMethod(methodShape);
     let rows: unknown[][];
     const warnings: string[] = [];
+    let backupTimer: NodeJS.Timeout | undefined;
     try {
       const call = streaming
         ? callStreaming(client, methodShape, messages, metadata ?? new bundle.grpcModule.Metadata(), deadlineMs, request.signal).then((out) => {
@@ -291,13 +292,17 @@ export const grpcPlugin: TapRootPlugin = {
         : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs, request.signal).then((value) => [[value]]);
       rows = await Promise.race([
         call,
-        new Promise<never>((_, reject) => setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500)),
+        new Promise<never>((_, reject) => {
+          backupTimer = setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500);
+        }),
       ]);
     } catch (err) {
       request.signal?.throwIfAborted();
       const msg = (err as Error).message || String(err);
       if (/deadline exceeded/i.test(msg)) throw queryTimeoutError(deadlineMs);
       throw err;
+    } finally {
+      clearTimeout(backupTimer);
     }
     let schemaContext: SchemaContext | undefined;
     try {

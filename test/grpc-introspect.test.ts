@@ -333,6 +333,22 @@ describe('grpc-introspect discovery helpers', () => {
     );
   });
 
+  it('grpc describe --max-depth 0 lists only the request and response messages', () => {
+    // arrange
+    const dir = tmpDir('introspect-depth-zero');
+    writeFixtureProto(dir);
+
+    // act
+    const out = spawnSync(
+      process.execPath,
+      [path.join(process.cwd(), 'dist', 'index.js'), 'grpc', 'describe', '--proto-root', dir, '--method', 'GetProfile', '--max-depth', '0', '--pluck', 'data.messages'],
+      { encoding: 'utf8', env: { ...process.env, TAPROOT_STATE_ROOT: tmpDir('introspect-state') } },
+    );
+
+    // assert
+    expect(Object.keys(JSON.parse(out.stdout)).sort()).toEqual(['taproot.test.GetProfileRequest', 'taproot.test.GetProfileResponse']);
+  });
+
   it('buildRequestSkeleton expands nested messages, repeated, enum, map, oneof', async () => {
     const dir = tmpDir('introspect-skeleton-deep');
     writeFixtureProto(dir);

@@ -44,7 +44,10 @@ const ERROR_CLASSES = {
     match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
   },
   UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
-  AUTH_EXPIRED: { exitCode: EXIT_CODES.AUTH, match: /auth|login|expired|unauthorized/ },
+  AUTH_EXPIRED: {
+    exitCode: EXIT_CODES.AUTH,
+    match: /\b(?:unauthorized|unauthenticated|not logged in|noauth|wrongpass)\b|log ?in again|authentication required|unable to authenticate|(?:session|certificate|token|credentials?) (?:has |have |is )?expired|expired (?:session|certificate|token|credentials?)/,
+  },
   GENERIC: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /.*/ },
 } as const satisfies Record<string, ErrorClassDef>;
 

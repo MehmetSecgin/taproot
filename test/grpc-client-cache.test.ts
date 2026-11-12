@@ -126,3 +126,19 @@ describe('grpcPlugin client cache', () => {
     expect(newChannelCredentials).not.toHaveBeenCalled();
   });
 });
+
+describe('grpcPlugin unary call', () => {
+  it('clears its backup deadline timer once the call returns', async () => {
+    // arrange
+    const root = protoRootWith(NAME_AND_CITY);
+    const setTimer = vi.spyOn(globalThis, 'setTimeout');
+    const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
+
+    // act
+    await grpcPlugin.execute!(getProfile(root, root), {});
+
+    // assert
+    const backupCall = setTimer.mock.calls.findIndex(([, delay]) => delay === 5500);
+    expect(clearTimer).toHaveBeenCalledWith(setTimer.mock.results[backupCall].value);
+  });
+});

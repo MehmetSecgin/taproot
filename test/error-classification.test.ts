@@ -60,6 +60,22 @@ describe('error classification', () => {
     expect(classifyError('ACCESS_DENIED: credential missing')).toBe('ACCESS_DENIED');
   });
 
+  it('maps expired sessions and rejected credentials to AUTH_EXPIRED', () => {
+    expect(classifyError('ERROR: not logged in')).toBe('AUTH_EXPIRED');
+    expect(classifyError('ERROR: Your session has expired. Please login again.')).toBe('AUTH_EXPIRED');
+    expect(classifyError('x509: certificate has expired or is not yet valid')).toBe('AUTH_EXPIRED');
+    expect(classifyError('error: You must be logged in to the server (Unauthorized)')).toBe('AUTH_EXPIRED');
+    expect(classifyError('grpc_code=16 UNAUTHENTICATED: token rejected')).toBe('AUTH_EXPIRED');
+    expect(classifyError('NOAUTH Authentication required.')).toBe('AUTH_EXPIRED');
+    expect(exitCodeForClass('AUTH_EXPIRED')).toBe(EXIT_CODES.AUTH);
+  });
+
+  it('does not read auth or login inside a name as an auth failure', () => {
+    expect(classifyError('Datasource not found: auth-service')).toBe('GENERIC');
+    expect(classifyError('Datasource not found: login-history')).toBe('GENERIC');
+    expect(classifyError('Datasource not found: expired-orders')).toBe('GENERIC');
+  });
+
   it('maps permission errors to ACCESS_DENIED', () => {
     expect(classifyError('Access denied for user')).toBe('ACCESS_DENIED');
     expect(exitCodeForClass('ACCESS_DENIED')).toBe(EXIT_CODES.ACCESS_DENIED);

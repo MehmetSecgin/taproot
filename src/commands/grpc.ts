@@ -53,7 +53,10 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .action(async (opts) => {
       const ctx = getCtx();
       const { root, source } = resolveProtoRoot(ctx, opts);
-      const maxDepth = Math.max(0, parseInt(String(opts.maxDepth || '4'), 10) || 4);
+      const maxDepth = Number(opts.maxDepth);
+      if (!Number.isInteger(maxDepth) || maxDepth < 0) {
+        throw badInput(`--max-depth must be a non-negative integer, got '${opts.maxDepth}'.`);
+      }
       const { protobufRoot } = await loadProtobufRoot(root);
 
       const allServices = listServices(protobufRoot);
