@@ -43,6 +43,7 @@ export class SessionRegistry {
   private readonly sessionsById = new Map<string, SessionRecord>();
   private readonly sessionIdByFingerprint = new Map<string, string>();
   private readonly leaseHeartbeats = new Map<string, Map<string, number>>();
+  private persistedContent?: string;
 
   constructor(private readonly runDir: string) {
     fs.mkdirSync(this.runDir, { recursive: true });
@@ -70,10 +71,14 @@ export class SessionRegistry {
   }
 
   persist(): void {
-    const payload: SessionCheckpoint = { schemaVersion: 1, updatedAt: nowIso(), sessions: this.list() };
+    const sessions = this.list();
+    const content = JSON.stringify(sessions);
+    if (content === this.persistedContent) return;
+    const payload: SessionCheckpoint = { schemaVersion: 1, updatedAt: nowIso(), sessions };
     const tmp = `${this.checkpointFile}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
     fs.renameSync(tmp, this.checkpointFile);
+    this.persistedContent = content;
   }
 
   list(): SessionRecord[] {
@@ -99,7 +104,6 @@ export class SessionRegistry {
     if (existing && existing.state !== 'closed') {
       existing.lastUsedAt = nowIso();
       if (existing.state === 'recovering' || existing.state === 'opening') existing.state = 'ready';
-      this.persist();
       return existing;
     }
 

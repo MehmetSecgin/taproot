@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { buildFingerprint, SessionRegistry } from '../src/daemon/session-registry.js';
 
@@ -60,5 +60,19 @@ describe('session registry', () => {
     expect(reg.list()).toEqual([]);
     const backups = fs.readdirSync(runDir).filter((f) => f.startsWith('sessions.json.corrupt.'));
     expect(backups.length).toBe(1);
+  });
+  it('writes nothing on a tick with no change', () => {
+    // arrange
+    const reg = new SessionRegistry(tmpRunDir());
+    reg.open({ datasourceName: 'qa-sample', kind: 'mysql' });
+    reg.onTick();
+    const write = vi.spyOn(fs, 'writeFileSync');
+
+    // act
+    reg.onTick();
+
+    // assert
+    expect(write).not.toHaveBeenCalled();
+    write.mockRestore();
   });
 });

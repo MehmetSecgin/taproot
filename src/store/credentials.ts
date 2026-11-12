@@ -22,10 +22,20 @@ function getMasterSecret(): string {
   return process.env.TAPROOT_MASTER_KEY || derivedSecret();
 }
 
+let lastKey: { id: string; key: Buffer } | undefined;
+
+function deriveKey(secret: string, salt: Buffer): Buffer {
+  const id = `${salt.toString('base64')}:${secret}`;
+  if (lastKey?.id === id) return lastKey.key;
+  const key = crypto.pbkdf2Sync(secret, salt, 200000, 32, 'sha256');
+  lastKey = { id, key };
+  return key;
+}
+
 function encryptJson(payload: Record<string, Record<string, string>>): FallbackFileShape {
   const salt = crypto.randomBytes(16);
   const iv = crypto.randomBytes(12);
-  const key = crypto.pbkdf2Sync(getMasterSecret(), salt, 200000, 32, 'sha256');
+  const key = deriveKey(getMasterSecret(), salt);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const data = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
   return {
@@ -41,7 +51,7 @@ function decryptJson(input: FallbackFileShape, secret: string): Record<string, R
   const iv = Buffer.from(input.iv, 'base64');
   const authTag = Buffer.from(input.authTag, 'base64');
   const data = Buffer.from(input.data, 'base64');
-  const key = crypto.pbkdf2Sync(secret, salt, 200000, 32, 'sha256');
+  const key = deriveKey(secret, salt);
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(authTag);
   const out = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
