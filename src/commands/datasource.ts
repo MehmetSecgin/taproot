@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
+import { runDatasourceConnectors } from '../core/connector-runner.js';
 import { badInput } from '../core/error-classification.js';
 import { parseKeyValuePairs } from '../core/key-value.js';
+import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../core/naming.js';
 import { nowIso } from '../core/time.js';
 import { printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
-import { normalizeNamespace, normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
 import { normalizeRelations } from '../core/relations.js';

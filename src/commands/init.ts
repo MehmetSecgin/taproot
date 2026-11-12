@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { normalizeNamespace, normalizeService } from '../core/app.js';
+import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { reconcileDatasource } from '../core/bootstrap.js';
 import { printEnvelope } from '../core/output.js';
 import { collectReadinessSnapshot } from '../core/readiness.js';

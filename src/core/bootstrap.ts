@@ -1,5 +1,5 @@
 import type { AppContext } from './app.js';
-import { defaultDatasourceName } from './app.js';
+import { defaultDatasourceName } from './naming.js';
 import { criticalDatasourceKbConflicts } from './conflicts.js';
 import { qaPortforwardLocalPort } from './qa-portforward.js';
 import { nowIso } from './time.js';

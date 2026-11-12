@@ -216,9 +216,6 @@ export interface SchemaCatalogSummary {
 export interface SchemaContext {
   tables: Record<string, TableContext>;
   catalog?: SchemaCatalogSummary;
-  services?: Record<string, RpcServiceShape>;
-  messages?: Record<string, RpcMessageShape>;
-  enums?: Record<string, RpcEnumShape>;
 }
 
 export type DoctorCheckCode =

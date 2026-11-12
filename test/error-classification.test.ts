@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyError } from '../src/core/app.js';
-import { classifyExecutorDoctorCode, spawnErrorMessage } from '../src/core/error-classification.js';
+import { classifyError, classifyExecutorDoctorCode, spawnErrorMessage } from '../src/core/error-classification.js';
 import { EXIT_CODES, exitCodeForClass } from '../src/core/exit-codes.js';
 
 describe('error classification', () => {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DatasourceProfile, DoctorCheck, TapRootPlugin } from '../src/types/core.js';
 
 process.env.TAPROOT_CONNECTOR_CONNECT_MS = '300';
-const { runDatasourceConnectors } = await import('../src/core/app.js');
+const { runDatasourceConnectors } = await import('../src/core/connector-runner.js');
 const { RUNTIME_CONSTANTS } = await import('../src/core/constants.js');
 const { kubectlPortforwardPlugin } = await import('../src/plugins-builtins/kubectl-portforward/index.js');
 

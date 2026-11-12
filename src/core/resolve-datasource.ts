@@ -1,5 +1,5 @@
 import type { AppContext } from './app.js';
-import { defaultDatasourceName } from './app.js';
+import { defaultDatasourceName } from './naming.js';
 import { saveKbBootstrapCandidate } from './bootstrap.js';
 import { levenshtein, suggestNames } from './grpc-introspect.js';
 import { discoverKubernetesTargets } from './discovery.js';

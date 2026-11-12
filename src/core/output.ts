@@ -75,13 +75,7 @@ export function trimQueryJsonEnvelope<T extends Record<string, unknown>>(envelop
   const meta = envelope.meta as Record<string, unknown> | undefined;
   if (meta && typeof meta === 'object') {
     const sc = meta.schemaContext as Record<string, unknown> | undefined;
-    if (
-      sc &&
-      isEmptyMap(sc.tables) &&
-      isEmptyMap(sc.services) &&
-      isEmptyMap(sc.messages) &&
-      isEmptyMap(sc.enums)
-    ) delete meta.schemaContext;
+    if (sc && isEmptyMap(sc.tables)) delete meta.schemaContext;
   }
   return envelope;
 }

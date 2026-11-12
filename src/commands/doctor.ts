@@ -1,8 +1,10 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { classifyError, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
+import { runDatasourceConnectors } from '../core/connector-runner.js';
+import { classifyError } from '../core/error-classification.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
+import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { verboseLog } from './query-direct.js';

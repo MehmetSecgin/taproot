@@ -46,9 +46,18 @@ export function resolvePaths(kbDir?: string): Paths {
 
 const OWNER_ONLY_DIR_MODE = 0o700;
 
+function tryRestrictToOwner(dir: string): void {
+  try {
+    fs.chmodSync(dir, OWNER_ONLY_DIR_MODE);
+  } catch {
+    return;
+  }
+}
+
 export function ensurePaths(paths: Paths): void {
   fs.mkdirSync(paths.stateRoot, { recursive: true });
   fs.mkdirSync(paths.configDir, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
+  tryRestrictToOwner(paths.configDir);
   fs.mkdirSync(paths.cacheDir, { recursive: true });
 }
 

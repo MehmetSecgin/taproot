@@ -1,7 +1,10 @@
-import { classifyError, environmentPolicy, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from './app.js';
+import { environmentPolicy } from './app.js';
 import type { AppContext } from './app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflicts.js';
-import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
+import { runDatasourceConnectors } from './connector-runner.js';
+import { classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
+import { parseKeyValuePairs } from './key-value.js';
+import { normalizeNamespace, normalizeService } from './naming.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
 import type { JsonExtractSpec } from './json-extract.js';
 import { preflightBudgetMs, withQueryTimeout } from './query-timeout.js';
@@ -205,7 +208,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   let jsonExtractSpecs: JsonExtractSpec[];
   const query = request.query.trim();
   try {
-    params = parseParamPairs(request.params || []);
+    params = parseKeyValuePairs('--param', request.params || []);
     jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
     if (!query) throw new Error('No query resolved. Provide --sql (or --query for Redis and gRPC).');
   } catch (error) {

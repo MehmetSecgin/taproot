@@ -5,12 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
 import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
-import { runDatasourceConnectors } from '../src/core/app.js';
+import { runDatasourceConnectors } from '../src/core/connector-runner.js';
 import type { AppContext } from '../src/core/app.js';
 import type { TapRootPlugin } from '../src/types/core.js';
 
-vi.mock('../src/core/app.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/core/app.js')>();
+vi.mock('../src/core/connector-runner.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/connector-runner.js')>();
   return { ...actual, runDatasourceConnectors: vi.fn(actual.runDatasourceConnectors) };
 });
 

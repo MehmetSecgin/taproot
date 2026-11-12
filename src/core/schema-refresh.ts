@@ -1,5 +1,5 @@
 import type { AppContext } from './app.js';
-import { runDatasourceConnectors } from './app.js';
+import { runDatasourceConnectors } from './connector-runner.js';
 import { DoctorStatus, SQL_DATASOURCE_KINDS } from '../types/core.js';
 import type { DatasourceProfile, SchemaIndex, SchemaPartition, TableContext } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';

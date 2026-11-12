@@ -11,20 +11,20 @@ describe('trimQueryJsonEnvelope', () => {
     expect('warnings' in (out.data as Record<string, unknown>)).toBe(false);
   });
 
-  it('drops schemaContext when every sub-map is empty', () => {
+  it('drops schemaContext when tables is empty', () => {
     const out = trimQueryJsonEnvelope({
       ok: true,
       data: {},
-      meta: { schemaContext: { tables: {}, services: {}, messages: {}, enums: {} } },
+      meta: { schemaContext: { tables: {} } },
     });
     expect('schemaContext' in (out.meta as Record<string, unknown>)).toBe(false);
   });
 
-  it('keeps schemaContext when any sub-map has entries', () => {
+  it('keeps schemaContext when tables has entries', () => {
     const out = trimQueryJsonEnvelope({
       ok: true,
       data: {},
-      meta: { schemaContext: { tables: { event: {} }, services: {}, messages: {}, enums: {} } },
+      meta: { schemaContext: { tables: { event: {} } } },
     });
     expect((out.meta as Record<string, unknown>).schemaContext).toBeDefined();
   });
