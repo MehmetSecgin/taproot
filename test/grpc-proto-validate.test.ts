@@ -75,6 +75,20 @@ describe('validateGrpcRequest', () => {
     expect(err!.message).toMatch(/Did you mean 'item_id'/);
   });
 
+  it('rejects a camelCase key the request encoder would drop', async () => {
+    // arrange
+    const dir = tmpDir('grpcv-camel');
+    writeFixtureProto(dir);
+    const { protobufRoot } = await loadProtobufRoot(dir);
+
+    // act
+    const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', { itemId: 'abc' });
+
+    // assert
+    expect(err!.field).toBe('itemId');
+    expect(err!.message).toMatch(/Did you mean 'item_id'/);
+  });
+
   it('flags wrong scalar type (number instead of string)', async () => {
     const dir = tmpDir('grpcv-scalar-string');
     writeFixtureProto(dir);
