@@ -45,9 +45,14 @@ function partitionSql(datasource: DatasourceProfile): string {
   ].join(' ');
 }
 
-async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: string, signal: AbortSignal): Promise<QueryResult> {
-  const plugin = ctx.pluginRegistry.get(datasource.kind);
-  if (!plugin?.execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
+async function catalogReader(
+  ctx: AppContext,
+  datasource: DatasourceProfile,
+  sessionId: string | undefined,
+  signal: AbortSignal,
+): Promise<(sql: string) => Promise<QueryResult>> {
+  const execute = ctx.pluginRegistry.get(datasource.kind)?.execute;
+  if (!execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
   const creds = await ctx.credentialStore.get(datasource.credentialRef);
   const connectorChecks = await runDatasourceConnectors({
     datasource,
@@ -58,28 +63,35 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
   if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
     throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
   }
-  return plugin.execute(
-    {
-      datasource,
-      query: sql,
-      capability: 'executeRead',
-      sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
-      signal,
-    },
-    creds,
-  );
+  const sessionCreds = sessionId ? { ...creds, __sessionId: sessionId } : creds;
+  return (sql) =>
+    execute(
+      {
+        datasource,
+        query: sql,
+        capability: 'executeRead',
+        sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
+        signal,
+      },
+      sessionCreds,
+    );
 }
 
 function namedRows(result: QueryResult): Array<Record<string, unknown>> {
   return result.result.rows.map((row) => rowObject(result.result.columns, row));
 }
 
-function executeCatalogRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
-  return withQueryTimeout({
-    timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs,
-    signal: undefined,
-    run: (signal) => executeRead(ctx, datasource, sql, signal),
-  });
+async function readCatalogRows(ctx: AppContext, datasource: DatasourceProfile, request: CatalogRequest, signal: AbortSignal) {
+  const releaseSlot = request.acquireQuerySlot ? await request.acquireQuerySlot(signal) : undefined;
+  try {
+    const read = await catalogReader(ctx, datasource, request.sessionId, signal);
+    const tables = await read(tableSql(datasource));
+    const indexes = await read(indexSql(datasource));
+    const partitions = await read(partitionSql(datasource));
+    return { tables: namedRows(tables), indexes: namedRows(indexes), partitions: namedRows(partitions) };
+  } finally {
+    releaseSlot?.();
+  }
 }
 
 function extractBacktickColumns(value: string): string[] {
@@ -134,13 +146,15 @@ function parsePartition(kindRaw: string, exprRaw: string): SchemaPartition | und
   return { kind, expr, keys, key: keys.length === 1 ? keys[0] : undefined };
 }
 
-async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile): Promise<Record<string, TableContext>> {
-  const tableResult = await executeCatalogRead(ctx, datasource, tableSql(datasource));
-  const indexResult = await executeCatalogRead(ctx, datasource, indexSql(datasource));
-  const partitionResult = await executeCatalogRead(ctx, datasource, partitionSql(datasource));
+async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile, request: CatalogRequest): Promise<Record<string, TableContext>> {
+  const rows = await withQueryTimeout({
+    timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs,
+    signal: undefined,
+    run: (signal) => readCatalogRows(ctx, datasource, request, signal),
+  });
 
   const columnsByTable = new Map<string, Set<string>>();
-  for (const row of namedRows(tableResult)) {
+  for (const row of rows.tables) {
     const table = String(row.table_name || '').trim();
     const column = String(row.column_name || '').trim();
     if (!table) continue;
@@ -150,7 +164,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const indexesByTable = new Map<string, Map<string, SchemaIndex>>();
-  for (const row of namedRows(indexResult)) {
+  for (const row of rows.indexes) {
     const table = String(row.table_name || '').trim();
     const name = String(row.index_name || '').trim();
     const column = String(row.column_name || '').trim();
@@ -166,7 +180,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const partitionsByTable = new Map<string, SchemaPartition>();
-  for (const row of namedRows(partitionResult)) {
+  for (const row of rows.partitions) {
     const table = String(row.table_name || '').trim();
     if (!table || partitionsByTable.has(table)) continue;
     const method = String(row.partition_method || row.subpartition_method || '').trim();
@@ -190,6 +204,14 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   return tables;
 }
 
+export type QuerySlot = (signal: AbortSignal) => Promise<() => void>;
+
+export interface CatalogRequest {
+  sessionId: string | undefined;
+  acquireQuerySlot: QuerySlot | undefined;
+  force: boolean;
+}
+
 export interface CatalogEnsureResult {
   outcome: 'unsupported' | 'cached' | 'fetched' | 'failed';
   tableCount: number;
@@ -197,25 +219,31 @@ export interface CatalogEnsureResult {
 }
 
 const catalogFetches = new Map<string, Promise<CatalogEnsureResult>>();
+const catalogFailures = new Map<string, { failedAt: number; error: string }>();
 
-export function ensureDatasourceCatalog(
-  ctx: AppContext,
-  datasource: DatasourceProfile,
-  opts: { force?: boolean } = {},
-): Promise<CatalogEnsureResult> {
+export function ensureDatasourceCatalog(ctx: AppContext, datasource: DatasourceProfile, request: CatalogRequest): Promise<CatalogEnsureResult> {
   if (!SQL_DATASOURCE_KINDS.has(datasource.kind)) return Promise.resolve({ outcome: 'unsupported', tableCount: 0 });
   const cached = ctx.schemaCatalogStore.get(datasource.name);
   const cachedCount = Object.keys(cached?.tables || {}).length;
-  const ttlMs = RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
-  if (!opts.force && cached && Date.now() - Date.parse(cached.fetchedAt) < ttlMs) return Promise.resolve({ outcome: 'cached', tableCount: cachedCount });
+  const maxAgeMs = request.force ? RUNTIME_CONSTANTS.query.catalogForcedRefreshGapMs : RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
+  if (cached && Date.now() - Date.parse(cached.fetchedAt) < maxAgeMs) return Promise.resolve({ outcome: 'cached', tableCount: cachedCount });
+  const lastFailure = catalogFailures.get(datasource.name);
+  if (lastFailure && Date.now() - lastFailure.failedAt < RUNTIME_CONSTANTS.query.catalogFailureRetryMs) {
+    return Promise.resolve({ outcome: 'failed', tableCount: cachedCount, error: lastFailure.error });
+  }
   const running = catalogFetches.get(datasource.name);
   if (running) return running;
-  const fetch = fetchSchemaCatalog(ctx, datasource)
+  const fetch = fetchSchemaCatalog(ctx, datasource, request)
     .then((tables): CatalogEnsureResult => {
       ctx.schemaCatalogStore.save(datasource.name, tables);
+      catalogFailures.delete(datasource.name);
       return { outcome: 'fetched', tableCount: Object.keys(tables).length };
     })
-    .catch((error): CatalogEnsureResult => ({ outcome: 'failed', tableCount: cachedCount, error: (error as Error).message }))
+    .catch((error): CatalogEnsureResult => {
+      const message = (error as Error).message;
+      catalogFailures.set(datasource.name, { failedAt: Date.now(), error: message });
+      return { outcome: 'failed', tableCount: cachedCount, error: message };
+    })
     .finally(() => catalogFetches.delete(datasource.name));
   catalogFetches.set(datasource.name, fetch);
   return fetch;

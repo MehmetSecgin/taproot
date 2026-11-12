@@ -41,7 +41,7 @@ describe('executeQuery success', () => {
     const recorder = recordingReport();
 
     // act
-    const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report, signal: undefined, acquireQuerySlot: undefined });
 
     // assert
     expect(outcome.ok).toBe(true);
@@ -60,7 +60,7 @@ describe('executeQuery success', () => {
 
   it('omits rowsForm and returns objects when rowsObject is set', async () => {
     const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ rowsObject: true }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ rowsObject: true }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.rows).toEqual([{ ok: 1 }]);
     expect(outcome.data.rowsForm).toBeUndefined();
@@ -71,7 +71,7 @@ describe('executeQuery success', () => {
     const ctx = contextWith(fakePlugin({ columns: ['id', 'id'], rows: [[7, 9]] }));
 
     // act
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
 
     // assert
     if (!outcome.ok) throw new Error('expected success');
@@ -84,7 +84,7 @@ describe('executeQuery success', () => {
     const ctx = contextWith(fakePlugin({ columns: ['id', 'name', 'payload'], rows: [[7, 'Ada', '{"order":{"id":3}}']] }));
 
     // act
-    const outcome = await executeQuery(queryRequest({ rowsObject: true, jsonExtract: ['payload:order.id'] }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ rowsObject: true, jsonExtract: ['payload:order.id'] }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
 
     // assert
     if (!outcome.ok) throw new Error('expected success');
@@ -94,7 +94,7 @@ describe('executeQuery success', () => {
   it('wraps the query with EXPLAIN when explain is set', async () => {
     const capture: { query?: string } = {};
     const ctx = contextWith(capturingPlugin(capture));
-    await executeQuery(queryRequest({ explain: true }), { ctx, report: silentQueryReport, signal: undefined });
+    await executeQuery(queryRequest({ explain: true }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(capture.query).toBe('EXPLAIN SELECT 1 AS ok');
   });
 
@@ -102,7 +102,7 @@ describe('executeQuery success', () => {
     const ctx = contextWith(fakePlugin({ columns: ['payload'], rows: [['{"order":{"id":7}}']] }));
     const outcome = await executeQuery(queryRequest({ jsonExtract: ['payload:order.id'] }), {
       ctx,
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.columns).toContain('payload.order.id');
@@ -111,7 +111,7 @@ describe('executeQuery success', () => {
 
   it('reports plugin warnings once', async () => {
     const ctx = contextWith(fakePlugin({ warnings: ['slow scan'] }));
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.warnings).toEqual(['slow scan']);
   });
@@ -136,10 +136,10 @@ describe('executeQuery success', () => {
     const ctx = contextWith(plugin);
 
     // act
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     const cachedBeforeRelease = ctx.schemaCatalogStore.get('qa-fake');
     releaseCatalog();
-    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!);
+    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, { sessionId: undefined, acquireQuerySlot: undefined, force: false });
 
     // assert
     expect(outcome.ok).toBe(true);
@@ -156,7 +156,7 @@ describe('executeQuery session identity', () => {
     const ctx = contextWith(capturingPlugin(capture));
     const outcome = await executeQuery(queryRequest(), {
       ctx,
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
       openSession: () => 'session-123',
     });
     expect(capture.creds?.__sessionId).toBe('session-123');
@@ -167,7 +167,7 @@ describe('executeQuery session identity', () => {
   it('calls openSession with the resolved datasource', async () => {
     const ctx = contextWith(fakePlugin());
     const openSession = vi.fn((_datasource: DatasourceProfile) => 'session-abc');
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, openSession });
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, openSession });
     expect(openSession).toHaveBeenCalledTimes(1);
     expect(openSession.mock.calls[0][0]).toMatchObject({ name: 'qa-fake', kind: 'fake' });
   });
@@ -175,7 +175,7 @@ describe('executeQuery session identity', () => {
   it('omits the session marker when no session is opened', async () => {
     const capture: { creds?: Record<string, string> } = {};
     const ctx = contextWith(capturingPlugin(capture));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(capture.creds?.__sessionId).toBeUndefined();
   });
 });
@@ -183,7 +183,7 @@ describe('executeQuery session identity', () => {
 describe('executeQuery failure', () => {
   it('rejects a malformed param', async () => {
     const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ params: ['brokenpair'] }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ params: ['brokenpair'] }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.code).toBe('BAD_INPUT');
@@ -192,7 +192,7 @@ describe('executeQuery failure', () => {
 
   it('rejects an empty query', async () => {
     const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ query: '   ' }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ query: '   ' }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).toContain('No query resolved');
@@ -202,7 +202,7 @@ describe('executeQuery failure', () => {
     const ctx = contextWith(fakePlugin());
     const outcome = await executeQuery(queryRequest({ query: 'DELETE FROM orders' }), {
       ctx,
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
@@ -214,7 +214,7 @@ describe('executeQuery failure', () => {
     const ctx = contextWith(fakePlugin({ kind: 'mysql' }));
     const outcome = await executeQuery(queryRequest({ query: 'CALL refresh_totals()' }), {
       ctx,
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
@@ -223,7 +223,7 @@ describe('executeQuery failure', () => {
 
   it('classifies a plugin failure and keeps the schema context', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.code).toBe('ACCESS_DENIED');
@@ -238,7 +238,7 @@ describe('executeQuery failure', () => {
     });
 
     // act
-    const outcome = await executeQuery(queryRequest({ query: 'SELECT customer_ident FROM orders' }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ query: 'SELECT customer_ident FROM orders' }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
 
     // assert
     if (outcome.ok) throw new Error('expected failure');
@@ -247,9 +247,37 @@ describe('executeQuery failure', () => {
     expect(outcome.details).toMatchObject({ didYouMean: expect.arrayContaining(['orders.customer_id']) });
   });
 
+  it('refetches the catalog at most once while an agent retries unknown columns', async () => {
+    // arrange
+    stateRoot = await setupQueryState({ kind: 'mysql' });
+    const catalogQueries: string[] = [];
+    const plugin = fakePlugin({ kind: 'mysql' });
+    const inner = plugin.execute!;
+    plugin.execute = async (request, creds): Promise<QueryResult> => {
+      if (!request.query.includes('information_schema')) throw new Error("Unknown column 'customer_ident' in 'field list'");
+      catalogQueries.push(request.query);
+      return inner(request, creds);
+    };
+    const ctx = contextWith(plugin);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() - 2 * 60 * 1000);
+    ctx.schemaCatalogStore.save('qa-fake', {});
+    vi.useRealTimers();
+    const joinRefetch = { sessionId: undefined, acquireQuerySlot: undefined, force: true };
+
+    // act
+    for (const attempt of ['customer_ident', 'customer_idnt', 'customerid']) {
+      await executeQuery(queryRequest({ query: `SELECT ${attempt} FROM orders` }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
+      await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, joinRefetch);
+    }
+
+    // assert
+    expect(catalogQueries.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
+  });
+
   it('fails when no plugin serves the datasource kind', async () => {
     const ctx = contextWith(fakePlugin({ kind: 'other' }));
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.message).toContain('No execute-capable plugin');
@@ -259,7 +287,7 @@ describe('executeQuery failure', () => {
     const ctx = contextWith(fakePlugin());
     const outcome = await executeQuery(queryRequest({ datasource: 'missing', env: '', service: '' }), {
       ctx,
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
@@ -295,7 +323,7 @@ describe('executeQuery datasource kind routing', () => {
     saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
     const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
       ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.datasource).toBe('qa-svc-sql');
@@ -306,7 +334,7 @@ describe('executeQuery datasource kind routing', () => {
     saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 1 });
     const outcome = await executeQuery(
       queryRequest({ datasource: undefined, service: 'svc', query: 'taproot.test.ProfileService/getProfile' }),
-      { ctx: bothKinds(), report: silentQueryReport, signal: undefined },
+      { ctx: bothKinds(), report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined },
     );
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.datasource).toBe('qa-svc-grpc');
@@ -316,7 +344,7 @@ describe('executeQuery datasource kind routing', () => {
     stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
     const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
       ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.datasource).toBe('qa-svc-grpc');
@@ -327,7 +355,7 @@ describe('executeQuery datasource kind routing', () => {
     saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
     const outcome = await executeQuery(queryRequest({ datasource: 'qa-svc-grpc', service: 'svc', query: 'SELECT 1 AS ok' }), {
       ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined,
+      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined,
     });
     if (!outcome.ok) throw new Error('expected success');
     expect(outcome.data.datasource).toBe('qa-svc-grpc');
@@ -348,7 +376,7 @@ describe('executeQuery timeout', () => {
     });
 
     // act
-    const outcome = await executeQuery(queryRequest({ timeoutMs: 200 }), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest({ timeoutMs: 200 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
 
     // assert
     expect(outcome.ok).toBe(true);
@@ -359,7 +387,7 @@ describe('executeQuery access denied', () => {
   it('fails with ACCESS_DENIED without retrying', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
     await ctx.credentialStore.set('qa:fake', { user: 'x' });
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined });
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.code).toBe('ACCESS_DENIED');

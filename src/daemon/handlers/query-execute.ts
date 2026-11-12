@@ -74,7 +74,12 @@ export const handleQueryExecute: Handler = async ({ req, base, deps, clientGone 
       RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
     );
 
-    const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, { ctx, report: silentQueryReport, signal: clientGone });
+    const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, {
+      ctx,
+      report: silentQueryReport,
+      signal: clientGone,
+      acquireQuerySlot: (signal) => queryLimiter.acquire({ signal }),
+    });
     const meta = outcome.meta;
     if (meta.schemaContext) base.meta.schemaContext = meta.schemaContext;
     if (meta.phases) (base.meta as Record<string, unknown>).phases = meta.phases;

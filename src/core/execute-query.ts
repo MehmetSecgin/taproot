@@ -10,6 +10,7 @@ import { rowObject } from './rows.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate } from './safety.js';
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
 import { ensureDatasourceCatalog } from './schema-refresh.js';
+import type { QuerySlot } from './schema-refresh.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
 import { str } from './strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
@@ -48,6 +49,7 @@ export interface QueryDeps {
   report: QueryReport;
   signal: AbortSignal | undefined;
   openSession?: (datasource: DatasourceProfile) => string;
+  acquireQuerySlot: QuerySlot | undefined;
 }
 
 export interface QueryOutcomeMeta {
@@ -218,7 +220,8 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     configDefault: ctx.runtimeConfigStore.queryTimeZone(),
   });
   const schemaContext = buildSchemaContext(query, ctx.schemaCatalogStore.get(datasource.name));
-  void ensureDatasourceCatalog(ctx, datasource).then((catalog) => {
+  const catalogSession = { sessionId, acquireQuerySlot: deps.acquireQuerySlot };
+  void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, force: false }).then((catalog) => {
     if (catalog.outcome === 'failed') report.log(`schema catalog skipped: ${catalog.error}`);
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
@@ -338,7 +341,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   } catch (error) {
     const outcome = failure(error, meta);
     if (outcome.ok || (outcome.code !== 'UNKNOWN_COLUMN' && outcome.code !== 'UNKNOWN_TABLE')) return outcome;
-    void ensureDatasourceCatalog(ctx, datasource, { force: true });
+    void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, force: true });
     const didYouMean = suggestSchemaNames(outcome.code, outcome.message, schemaContext, ctx.schemaCatalogStore.get(datasource.name));
     if (!didYouMean.length) return outcome;
     return {

@@ -1,14 +1,23 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
 import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
+import { runDatasourceConnectors } from '../src/core/app.js';
 import type { AppContext } from '../src/core/app.js';
 import type { TapRootPlugin } from '../src/types/core.js';
 
+vi.mock('../src/core/app.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/core/app.js')>();
+  return { ...actual, runDatasourceConnectors: vi.fn(actual.runDatasourceConnectors) };
+});
+
 type Rows = Array<Record<string, unknown>>;
+
+const UNFORCED = { sessionId: undefined, acquireQuerySlot: undefined, force: false };
+const FORCED = { sessionId: undefined, acquireQuerySlot: undefined, force: true };
 
 const ORDERS_COLUMNS: Rows = [
   { table_name: 'orders', column_name: 'id' },
@@ -20,11 +29,13 @@ const ORDERS_COLUMNS: Rows = [
 function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('information_schema.columns') ? ORDERS_COLUMNS : [])) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-'));
   const seen: string[] = [];
+  const sessions: Array<string | undefined> = [];
   const registry = new Map<string, TapRootPlugin>();
   registry.set('mysql', {
     manifest: { name: 'mysql', kind: 'executor', capabilities: ['executeRead'] },
-    async execute(request) {
+    async execute(request, creds) {
       seen.push(request.query);
+      sessions.push(creds.__sessionId);
       const rows = rowsFor(request.query);
       return {
         datasource: request.datasource.name,
@@ -44,12 +55,12 @@ function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('in
     schemaCatalogStore: new SchemaCatalogStore(path.join(root, 'cache', 'schema')),
     pluginRegistry: registry,
   } as unknown as AppContext;
-  return { ctx, seen };
+  return { ctx, seen, sessions };
 }
 
-function datasource(kind = 'mysql') {
+function datasource(kind = 'mysql', name = 'qa-orders') {
   return {
-    name: 'qa-orders',
+    name,
     kind,
     env: 'qa',
     service: 'orders',
@@ -62,13 +73,24 @@ function datasource(kind = 'mysql') {
   } as any;
 }
 
+function backdateCatalog(ctx: AppContext, name: string, ageMs: number): void {
+  const catalogFile = path.join(ctx.paths.cacheDir, 'schema', `${name}.json`);
+  const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
+  catalog.fetchedAt = new Date(Date.now() - ageMs).toISOString();
+  fs.writeFileSync(catalogFile, JSON.stringify(catalog));
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('eager schema catalog', () => {
   it('fetches the whole catalog once and reports the table count', async () => {
     // arrange
     const { ctx, seen } = makeContext();
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource());
+    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // assert
     expect(out).toEqual({ outcome: 'fetched', tableCount: 3 });
@@ -79,11 +101,11 @@ describe('eager schema catalog', () => {
   it('serves the second call from cache without re-introspecting', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
     const afterFirst = seen.length;
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource());
+    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // assert
     expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
@@ -93,15 +115,12 @@ describe('eager schema catalog', () => {
   it('re-introspects once the cached catalog is past its TTL', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
     const afterFirst = seen.length;
-    const catalogFile = path.join(ctx.paths.cacheDir, 'schema', 'qa-orders.json');
-    const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
-    catalog.fetchedAt = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
-    fs.writeFileSync(catalogFile, JSON.stringify(catalog));
+    backdateCatalog(ctx, 'qa-orders', 72 * 3600 * 1000);
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource());
+    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // assert
     expect(out.outcome).toBe('fetched');
@@ -113,7 +132,7 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
 
     // act
-    const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource()), ensureDatasourceCatalog(ctx, datasource())]);
+    const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource(), UNFORCED), ensureDatasourceCatalog(ctx, datasource(), UNFORCED)]);
 
     // assert
     expect(first).toEqual({ outcome: 'fetched', tableCount: 3 });
@@ -121,18 +140,62 @@ describe('eager schema catalog', () => {
     expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
   });
 
-  it('refetches a fresh catalog when forced', async () => {
+  it('runs the connector preflight once and every statement on the query session', async () => {
+    // arrange
+    const { ctx, sessions } = makeContext();
+    vi.mocked(runDatasourceConnectors).mockClear();
+
+    // act
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-session'), { ...UNFORCED, sessionId: 'sess-1' });
+
+    // assert
+    expect(runDatasourceConnectors).toHaveBeenCalledTimes(1);
+    expect(sessions).toEqual(['sess-1', 'sess-1', 'sess-1']);
+  });
+
+  it('holds a query slot for the whole fetch', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    const slotEvents: string[] = [];
+    const acquireQuerySlot = async () => {
+      slotEvents.push(`acquire after ${seen.length}`);
+      return () => slotEvents.push(`release after ${seen.length}`);
+    };
+
+    // act
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-slot'), { ...UNFORCED, acquireQuerySlot });
+
+    // assert
+    expect(slotEvents).toEqual(['acquire after 0', 'release after 3']);
+  });
+
+  it('refetches when forced and the catalog is older than the forced refresh gap', async () => {
+    // arrange
+    const { ctx, seen } = makeContext();
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    backdateCatalog(ctx, 'qa-orders', 2 * 60 * 1000);
     const afterFirst = seen.length;
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), { force: true });
+    const out = await ensureDatasourceCatalog(ctx, datasource(), FORCED);
 
     // assert
     expect(out.outcome).toBe('fetched');
     expect(seen.length).toBeGreaterThan(afterFirst);
+  });
+
+  it('serves a forced refresh from cache within the forced refresh gap', async () => {
+    // arrange
+    const { ctx, seen } = makeContext();
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    const afterFirst = seen.length;
+
+    // act
+    const out = await ensureDatasourceCatalog(ctx, datasource(), FORCED);
+
+    // assert
+    expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
+    expect(seen.length).toBe(afterFirst);
   });
 
   it('reports unsupported kinds without touching the plugin', async () => {
@@ -140,7 +203,7 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource('redis'));
+    const out = await ensureDatasourceCatalog(ctx, datasource('redis'), UNFORCED);
 
     // assert
     expect(out).toEqual({ outcome: 'unsupported', tableCount: 0 });
@@ -154,11 +217,46 @@ describe('eager schema catalog', () => {
     });
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource());
+    const out = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-refused'), UNFORCED);
 
     // assert
     expect(out.outcome).toBe('failed');
     expect(out.error).toContain('connection refused');
+  });
+
+  it('does not retry a failed fetch within the failure window, even when forced', async () => {
+    // arrange
+    const { ctx, seen } = makeContext(() => {
+      throw new Error('SELECT command denied');
+    });
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), UNFORCED);
+    const afterFirst = seen.length;
+
+    // act
+    const again = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), UNFORCED);
+    const forced = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), FORCED);
+
+    // assert
+    expect(again).toEqual({ outcome: 'failed', tableCount: 0, error: 'SELECT command denied' });
+    expect(forced).toEqual(again);
+    expect(seen.length).toBe(afterFirst);
+  });
+
+  it('retries a failed fetch once the failure window has passed', async () => {
+    // arrange
+    const { ctx, seen } = makeContext(() => {
+      throw new Error('SELECT command denied');
+    });
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), UNFORCED);
+    const afterFirst = seen.length;
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 6 * 60 * 1000);
+
+    // act
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), UNFORCED);
+
+    // assert
+    expect(seen.length).toBeGreaterThan(afterFirst);
   });
 
   it('keeps indexes without BTREE and non-unique defaults, and parses the partition key', async () => {
@@ -185,7 +283,7 @@ describe('eager schema catalog', () => {
     });
 
     // act
-    await ensureDatasourceCatalog(ctx, datasource());
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // assert
     expect(ctx.schemaCatalogStore.get('qa-orders')!.tables.order_items).toEqual({
@@ -203,7 +301,7 @@ describe('eager schema catalog', () => {
   it('returns only the referenced tables plus the catalog summary', async () => {
     // arrange
     const { ctx } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // act
     const context = buildSchemaContext('SELECT id FROM ORDERS', ctx.schemaCatalogStore.get('qa-orders'));
@@ -217,7 +315,7 @@ describe('eager schema catalog', () => {
   it('lists and clears cached catalogs', async () => {
     // arrange
     const { ctx } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource());
+    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
 
     // act
     const listed = ctx.schemaCatalogStore.list();
