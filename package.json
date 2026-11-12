@@ -1,6 +1,6 @@
 {
   "name": "@mehmetsecgin/taproot",
-  "version": "1.10.5",
+  "version": "1.10.6",
   "private": true,
   "description": "Universal query orchestration CLI with plugin runtime (DB-first v1)",
   "type": "module",
