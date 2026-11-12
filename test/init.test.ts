@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
 
 function runCli(args: string[], env: Record<string, string> = {}) {
   const distCli = path.join(process.cwd(), 'dist', 'index.js');
@@ -51,6 +52,44 @@ function setupCustomKb(kbDir: string, services: Array<Record<string, unknown>>) 
   fs.mkdirSync(kbDir, { recursive: true });
   fs.writeFileSync(path.join(kbDir, 'services.json'), JSON.stringify(services));
   return kbDir;
+}
+
+function initDatasourceOverSavedOrdersProfile(savedPort: number) {
+  const stateRoot = makeStateRoot();
+  const kbDir = makeKbDir();
+  setupKb(kbDir);
+  const configDir = path.join(stateRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, 'datasources.json'),
+    JSON.stringify([
+      {
+        name: 'qa-develop-orders',
+        kind: 'mysql',
+        env: 'qa',
+        namespace: 'develop',
+        service: 'orders',
+        tags: ['auto-bootstrap'],
+        connection: { host: '127.0.0.1', port: savedPort, database: 'orders' },
+        credentialRef: 'qa:orders',
+        connectors: ['kubectl-portforward'],
+        policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+        resolverHints: {
+          'kubectl-portforwardCredentialRef': 'kpf:qa:orders',
+        },
+        updatedAt: new Date().toISOString(),
+        confidence: 0.9,
+      },
+    ]),
+  );
+  const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], {
+    TAPROOT_STATE_ROOT: stateRoot,
+    TAPROOT_MASTER_KEY: 'test-key',
+    TAPROOT_NO_KEYCHAIN: '1',
+    TAPROOT_KB_DIR: kbDir,
+  });
+  expect(out.status).toBe(0);
+  return JSON.parse(out.stdout).data;
 }
 
 describe('init command', () => {
@@ -278,42 +317,15 @@ describe('init command', () => {
   });
 
   it('skips existing datasource profile', () => {
-    const stateRoot = makeStateRoot();
-    const kbDir = makeKbDir();
-    setupKb(kbDir);
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, 'datasources.json'),
-      JSON.stringify([
-        {
-          name: 'qa-develop-orders',
-          kind: 'mysql',
-          env: 'qa',
-          namespace: 'develop',
-          service: 'orders',
-          tags: ['auto-bootstrap'],
-          connection: { host: '127.0.0.1', port: 4406, database: 'orders' },
-          credentialRef: 'qa:orders',
-          connectors: ['kubectl-portforward'],
-          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-          resolverHints: {
-            'kubectl-portforwardCredentialRef': 'kpf:qa:orders',
-          },
-          updatedAt: new Date().toISOString(),
-          confidence: 0.9,
-        },
-      ]),
-    );
-    const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], {
-      TAPROOT_STATE_ROOT: stateRoot,
-      TAPROOT_MASTER_KEY: 'test-key',
-      TAPROOT_KB_DIR: kbDir,
-    });
-    expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout).data;
+    const parsed = initDatasourceOverSavedOrdersProfile(qaPortforwardLocalPort('qa', 'develop', 'orders'));
     expect(parsed.source).toBe('store-existing');
     expect(parsed.skipped).toBe(true);
+  });
+
+  it('rewrites a profile saved with the legacy shared qa-portforward port', () => {
+    const parsed = initDatasourceOverSavedOrdersProfile(4406);
+    expect(parsed.source).toBe('kb-repaired');
+    expect(parsed.profile.connection.port).toBe(qaPortforwardLocalPort('qa', 'develop', 'orders'));
   });
 
   it('creates namespace-aware datasource profile from KB when namespace is targeted explicitly', () => {

@@ -1,6 +1,7 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './app.js';
 import { criticalDatasourceKbConflicts } from './conflicts.js';
+import { qaPortforwardLocalPort } from './qa-portforward.js';
 import { nowIso } from './time.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
@@ -82,10 +83,12 @@ interface BootstrapStrategy {
 function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
   const effectiveNamespace = String(c.namespace || 'default');
   const context = String(process.env.TAPROOT_QA_CONTEXT || c.kb.k8s_context || c.env || effectiveNamespace);
-  const localPort = Number(process.env.TAPROOT_QA_LOCAL_PORT || 4406);
+  const localPort = qaPortforwardLocalPort(c.env, c.namespace, c.service);
   const logFile = `/tmp/taproot-pf-${c.env}-${c.service}.log`;
-  const statusCommand = `lsof -iTCP:${localPort} -sTCP:LISTEN >/dev/null`;
-  const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${c.target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl --context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
+  const forwardArgs = `--context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:`;
+  const listenerPid = `$(lsof -tiTCP:${localPort} -sTCP:LISTEN | head -n 1)`;
+  const statusCommand = `ps -o command= -p "${listenerPid}" 2>/dev/null | grep -qF -- '${forwardArgs}'`;
+  const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${c.target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl ${forwardArgs}$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
   const kpfRef = `kpf:${c.env}:${c.namespace || 'default'}:${c.service}`;
   return {
     kb: c.kb,
