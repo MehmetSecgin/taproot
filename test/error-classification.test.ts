@@ -47,6 +47,12 @@ describe('error classification', () => {
     expect(exitCodeForClass('RESOURCE_LIMIT')).toBe(EXIT_CODES.GENERAL_ERROR);
   });
 
+  it('maps a statement the server stopped at max_execution_time to QUERY_TIMEOUT', () => {
+    expect(classifyError('Query execution was interrupted, maximum statement execution time exceeded')).toBe('QUERY_TIMEOUT');
+    expect(classifyError('[executor:3024]Query execution was interrupted, maximum statement execution time exceeded')).toBe('QUERY_TIMEOUT');
+    expect(classifyError('Query execution was interrupted')).toBe('QUERY_TIMEOUT');
+  });
+
   it('maps a runaway query kill to RESOURCE_LIMIT', () => {
     expect(classifyError('Query execution was interrupted, identified as runaway query [ElapsedTime = 10s(5s)]')).toBe('RESOURCE_LIMIT');
   });

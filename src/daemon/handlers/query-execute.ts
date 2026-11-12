@@ -1,83 +1,56 @@
-import { environmentPolicy } from '../../core/app.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { discoveryUnavailable } from '../../core/error-classification.js';
-import { deriveQueryTarget, executeQuery, silentQueryReport } from '../../core/execute-query.js';
+import { executeQuery, silentQueryReport } from '../../core/execute-query.js';
 import type { QueryExecutionRequest } from '../../core/execute-query.js';
 import { parseTimeoutMs, queryTimeoutError } from '../../core/query-timeout.js';
-import { str } from '../../core/strings.js';
+import type { DatasourceProfile } from '../../types/core.js';
+import type { SessionRegistry } from '../session-registry.js';
 import type { Handler } from './types.js';
 
-function buildRequest(params: Record<string, unknown>, target: { env: string; namespace: string; service: string }, timeoutMs: number): QueryExecutionRequest {
-  const rawParams = Array.isArray(params.params) ? (params.params as unknown[]).map((v) => String(v)) : [];
+interface SessionLease {
+  sessionId: string;
+  release(): void;
+}
+
+function leaseSession(sessions: SessionRegistry, datasource: DatasourceProfile): SessionLease {
+  const { sessionId } = sessions.open({
+    datasourceName: datasource.name,
+    env: datasource.env,
+    namespace: datasource.namespace,
+    service: datasource.service,
+    kind: datasource.kind,
+    connection: datasource.connection,
+    connectors: datasource.connectors,
+  });
+  const leaseId = sessions.acquireLease(sessionId);
+  const heartbeat = setInterval(() => sessions.heartbeatLease(sessionId, leaseId), RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs);
   return {
-    datasource: params.datasource ? String(params.datasource) : undefined,
-    optsEnv: params.optsEnv ? String(params.optsEnv) : params.env ? String(params.env) : undefined,
-    env: target.env,
-    namespace: target.namespace,
-    service: target.service,
-    query: str(params.query),
-    params: rawParams,
-    allowDiscovery: Boolean(params.allowDiscovery),
-    allowMutate: Boolean(params.allowMutate),
-    allowPartitionScan: Boolean(params.allowPartitionScan),
-    explain: Boolean(params.explain),
-    rowsObject: Boolean(params.rowsObject),
-    jsonExtract: Array.isArray(params.jsonExtract) ? (params.jsonExtract as unknown[]).map((v) => String(v)) : [],
-    proto: params.proto ? String(params.proto) : undefined,
-    protoRoot: params.protoRoot ? String(params.protoRoot) : undefined,
-    allowFlush: Boolean(params.allowFlush),
-    requestJson: params.requestJson ? String(params.requestJson) : undefined,
-    skipProtoValidate: Boolean(params.skipProtoValidate),
-    timeoutMs,
-    tz: str(params.tz) || undefined,
+    sessionId,
+    release: () => {
+      clearInterval(heartbeat);
+      sessions.releaseLease(sessionId, leaseId);
+    },
   };
 }
 
 export const handleQueryExecute: Handler = async ({ req, base, deps, clientGone }) => {
   const { ctx, sessions, queryLimiter } = deps;
-  const target = deriveQueryTarget(ctx, {
-    datasource: str(req.params.datasource),
-    env: str(req.params.env),
-    namespace: str(req.params.namespace),
-    service: str(req.params.service),
-  });
-  const policy = environmentPolicy(ctx, target.env);
-  if (Boolean(req.params.allowDiscovery) || policy.allowDiscoveryByDefault) {
-    throw discoveryUnavailable('discovery mode is only available in direct CLI mode when daemon is bypassed.');
-  }
-
   const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
   const timeoutMs = parseTimeoutMs(req.params.timeoutMs, timeoutDefault);
+  const request = { ...(req.params as unknown as QueryExecutionRequest), timeoutMs, allowDiscovery: false };
   const timeoutController = new AbortController();
   const timeoutTimer = setTimeout(() => timeoutController.abort(queryTimeoutError(timeoutMs)), timeoutMs);
   const releaseGlobal = await queryLimiter.acquire({ signal: AbortSignal.any([clientGone, timeoutController.signal]) });
-  let leaseSessionId = '';
-  let leaseId = '';
-  let heartbeat: NodeJS.Timeout | undefined;
+  let lease: SessionLease | undefined;
   try {
-    const request = buildRequest(req.params, target, timeoutMs);
-    const resolvedProfile = target.explicitProfile;
-    const session = sessions.open({
-      datasourceName: resolvedProfile?.name || str(req.params.datasource) || `${target.env}-${target.service}`,
-      env: resolvedProfile?.env || target.env,
-      namespace: resolvedProfile?.namespace || target.namespace,
-      service: resolvedProfile?.service || target.service,
-      kind: resolvedProfile?.kind || '',
-      connection: (resolvedProfile?.connection || {}) as Record<string, unknown>,
-      connectors: resolvedProfile?.connectors || [],
-    });
-    leaseSessionId = session.sessionId;
-    leaseId = sessions.acquireLease(session.sessionId);
-    base.meta.sessionId = session.sessionId;
-    heartbeat = setInterval(
-      () => sessions.heartbeatLease(session.sessionId, leaseId),
-      RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
-    );
-
-    const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, {
+    const outcome = await executeQuery(request, {
       ctx,
       report: silentQueryReport,
       signal: clientGone,
+      openSession: (datasource) => {
+        lease = leaseSession(sessions, datasource);
+        base.meta.sessionId = lease.sessionId;
+        return lease.sessionId;
+      },
       acquireQuerySlot: (signal) => queryLimiter.acquire({ signal }),
     });
     const meta = outcome.meta;
@@ -98,8 +71,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps, clientGone 
     };
   } finally {
     clearTimeout(timeoutTimer);
-    if (heartbeat) clearInterval(heartbeat);
-    if (leaseSessionId && leaseId) sessions.releaseLease(leaseSessionId, leaseId);
+    lease?.release();
     releaseGlobal();
   }
 };

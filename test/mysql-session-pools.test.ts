@@ -1,7 +1,7 @@
 import mysql from 'mysql2';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { closeAllMysqlPools, closeMysqlSessionPools, leaseMysqlConnection } from '../src/plugins-builtins/_shared/db-conn.js';
-import { column, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
+import { closeAllMysqlPools, closeMysqlSessionPools } from '../src/plugins-builtins/_shared/db-conn.js';
+import { column, leaseFakeMysqlConnection, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
 
 let server: FakeMysqlServer;
 
@@ -16,11 +16,7 @@ afterAll(() => {
 });
 
 async function readIn(sessionId: string): Promise<void> {
-  const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, '+00:00', {
-    capability: 'executeRead',
-    sessionId,
-    signal: undefined,
-  });
+  const { conn, release } = await leaseFakeMysqlConnection(server, { sessionId });
   await conn.query('SELECT 1 AS ok');
   await release();
 }

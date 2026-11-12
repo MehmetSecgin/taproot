@@ -1,5 +1,9 @@
 import type { Connection, ConnectionOptions, Pool } from 'mysql2/promise';
-import { isUtcOffset } from '../../core/session-timezone.js';
+import { queryTimeoutError } from '../../core/query-timeout.js';
+import { DEFAULT_SESSION_TIME_ZONE, isUtcOffset } from '../../core/session-timezone.js';
+import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-hints.js';
+import { str } from '../../core/strings.js';
+import { nowIso } from '../../core/time.js';
 import type { QueryRequest, QueryResult } from '../../types/core.js';
 
 export interface BaseConnConfig {
@@ -10,14 +14,22 @@ export interface BaseConnConfig {
   database: string | undefined;
 }
 
+interface SessionSettings {
+  timeZone: string;
+  readOnly: boolean;
+  maxExecutionTimeMs: number;
+}
+
 const poolsBySession = new Map<string, Map<string, Pool>>();
-const connectionTimeZones = new WeakMap<object, string>();
-const READ_ONLY_UNENFORCED_ERRNOS = new Set([1193, 1235]);
+const appliedSessionSettings = new WeakMap<object, SessionSettings>();
+const NEW_SESSION_SETTINGS: Partial<SessionSettings> = { readOnly: false };
+const UNSUPPORTED_SETTING_ERRNOS = new Set([1193, 1235]);
 
 export interface MysqlLeaseRequest {
   capability: QueryRequest['capability'];
   sessionId: string | undefined;
   signal: AbortSignal | undefined;
+  timeoutMs: number | undefined;
 }
 
 export function baseConnConfig(
@@ -61,13 +73,21 @@ function readTemporalsIn(timeZone: string): ConnectionOptions {
   return isUtcOffset(timeZone) ? { timezone: timeZone } : { dateStrings: true };
 }
 
-function ignoreUnenforcedReadOnly(error: { errno?: number }): void {
-  if (!READ_ONLY_UNENFORCED_ERRNOS.has(Number(error.errno))) throw error;
+function ignoreUnsupportedSetting(error: { errno?: number }): void {
+  if (!UNSUPPORTED_SETTING_ERRNOS.has(Number(error.errno))) throw error;
 }
 
-async function prepareSession(conn: Connection, timeZone: string, readOnly: boolean): Promise<void> {
-  await conn.query('SET time_zone = ?', [timeZone]);
-  if (readOnly) await conn.query('SET SESSION transaction_read_only = 1').catch(ignoreUnenforcedReadOnly);
+async function applySessionSettings(conn: Connection, wanted: SessionSettings): Promise<void> {
+  const physical = (conn as unknown as { connection: object }).connection;
+  const applied = appliedSessionSettings.get(physical) ?? NEW_SESSION_SETTINGS;
+  if (applied.timeZone !== wanted.timeZone) await conn.query('SET time_zone = ?', [wanted.timeZone]);
+  if (applied.readOnly !== wanted.readOnly) {
+    await conn.query('SET SESSION transaction_read_only = ?', [Number(wanted.readOnly)]).catch(ignoreUnsupportedSetting);
+  }
+  if (applied.maxExecutionTimeMs !== wanted.maxExecutionTimeMs) {
+    await conn.query('SET SESSION max_execution_time = ?', [wanted.maxExecutionTimeMs]).catch(ignoreUnsupportedSetting);
+  }
+  appliedSessionSettings.set(physical, wanted);
 }
 
 export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, lease: MysqlLeaseRequest) {
@@ -76,15 +96,11 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
   const sessionConfig = { ...config, supportBigNumbers: true, ...readTemporalsIn(timeZone) };
   const poolConn = readOnly && lease.sessionId ? await poolFor(mysql, lease.sessionId, sessionConfig).getConnection() : undefined;
   const conn = poolConn ?? (await mysql.createConnection(sessionConfig));
-  const physical = (conn as unknown as { connection: object }).connection;
-  if (connectionTimeZones.get(physical) !== timeZone) {
-    try {
-      await prepareSession(conn, timeZone, readOnly);
-    } catch (error) {
-      conn.destroy();
-      throw error;
-    }
-    connectionTimeZones.set(physical, timeZone);
+  try {
+    await applySessionSettings(conn, { timeZone, readOnly, maxExecutionTimeMs: lease.timeoutMs ?? 0 });
+  } catch (error) {
+    conn.destroy();
+    throw error;
   }
   const release = async () => (poolConn ? poolConn.release() : closeMysqlConnection(conn));
   if (lease.signal?.aborted) {
@@ -94,7 +110,7 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
   return { conn, release };
 }
 
-export async function queryRows(
+async function queryRows(
   conn: Connection,
   sql: string,
   timeoutMs: number | undefined,
@@ -110,6 +126,45 @@ export async function queryRows(
     };
   } finally {
     signal?.removeEventListener('abort', destroy);
+  }
+}
+
+export async function executeMysqlQuery(
+  plugin: string,
+  request: QueryRequest,
+  config: ConnectionOptions,
+  sessionId: string | undefined,
+): Promise<QueryResult> {
+  const startedAt = nowIso();
+  const start = Date.now();
+  const { conn, release } = await leaseMysqlConnection(config, request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE, {
+    capability: request.capability,
+    sessionId,
+    signal: request.signal,
+    timeoutMs: request.timeoutMs,
+  });
+  try {
+    const result = await queryRows(conn, request.query, request.timeoutMs, request.signal);
+    return {
+      datasource: request.datasource.name,
+      plugin,
+      capability: request.capability,
+      query: { native: request.query },
+      result,
+      timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
+      warnings: [],
+      classification: 'success',
+    };
+  } catch (error) {
+    const message = str((error as Error).message);
+    if (request.timeoutMs && /timeout/i.test(message)) {
+      conn.destroy();
+      throw queryTimeoutError(request.timeoutMs);
+    }
+    const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);
+    throw enriched === message ? error : new Error(enriched);
+  } finally {
+    await release();
   }
 }
 

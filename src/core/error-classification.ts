@@ -20,7 +20,7 @@ type ErrorClassDef = {
 const ERROR_CLASSES = {
   BAD_INPUT: { exitCode: EXIT_CODES.BAD_INPUT, match: /^bad_input:/ },
   MISSING_PARTITION_PREDICATE: { exitCode: EXIT_CODES.BAD_INPUT, match: /missing_partition_predicate/ },
-  QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout/ },
+  QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout|maximum statement execution time exceeded|query execution was interrupted(?!, identified as runaway)/ },
   RESOURCE_LIMIT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /exceeded resource group quota limitation|runaway watch list|identified as runaway query/ },
   MISCONFIGURED_DATASOURCE: {
     exitCode: EXIT_CODES.BAD_INPUT,

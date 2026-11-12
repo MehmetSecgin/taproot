@@ -1,7 +1,6 @@
 import mysql from 'mysql2';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { leaseMysqlConnection } from '../src/plugins-builtins/_shared/db-conn.js';
-import { column, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
+import { column, leaseFakeMysqlConnection, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
 
 const UNSIGNED_FLAG = 32;
 
@@ -23,7 +22,7 @@ afterAll(() => server?.close());
 describe('MySQL BIGINT', () => {
   it('returns values beyond Number.MAX_SAFE_INTEGER as exact strings and small values as numbers', async () => {
     // arrange
-    const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, '+00:00', { capability: 'executeRead', sessionId: undefined, signal: undefined });
+    const { conn, release } = await leaseFakeMysqlConnection(server);
 
     // act
     const [rows] = await conn.query('SELECT id, external_id, version FROM accounts').finally(release);

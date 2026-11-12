@@ -2,12 +2,8 @@ import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
-import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
-import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-hints.js';
-import { nowIso } from '../../core/time.js';
-import { baseConnConfig, leaseMysqlConnection, loadMysql, queryRows } from '../_shared/db-conn.js';
-import { str } from '../../core/strings.js';
+import { baseConnConfig, executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
   return {
@@ -39,40 +35,6 @@ export const mysqlPlugin: TapRootPlugin = {
   },
 
   async execute(request, creds): Promise<QueryResult> {
-    const startedAt = nowIso();
-    const start = Date.now();
-    const { conn, release } = await leaseMysqlConnection(
-      connConfig(request.datasource, creds),
-      request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
-      { capability: request.capability, sessionId: creds.__sessionId, signal: request.signal },
-    );
-    try {
-      const result = await queryRows(conn, request.query, request.timeoutMs, request.signal);
-      return {
-        datasource: request.datasource.name,
-        plugin: 'mysql',
-        capability: request.capability,
-        query: { native: request.query },
-        result,
-        timings: {
-          startedAt,
-          endedAt: nowIso(),
-          durationMs: Date.now() - start,
-        },
-        warnings: [],
-        classification: 'success',
-      };
-    } catch (error) {
-      const message = str((error as Error).message);
-      if (request.timeoutMs && /timeout/i.test(message)) {
-        (conn as any).destroy?.();
-        throw queryTimeoutError(request.timeoutMs);
-      }
-      const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);
-      if (enriched !== message) throw new Error(enriched);
-      throw error;
-    } finally {
-      await release();
-    }
+    return executeMysqlQuery('mysql', request, connConfig(request.datasource, creds), creds.__sessionId);
   },
 };

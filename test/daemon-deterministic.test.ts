@@ -61,7 +61,7 @@ describe('daemon deterministic resolution', () => {
     }
   });
 
-  it('returns DISCOVERY_UNAVAILABLE in daemon path when allowDiscovery is requested', async () => {
+  it('resolves deterministically in the daemon even when allowDiscovery is requested', async () => {
     const stateRoot = makeStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
@@ -87,7 +87,7 @@ describe('daemon deterministic resolution', () => {
         },
       });
       expect(res.ok).toBe(false);
-      expect(res.error?.code).toBe('DISCOVERY_UNAVAILABLE');
+      expect(res.error?.code).toBe('DETERMINISTIC_REQUIRED');
     } finally {
       await daemon.stop();
     }

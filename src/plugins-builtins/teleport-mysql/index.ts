@@ -1,12 +1,8 @@
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { registerCleanup } from '../../core/cleanup.js';
-import { leaseMysqlConnection, loadMysql, queryRows } from '../_shared/db-conn.js';
+import { executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity, spawnErrorMessage } from '../../core/error-classification.js';
-import { queryTimeoutError } from '../../core/query-timeout.js';
-import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
-import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-hints.js';
-import { nowIso } from '../../core/time.js';
 import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/tsh-databases.js';
 import { DoctorStatus } from '../../types/core.js';
 import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../../types/core.js';
@@ -256,6 +252,11 @@ async function startProxy(
   }
 }
 
+function proxyUnavailable(error: Error): never {
+  if (/^(QUERY_TIMEOUT|MISSING_TOOL):/.test(str(error.message))) throw error;
+  throw connectivity(`teleport proxy path unavailable; ${String(error.message || error)}`);
+}
+
 export const teleportMysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport-mysql',
@@ -299,8 +300,6 @@ export const teleportMysqlPlugin: TapRootPlugin = {
   },
 
   async execute(request, creds): Promise<QueryResult> {
-    const startedAt = nowIso();
-    const start = Date.now();
     const target = request.datasource.connection.target;
     const user = await resolveDbUser(request.datasource, creds);
     const database = request.datasource.connection.database;
@@ -314,57 +313,13 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       );
     }
 
-    const warnings: string[] = [];
-    const effectiveSessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
-    const shouldCleanup = !sessionId;
-    let proxyReady = false;
+    const proxySessionId = sessionId || `direct-${process.pid}-${Date.now()}`;
     try {
-      const proxy = await ensureProxy(effectiveSessionId, String(target), String(user), String(database));
-      proxyReady = true;
-      const { conn, release } = await leaseMysqlConnection(
-        {
-          host: '127.0.0.1',
-          port: proxy.port,
-          user: String(user),
-          password: creds.password,
-          database: String(database),
-        },
-        request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
-        { capability: request.capability, sessionId, signal: request.signal },
-      );
-      try {
-        const result = await queryRows(conn, request.query, request.timeoutMs, request.signal);
-        return {
-          datasource: request.datasource.name,
-          plugin: 'teleport-mysql',
-          capability: request.capability,
-          query: { native: request.query },
-          result,
-          timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
-          warnings,
-          classification: 'success',
-        };
-      } catch (error) {
-        const message = str((error as Error).message);
-        if (request.timeoutMs && /timeout/i.test(message)) {
-          (conn as any).destroy?.();
-          throw queryTimeoutError(request.timeoutMs);
-        }
-        const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);
-        if (enriched !== message) throw new Error(enriched);
-        throw error;
-      } finally {
-        await release();
-      }
-    } catch (proxyError) {
-      if (proxyReady || /^(QUERY_TIMEOUT|MISSING_TOOL):/.test(str((proxyError as Error).message))) {
-        throw proxyError;
-      }
-      throw connectivity(`teleport proxy path unavailable; ${String((proxyError as Error).message || proxyError)}`);
+      const proxy = await ensureProxy(proxySessionId, String(target), String(user), String(database)).catch(proxyUnavailable);
+      const config = { host: '127.0.0.1', port: proxy.port, user: String(user), password: creds.password, database: String(database) };
+      return await executeMysqlQuery('teleport-mysql', request, config, sessionId);
     } finally {
-      if (shouldCleanup) {
-        await closeTeleportMysqlSessionProxies(effectiveSessionId);
-      }
+      if (!sessionId) await closeTeleportMysqlSessionProxies(proxySessionId);
     }
   },
 };

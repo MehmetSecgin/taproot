@@ -1,5 +1,6 @@
 import type { AddressInfo, Server } from 'node:net';
 import mysql from 'mysql2';
+import { leaseMysqlConnection, type MysqlLeaseRequest } from '../../src/plugins-builtins/_shared/db-conn.js';
 
 interface ServerConnection {
   sequenceId: number;
@@ -97,4 +98,17 @@ export async function startFakeMysqlServer(
     openConnections: () => new Promise((resolve, reject) => server._server.getConnections((error, count) => (error ? reject(error) : resolve(count)))),
     close: () => server.close(),
   };
+}
+
+export function leaseFakeMysqlConnection(
+  server: FakeMysqlServer,
+  { timeZone = '+00:00', ...lease }: Partial<MysqlLeaseRequest> & { timeZone?: string } = {},
+) {
+  return leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, timeZone, {
+    capability: 'executeRead',
+    sessionId: undefined,
+    signal: undefined,
+    timeoutMs: undefined,
+    ...lease,
+  });
 }

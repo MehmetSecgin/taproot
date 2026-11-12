@@ -37,7 +37,6 @@ export interface QueryExecutionRequest {
   skipProtoValidate: boolean;
   timeoutMs: number;
   tz?: string;
-  sessionId?: string;
 }
 
 export interface QueryReport {
@@ -201,7 +200,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return failure(error, {});
   }
 
-  const sessionId = deps.openSession ? deps.openSession(datasource) : request.sessionId;
+  const sessionId = deps.openSession?.(datasource);
   let params: Record<string, string>;
   let jsonExtractSpecs: JsonExtractSpec[];
   const query = request.query.trim();
