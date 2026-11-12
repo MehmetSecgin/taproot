@@ -8,6 +8,7 @@ type ParserBuild = { Parser: new () => SqlParser };
 
 const require = createRequire(import.meta.url);
 let parser: SqlParser | undefined;
+let lastParse: { executedSql: string; statements: readonly unknown[] | undefined } | undefined;
 
 const EXPLAIN_RE = /^[\s(]*(?:explain|describe|desc)\b/i;
 const ANALYZE_RE = /\banalyze\b/i;
@@ -73,8 +74,8 @@ export function hasSecondStatement(sql: string): boolean {
 }
 
 export function isExplainAnalyze(sql: string): boolean {
-  const code = maskCommentsAndLiterals(sql);
-  return EXPLAIN_RE.test(code) && ANALYZE_RE.test(code);
+  const maskedSql = maskCommentsAndLiterals(sql);
+  return EXPLAIN_RE.test(maskedSql) && ANALYZE_RE.test(maskedSql);
 }
 
 export function explainAnalyzeTarget(sql: string): string | undefined {
@@ -82,11 +83,25 @@ export function explainAnalyzeTarget(sql: string): string | undefined {
   return prefix ? sql.slice(prefix[0].length) : undefined;
 }
 
-export function parseExecutedStatements(sql: string): unknown[] | undefined {
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    Object.values(value).forEach(deepFreeze);
+  }
+  return value;
+}
+
+function parseStatements(executedSql: string): readonly unknown[] | undefined {
   try {
-    const ast = astifySql(explainAnalyzeTarget(sql) ?? sql);
-    return Array.isArray(ast) ? ast : [ast];
+    const ast = astifySql(executedSql);
+    return deepFreeze(Array.isArray(ast) ? ast : [ast]);
   } catch {
     return undefined;
   }
+}
+
+export function parseExecutedStatements(sql: string): readonly unknown[] | undefined {
+  const executedSql = explainAnalyzeTarget(sql) ?? sql;
+  if (lastParse?.executedSql !== executedSql) lastParse = { executedSql, statements: parseStatements(executedSql) };
+  return lastParse.statements;
 }

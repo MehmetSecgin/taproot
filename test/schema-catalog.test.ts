@@ -16,8 +16,8 @@ vi.mock('../src/core/app.js', async (importOriginal) => {
 
 type Rows = Array<Record<string, unknown>>;
 
-const UNFORCED = { sessionId: undefined, acquireQuerySlot: undefined, force: false };
-const FORCED = { sessionId: undefined, acquireQuerySlot: undefined, force: true };
+const ROUTINE = { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: false };
+const AFTER_SCHEMA_ERROR = { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: true };
 
 const ORDERS_COLUMNS: Rows = [
   { table_name: 'orders', column_name: 'id' },
@@ -90,7 +90,7 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
     expect(out).toEqual({ outcome: 'fetched', tableCount: 3 });
@@ -101,11 +101,11 @@ describe('eager schema catalog', () => {
   it('serves the second call from cache without re-introspecting', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
     const afterFirst = seen.length;
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
     expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
@@ -115,12 +115,12 @@ describe('eager schema catalog', () => {
   it('re-introspects once the cached catalog is past its TTL', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
     const afterFirst = seen.length;
     backdateCatalog(ctx, 'qa-orders', 72 * 3600 * 1000);
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
     expect(out.outcome).toBe('fetched');
@@ -132,7 +132,7 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
 
     // act
-    const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource(), UNFORCED), ensureDatasourceCatalog(ctx, datasource(), UNFORCED)]);
+    const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource(), ROUTINE), ensureDatasourceCatalog(ctx, datasource(), ROUTINE)]);
 
     // assert
     expect(first).toEqual({ outcome: 'fetched', tableCount: 3 });
@@ -146,7 +146,7 @@ describe('eager schema catalog', () => {
     vi.mocked(runDatasourceConnectors).mockClear();
 
     // act
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-session'), { ...UNFORCED, sessionId: 'sess-1' });
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-session'), { ...ROUTINE, sessionId: 'sess-1' });
 
     // assert
     expect(runDatasourceConnectors).toHaveBeenCalledTimes(1);
@@ -163,35 +163,35 @@ describe('eager schema catalog', () => {
     };
 
     // act
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-slot'), { ...UNFORCED, acquireQuerySlot });
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-slot'), { ...ROUTINE, acquireQuerySlot });
 
     // assert
     expect(slotEvents).toEqual(['acquire after 0', 'release after 3']);
   });
 
-  it('refetches when forced and the catalog is older than the forced refresh gap', async () => {
+  it('refetches after a schema error once the catalog is older than a minute', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
     backdateCatalog(ctx, 'qa-orders', 2 * 60 * 1000);
     const afterFirst = seen.length;
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), FORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource(), AFTER_SCHEMA_ERROR);
 
     // assert
     expect(out.outcome).toBe('fetched');
     expect(seen.length).toBeGreaterThan(afterFirst);
   });
 
-  it('serves a forced refresh from cache within the forced refresh gap', async () => {
+  it('serves a catalog under a minute old from cache after a schema error', async () => {
     // arrange
     const { ctx, seen } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
     const afterFirst = seen.length;
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource(), FORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource(), AFTER_SCHEMA_ERROR);
 
     // assert
     expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
@@ -203,7 +203,7 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext();
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource('redis'), UNFORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource('redis'), ROUTINE);
 
     // assert
     expect(out).toEqual({ outcome: 'unsupported', tableCount: 0 });
@@ -217,28 +217,28 @@ describe('eager schema catalog', () => {
     });
 
     // act
-    const out = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-refused'), UNFORCED);
+    const out = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-refused'), ROUTINE);
 
     // assert
     expect(out.outcome).toBe('failed');
     expect(out.error).toContain('connection refused');
   });
 
-  it('does not retry a failed fetch within the failure window, even when forced', async () => {
+  it('does not retry a failed fetch within the failure window, even after a schema error', async () => {
     // arrange
     const { ctx, seen } = makeContext(() => {
       throw new Error('SELECT command denied');
     });
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), ROUTINE);
     const afterFirst = seen.length;
 
     // act
-    const again = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), UNFORCED);
-    const forced = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), FORCED);
+    const again = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), ROUTINE);
+    const afterSchemaError = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), AFTER_SCHEMA_ERROR);
 
     // assert
     expect(again).toEqual({ outcome: 'failed', tableCount: 0, error: 'SELECT command denied' });
-    expect(forced).toEqual(again);
+    expect(afterSchemaError).toEqual(again);
     expect(seen.length).toBe(afterFirst);
   });
 
@@ -247,13 +247,13 @@ describe('eager schema catalog', () => {
     const { ctx, seen } = makeContext(() => {
       throw new Error('SELECT command denied');
     });
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), ROUTINE);
     const afterFirst = seen.length;
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.now() + 6 * 60 * 1000);
 
     // act
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), ROUTINE);
 
     // assert
     expect(seen.length).toBeGreaterThan(afterFirst);
@@ -283,7 +283,7 @@ describe('eager schema catalog', () => {
     });
 
     // act
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
     expect(ctx.schemaCatalogStore.get('qa-orders')!.tables.order_items).toEqual({
@@ -301,7 +301,7 @@ describe('eager schema catalog', () => {
   it('returns only the referenced tables plus the catalog summary', async () => {
     // arrange
     const { ctx } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // act
     const context = buildSchemaContext('SELECT id FROM ORDERS', ctx.schemaCatalogStore.get('qa-orders'));
@@ -315,7 +315,7 @@ describe('eager schema catalog', () => {
   it('lists and clears cached catalogs', async () => {
     // arrange
     const { ctx } = makeContext();
-    await ensureDatasourceCatalog(ctx, datasource(), UNFORCED);
+    await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // act
     const listed = ctx.schemaCatalogStore.list();

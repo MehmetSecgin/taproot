@@ -221,7 +221,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   });
   const schemaContext = buildSchemaContext(query, ctx.schemaCatalogStore.get(datasource.name));
   const catalogSession = { sessionId, acquireQuerySlot: deps.acquireQuerySlot };
-  void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, force: false }).then((catalog) => {
+  void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, afterSchemaError: false }).then((catalog) => {
     if (catalog.outcome === 'failed') report.log(`schema catalog skipped: ${catalog.error}`);
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
@@ -342,7 +342,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   } catch (error) {
     const outcome = failure(error, meta);
     if (outcome.ok || (outcome.code !== 'UNKNOWN_COLUMN' && outcome.code !== 'UNKNOWN_TABLE')) return outcome;
-    void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, force: true });
+    void ensureDatasourceCatalog(ctx, datasource, { ...catalogSession, afterSchemaError: true });
     const didYouMean = suggestSchemaNames(outcome.code, outcome.message, schemaContext, ctx.schemaCatalogStore.get(datasource.name));
     if (!didYouMean.length) return outcome;
     return {

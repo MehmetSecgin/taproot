@@ -82,7 +82,7 @@ function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set
   eachChild(obj, (child) => collectTablesFromNode(child, cteNames, tables, aliasToTable));
 }
 
-function scanTables(statements: unknown[]): { tables: Set<string>; aliasToTable: Map<string, string> } {
+function scanTables(statements: readonly unknown[]): { tables: Set<string>; aliasToTable: Map<string, string> } {
   const cteNames = new Set<string>();
   const tables = new Set<string>();
   const aliasToTable = new Map<string, string>();

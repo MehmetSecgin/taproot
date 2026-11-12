@@ -1,7 +1,7 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
 import { DoctorStatus, SQL_DATASOURCE_KINDS } from '../types/core.js';
-import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition, TableContext } from '../types/core.js';
+import type { DatasourceProfile, SchemaIndex, SchemaPartition, TableContext } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
@@ -45,50 +45,39 @@ function partitionSql(datasource: DatasourceProfile): string {
   ].join(' ');
 }
 
-async function catalogReader(
-  ctx: AppContext,
-  datasource: DatasourceProfile,
-  sessionId: string | undefined,
-  signal: AbortSignal,
-): Promise<(sql: string) => Promise<QueryResult>> {
-  const execute = ctx.pluginRegistry.get(datasource.kind)?.execute;
-  if (!execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
-  const creds = await ctx.credentialStore.get(datasource.credentialRef);
-  const connectorChecks = await runDatasourceConnectors({
-    datasource,
-    credentialStore: ctx.credentialStore,
-    pluginRegistry: ctx.pluginRegistry,
-    mode: 'connect',
-  });
-  if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
-    throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
-  }
-  const sessionCreds = sessionId ? { ...creds, __sessionId: sessionId } : creds;
-  return (sql) =>
-    execute(
-      {
-        datasource,
-        query: sql,
-        capability: 'executeRead',
-        sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
-        signal,
-      },
-      sessionCreds,
-    );
-}
-
-function namedRows(result: QueryResult): Array<Record<string, unknown>> {
-  return result.result.rows.map((row) => rowObject(result.result.columns, row));
-}
-
 async function readCatalogRows(ctx: AppContext, datasource: DatasourceProfile, request: CatalogRequest, signal: AbortSignal) {
   const releaseSlot = request.acquireQuerySlot ? await request.acquireQuerySlot(signal) : undefined;
   try {
-    const read = await catalogReader(ctx, datasource, request.sessionId, signal);
+    const execute = ctx.pluginRegistry.get(datasource.kind)?.execute;
+    if (!execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
+    const creds = await ctx.credentialStore.get(datasource.credentialRef);
+    const connectorChecks = await runDatasourceConnectors({
+      datasource,
+      credentialStore: ctx.credentialStore,
+      pluginRegistry: ctx.pluginRegistry,
+      mode: 'connect',
+    });
+    if (connectorChecks.some((c) => c.status === DoctorStatus.Fail)) {
+      throw connectivity(`connector preflight failed: ${connectorChecks.filter((c) => c.status === DoctorStatus.Fail).map((c) => c.detail).join(' | ')}`);
+    }
+    const sessionCreds = request.sessionId ? { ...creds, __sessionId: request.sessionId } : creds;
+    const read = async (sql: string): Promise<Array<Record<string, unknown>>> => {
+      const { result } = await execute(
+        {
+          datasource,
+          query: sql,
+          capability: 'executeRead',
+          sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
+          signal,
+        },
+        sessionCreds,
+      );
+      return result.rows.map((row) => rowObject(result.columns, row));
+    };
     const tables = await read(tableSql(datasource));
     const indexes = await read(indexSql(datasource));
     const partitions = await read(partitionSql(datasource));
-    return { tables: namedRows(tables), indexes: namedRows(indexes), partitions: namedRows(partitions) };
+    return { tables, indexes, partitions };
   } finally {
     releaseSlot?.();
   }
@@ -209,7 +198,7 @@ export type QuerySlot = (signal: AbortSignal) => Promise<() => void>;
 export interface CatalogRequest {
   sessionId: string | undefined;
   acquireQuerySlot: QuerySlot | undefined;
-  force: boolean;
+  afterSchemaError: boolean;
 }
 
 export interface CatalogEnsureResult {
@@ -225,7 +214,7 @@ export function ensureDatasourceCatalog(ctx: AppContext, datasource: DatasourceP
   if (!SQL_DATASOURCE_KINDS.has(datasource.kind)) return Promise.resolve({ outcome: 'unsupported', tableCount: 0 });
   const cached = ctx.schemaCatalogStore.get(datasource.name);
   const cachedCount = Object.keys(cached?.tables || {}).length;
-  const maxAgeMs = request.force ? RUNTIME_CONSTANTS.query.catalogForcedRefreshGapMs : RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
+  const maxAgeMs = request.afterSchemaError ? RUNTIME_CONSTANTS.query.catalogMaxAgeAfterSchemaErrorMs : RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;
   if (cached && Date.now() - Date.parse(cached.fetchedAt) < maxAgeMs) return Promise.resolve({ outcome: 'cached', tableCount: cachedCount });
   const lastFailure = catalogFailures.get(datasource.name);
   if (lastFailure && Date.now() - lastFailure.failedAt < RUNTIME_CONSTANTS.query.catalogFailureRetryMs) {

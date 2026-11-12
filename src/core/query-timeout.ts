@@ -23,9 +23,7 @@ export function preflightBudgetMs(timeoutMs: number): number {
 }
 
 export function queryBudgetMs(timeoutMs: number): number {
-  const queueWaitMs = timeoutMs;
-  const executeMs = timeoutMs;
-  return queueWaitMs + preflightBudgetMs(timeoutMs) + executeMs;
+  return 2 * timeoutMs + preflightBudgetMs(timeoutMs);
 }
 
 function rejectOnAbort(signal: AbortSignal): Promise<never> {

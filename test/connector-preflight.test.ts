@@ -81,6 +81,22 @@ describe('connector preflight reuse', () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ['connection', (profile: DatasourceProfile): DatasourceProfile => ({ ...profile, connection: { ...profile.connection, port: 4000 } })],
+    ['connectors', (profile: DatasourceProfile): DatasourceProfile => ({ ...profile, connectors: ['fake', 'other'] })],
+  ])('runs connect again after a change to the profile %s inside the reuse window', async (part, edit) => {
+    // arrange
+    const { connect, pluginRegistry } = fakeConnector(['ok']);
+    const profile = datasource(`changed-${part}`);
+    await runDatasourceConnectors(connectInput(profile, pluginRegistry));
+
+    // act
+    await runDatasourceConnectors(connectInput(edit(profile), pluginRegistry));
+
+    // assert
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a failed connect on the next query', async () => {
     // arrange
     const { connect, pluginRegistry } = fakeConnector(['fail', 'ok']);

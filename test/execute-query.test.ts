@@ -139,7 +139,7 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
     const cachedBeforeRelease = ctx.schemaCatalogStore.get('qa-fake');
     releaseCatalog();
-    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, { sessionId: undefined, acquireQuerySlot: undefined, force: false });
+    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: false });
 
     // assert
     expect(outcome.ok).toBe(true);
@@ -263,7 +263,7 @@ describe('executeQuery failure', () => {
     vi.setSystemTime(Date.now() - 2 * 60 * 1000);
     ctx.schemaCatalogStore.save('qa-fake', {});
     vi.useRealTimers();
-    const joinRefetch = { sessionId: undefined, acquireQuerySlot: undefined, force: true };
+    const joinRefetch = { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: true };
 
     // act
     for (const attempt of ['customer_ident', 'customer_idnt', 'customerid']) {

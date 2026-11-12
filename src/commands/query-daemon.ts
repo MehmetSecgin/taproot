@@ -1,4 +1,5 @@
 import type { AppContext } from '../core/app.js';
+import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import type { QueryOutcomeMeta, QuerySuccessData, QueryExecutionRequest } from '../core/execute-query.js';
 import { queryBudgetMs } from '../core/query-timeout.js';
 import { str } from '../core/strings.js';
@@ -16,7 +17,7 @@ export async function runDaemonQuery(request: QueryExecutionRequest, ctx: AppCon
   const callDaemon = async (): Promise<RpcResponse | undefined> => {
     try {
       const res = await rpcCall({
-        timeoutMs: queryBudgetMs(request.timeoutMs) + 1000,
+        timeoutMs: queryBudgetMs(request.timeoutMs) + RUNTIME_CONSTANTS.rpc.queryReplyMarginMs,
         method: RpcMethod.QueryExecute,
         params: { ...request },
       });

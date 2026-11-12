@@ -22,6 +22,7 @@ export const RUNTIME_CONSTANTS = {
   },
   rpc: {
     requestTimeoutMs: 30 * 1000,
+    queryReplyMarginMs: 1000,
   },
   query: {
     defaultTimeoutMs: intFromEnv('TAPROOT_QUERY_TIMEOUT_MS', 15 * 1000),
@@ -29,7 +30,7 @@ export const RUNTIME_CONSTANTS = {
     catalogTtlHours: intFromEnv('TAPROOT_CATALOG_TTL_HOURS', 24),
     catalogTimeoutMs: intFromEnv('TAPROOT_CATALOG_TIMEOUT_MS', 20 * 1000),
     catalogFailureRetryMs: 5 * 60 * 1000,
-    catalogForcedRefreshGapMs: 60 * 1000,
+    catalogMaxAgeAfterSchemaErrorMs: 60 * 1000,
   },
   connector: {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),

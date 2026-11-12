@@ -113,24 +113,31 @@ interface ConnectorRunInput {
   mode: 'doctor' | 'connect';
 }
 
-const recentConnects = new Map<string, { checks: Promise<DoctorCheck[]>; expiresAt: number }>();
+const connectsInFlight = new Map<string, Promise<DoctorCheck[]>>();
+const connectSuccesses = new Map<string, { checks: DoctorCheck[]; reusableUntil: number }>();
+
+function connectKey(datasource: DatasourceProfile): string {
+  return JSON.stringify([datasource.name, datasource.connectors, datasource.connection, datasource.resolverHints]);
+}
 
 export function runDatasourceConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
   if (input.mode === 'doctor') return runConnectors(input);
-  const name = input.datasource.name;
-  const recent = recentConnects.get(name);
-  if (recent && recent.expiresAt > Date.now()) return recent.checks;
+  const key = connectKey(input.datasource);
+  const success = connectSuccesses.get(key);
+  if (success && success.reusableUntil > Date.now()) return Promise.resolve(success.checks);
+  const inFlight = connectsInFlight.get(key);
+  if (inFlight) return inFlight;
 
-  const run = { checks: runConnectors(input), expiresAt: Number.POSITIVE_INFINITY };
-  recentConnects.set(name, run);
-  void run.checks.then((checks) => {
-    if (checks.every((c) => c.status === DoctorStatus.Ok)) {
-      run.expiresAt = Date.now() + RUNTIME_CONSTANTS.connector.connectReuseMs;
-    } else if (recentConnects.get(name) === run) {
-      recentConnects.delete(name);
-    }
-  });
-  return run.checks;
+  const run = runConnectors(input)
+    .then((checks) => {
+      if (checks.every((c) => c.status === DoctorStatus.Ok)) {
+        connectSuccesses.set(key, { checks, reusableUntil: Date.now() + RUNTIME_CONSTANTS.connector.connectReuseMs });
+      }
+      return checks;
+    })
+    .finally(() => connectsInFlight.delete(key));
+  connectsInFlight.set(key, run);
+  return run;
 }
 
 async function runConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {

@@ -17,37 +17,36 @@ const SIDE_EFFECT_RE = /\binto\b|:=|\b(get_lock|release_lock|release_all_locks|n
 const DATA_CHANGE_RE = /\b(insert|update|delete|replace)\b/i;
 
 export function classifySql(sql: string): QueryMode {
-  const code = maskCommentsAndLiterals(sql);
-  if (SIDE_EFFECT_RE.test(code) || hasSecondStatement(code)) return 'mutate';
-  const keyword = leadingKeyword(code);
-  if (keyword === 'select' || keyword === 'with') return classifySelect(code, keyword);
+  const maskedSql = maskCommentsAndLiterals(sql);
+  if (SIDE_EFFECT_RE.test(maskedSql) || hasSecondStatement(sql)) return 'mutate';
+  const keyword = leadingKeyword(maskedSql);
+  if (keyword === 'select' || keyword === 'with') return classifySelect(sql, maskedSql, keyword);
   if (keyword === 'show') return 'read';
-  if (EXPLAIN_KEYWORDS.has(keyword)) return classifyExplain(code);
+  if (EXPLAIN_KEYWORDS.has(keyword)) return classifyExplain(sql);
   return 'mutate';
 }
 
-function leadingKeyword(code: string): string {
-  return LEADING_KEYWORD_RE.exec(code)?.[1].toLowerCase() ?? '';
+function leadingKeyword(maskedSql: string): string {
+  return LEADING_KEYWORD_RE.exec(maskedSql)?.[1].toLowerCase() ?? '';
 }
 
 function isMultiStatementRead(sql: string): boolean {
-  const code = maskCommentsAndLiterals(sql);
-  return READ_KEYWORDS.has(leadingKeyword(code)) && hasSecondStatement(code);
+  return READ_KEYWORDS.has(leadingKeyword(maskCommentsAndLiterals(sql))) && hasSecondStatement(sql);
 }
 
 function isSelect(statement: unknown): boolean {
   return (statement as { type?: unknown }).type === 'select';
 }
 
-function classifySelect(code: string, keyword: 'select' | 'with'): QueryMode {
-  const statements = parseExecutedStatements(code);
+function classifySelect(sql: string, maskedSql: string, keyword: 'select' | 'with'): QueryMode {
+  const statements = parseExecutedStatements(sql);
   if (statements) return statements.every(isSelect) ? 'read' : 'mutate';
-  return keyword === 'with' && DATA_CHANGE_RE.test(code) ? 'mutate' : 'read';
+  return keyword === 'with' && DATA_CHANGE_RE.test(maskedSql) ? 'mutate' : 'read';
 }
 
-function classifyExplain(code: string): QueryMode {
-  if (!isExplainAnalyze(code)) return 'read';
-  const target = explainAnalyzeTarget(code);
+function classifyExplain(sql: string): QueryMode {
+  if (!isExplainAnalyze(sql)) return 'read';
+  const target = explainAnalyzeTarget(sql);
   return target === undefined ? 'mutate' : classifySql(target);
 }
 
