@@ -21,6 +21,13 @@ export interface StreamCallResult {
   truncated: boolean;
 }
 
+export function cancelOnAbort(call: { cancel: () => void }, signal: AbortSignal | undefined): () => void {
+  const cancel = (): void => call.cancel();
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) cancel();
+  return () => signal?.removeEventListener('abort', cancel);
+}
+
 export function isStreamingMethod(method: RpcMethodShape): boolean {
   return Boolean(method.requestStream || method.responseStream);
 }
@@ -57,6 +64,7 @@ export function callStreaming(
   messages: Record<string, unknown>[],
   metadata: unknown,
   deadlineMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<StreamCallResult> {
   const fn = client[method.name];
   if (typeof fn !== 'function') {
@@ -74,6 +82,7 @@ export function callStreaming(
     const settle = (): void => {
       if (settled) return;
       settled = true;
+      stopCancelling();
       if (failure && !truncated) reject(streamFailure(failure, sent, responses));
       else resolve({ responses, truncated });
     };
@@ -106,6 +115,7 @@ export function callStreaming(
     } else {
       call = (fn as (md: unknown, opts: unknown) => StreamCall).call(client, metadata, options);
     }
+    const stopCancelling = cancelOnAbort(call, signal);
 
     if (method.responseStream) {
       call.on('data', onResponse);

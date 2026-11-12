@@ -17,6 +17,7 @@ const READ_ONLY_UNENFORCED_ERRNOS = new Set([1193, 1235]);
 export interface MysqlLeaseRequest {
   capability: QueryRequest['capability'];
   inSession: boolean;
+  signal: AbortSignal | undefined;
 }
 
 export function baseConnConfig(
@@ -83,15 +84,31 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
     }
     connectionTimeZones.set(physical, timeZone);
   }
-  return { conn, release: async () => (poolConn ? poolConn.release() : closeMysqlConnection(conn)) };
+  const release = async () => (poolConn ? poolConn.release() : closeMysqlConnection(conn));
+  if (lease.signal?.aborted) {
+    await release();
+    throw lease.signal.reason;
+  }
+  return { conn, release };
 }
 
-export async function queryRows(conn: Connection, sql: string, timeoutMs: number | undefined): Promise<QueryResult['result']> {
-  const [rows, fields] = await conn.query({ sql, rowsAsArray: true, timeout: timeoutMs });
-  return {
-    columns: Array.isArray(fields) ? fields.map((field) => field.name) : [],
-    rows: Array.isArray(rows) ? (rows as unknown[][]) : [],
-  };
+export async function queryRows(
+  conn: Connection,
+  sql: string,
+  timeoutMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<QueryResult['result']> {
+  const destroy = () => conn.destroy();
+  signal?.addEventListener('abort', destroy, { once: true });
+  try {
+    const [rows, fields] = await conn.query({ sql, rowsAsArray: true, timeout: timeoutMs });
+    return {
+      columns: Array.isArray(fields) ? fields.map((field) => field.name) : [],
+      rows: Array.isArray(rows) ? (rows as unknown[][]) : [],
+    };
+  } finally {
+    signal?.removeEventListener('abort', destroy);
+  }
 }
 
 export async function closeAllMysqlPools(): Promise<void> {

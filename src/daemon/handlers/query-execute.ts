@@ -33,7 +33,7 @@ function buildRequest(params: Record<string, unknown>, target: { env: string; na
   };
 }
 
-export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
+export const handleQueryExecute: Handler = async ({ req, base, deps, clientGone }) => {
   const { ctx, sessions, queryLimiter } = deps;
   const target = deriveQueryTarget(ctx, {
     datasource: str(req.params.datasource),
@@ -50,7 +50,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
   const timeoutMs = parseTimeoutMs(req.params.timeoutMs, timeoutDefault);
   const timeoutController = new AbortController();
   const timeoutTimer = setTimeout(() => timeoutController.abort(queryTimeoutError(timeoutMs)), timeoutMs);
-  const releaseGlobal = await queryLimiter.acquire({ signal: timeoutController.signal });
+  const releaseGlobal = await queryLimiter.acquire({ signal: AbortSignal.any([clientGone, timeoutController.signal]) });
   let leaseSessionId = '';
   let leaseId = '';
   let heartbeat: NodeJS.Timeout | undefined;
@@ -74,7 +74,7 @@ export const handleQueryExecute: Handler = async ({ req, base, deps }) => {
       RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs,
     );
 
-    const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, { ctx, report: silentQueryReport });
+    const outcome = await executeQuery({ ...request, sessionId: session.sessionId }, { ctx, report: silentQueryReport, signal: clientGone });
     const meta = outcome.meta;
     if (meta.schemaContext) base.meta.schemaContext = meta.schemaContext;
     if (meta.phases) (base.meta as Record<string, unknown>).phases = meta.phases;

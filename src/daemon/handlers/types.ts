@@ -19,4 +19,5 @@ export type Handler = (input: {
   req: RpcRequest;
   base: RpcResponse;
   deps: HandlerDeps;
+  clientGone: AbortSignal;
 }) => Promise<HandlerResult | void>;

@@ -109,6 +109,7 @@ export interface QueryRequest {
   timeoutMs?: number;
   sessionTimeZone: string;
   pluginParams?: PluginParams;
+  signal: AbortSignal | undefined;
 }
 
 export interface QueryPhaseTimings {

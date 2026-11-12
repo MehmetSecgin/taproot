@@ -56,7 +56,7 @@ function reply(conn: ServerConnection, write: () => void): void {
 }
 
 export async function startFakeMysqlServer(
-  servedRow: () => ServedRow,
+  servedRow: (sql: string) => ServedRow | Promise<ServedRow>,
   answerSet: (sql: string) => FakeMysqlError | undefined,
 ): Promise<FakeMysqlServer> {
   const server = mysql.createServer((conn) => {
@@ -81,14 +81,14 @@ export async function startFakeMysqlServer(
         else client.writeOk();
       }),
     );
-    client.on('query', () =>
+    client.on('query', async (sql: string) => {
+      const { columns, row } = await servedRow(sql);
       reply(client, () => {
-        const { columns, row } = servedRow();
         client.writeColumns(columns);
         client.writeTextRow(row);
         client.writeEof();
-      }),
-    );
+      });
+    });
   }) as unknown as MysqlServer;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return { port: (server._server.address() as AddressInfo).port, close: () => server.close() };

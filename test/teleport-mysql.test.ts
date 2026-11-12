@@ -122,6 +122,7 @@ describe('teleport mysql proxy reuse', () => {
       query: 'SELECT 1 AS ok',
       capability: 'executeRead',
       sessionTimeZone: '+00:00',
+      signal: undefined,
     };
     const creds = { dbUser: 'reader', password: '', __sessionId: sessionId };
     await teleportMysqlPlugin.execute!(request, creds);

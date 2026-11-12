@@ -45,7 +45,7 @@ function partitionSql(datasource: DatasourceProfile): string {
   ].join(' ');
 }
 
-async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
+async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: string, signal: AbortSignal): Promise<QueryResult> {
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) throw new Error(`no execute plugin for datasource kind '${datasource.kind}'`);
   const creds = await ctx.credentialStore.get(datasource.credentialRef);
@@ -64,6 +64,7 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
       query: sql,
       capability: 'executeRead',
       sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
+      signal,
     },
     creds,
   );
@@ -74,7 +75,11 @@ function namedRows(result: QueryResult): Array<Record<string, unknown>> {
 }
 
 function executeCatalogRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
-  return withQueryTimeout({ timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs, run: () => executeRead(ctx, datasource, sql) });
+  return withQueryTimeout({
+    timeoutMs: RUNTIME_CONSTANTS.query.catalogTimeoutMs,
+    signal: undefined,
+    run: (signal) => executeRead(ctx, datasource, sql, signal),
+  });
 }
 
 function extractBacktickColumns(value: string): string[] {

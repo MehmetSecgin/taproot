@@ -1,11 +1,10 @@
 import { classifyError, environmentPolicy, normalizeNamespace, normalizeService, parseParamPairs, runDatasourceConnectors } from './app.js';
 import type { AppContext } from './app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflicts.js';
-import { RUNTIME_CONSTANTS } from './constants.js';
 import { deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
 import type { JsonExtractSpec } from './json-extract.js';
-import { withQueryTimeout } from './query-timeout.js';
+import { preflightBudgetMs, withQueryTimeout } from './query-timeout.js';
 import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
 import { rowObject } from './rows.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate } from './safety.js';
@@ -47,6 +46,7 @@ export interface QueryReport {
 export interface QueryDeps {
   ctx: AppContext;
   report: QueryReport;
+  signal: AbortSignal | undefined;
   openSession?: (datasource: DatasourceProfile) => string;
 }
 
@@ -249,9 +249,9 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
     report.log('checking connectors');
     const connectStart = Date.now();
-    const preflightBudgetMs = Math.max(request.timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
     const connectorChecks = await withQueryTimeout({
-      timeoutMs: preflightBudgetMs,
+      timeoutMs: preflightBudgetMs(request.timeoutMs),
+      signal: deps.signal,
       run: () =>
         runDatasourceConnectors({
           datasource,
@@ -277,7 +277,8 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     const pluginParams = buildPluginParams(request, params, datasource.kind);
     const result: QueryResult = await withQueryTimeout({
       timeoutMs: remainingMs(),
-      run: () =>
+      signal: deps.signal,
+      run: (signal) =>
         execute(
           {
             datasource,
@@ -286,6 +287,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
             timeoutMs: remainingMs(),
             sessionTimeZone,
             pluginParams,
+            signal,
           },
           sessionId ? { ...creds, __sessionId: sessionId } : creds,
         ),

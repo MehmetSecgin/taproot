@@ -20,7 +20,7 @@ import {
 import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
 import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { callStreaming, isStreamingMethod } from './stream-call.js';
+import { callStreaming, cancelOnAbort, isStreamingMethod } from './stream-call.js';
 
 interface GrpcClient extends Record<string, unknown> {
   waitForReady: (deadline: number, callback: (err?: Error) => void) => void;
@@ -129,6 +129,7 @@ function callUnary(
   payload: Record<string, unknown>,
   metadata: { add: (k: string, v: string) => void } | undefined,
   deadlineMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const fn = client[method];
@@ -137,7 +138,9 @@ function callUnary(
       return;
     }
     type GrpcCallback = (err: (Error & { code?: number; details?: string }) | null, response: Record<string, unknown>) => void;
+    type UnaryCall = { cancel: () => void };
     const cb: GrpcCallback = (err, response) => {
+      stopCancelling();
       if (err) {
         const msg = err.details || err.message || 'grpc call failed';
         const code = typeof err.code === 'number' ? `grpc_code=${err.code} ` : '';
@@ -147,11 +150,10 @@ function callUnary(
       resolve(response || {});
     };
     const options = { deadline: Date.now() + Math.max(1, deadlineMs) };
-    if (metadata) {
-      (fn as (req: unknown, md: unknown, opts: unknown, cb: GrpcCallback) => void).call(client, payload, metadata, options, cb);
-    } else {
-      (fn as (req: unknown, opts: unknown, cb: GrpcCallback) => void).call(client, payload, options, cb);
-    }
+    const call = metadata
+      ? (fn as (req: unknown, md: unknown, opts: unknown, cb: GrpcCallback) => UnaryCall).call(client, payload, metadata, options, cb)
+      : (fn as (req: unknown, opts: unknown, cb: GrpcCallback) => UnaryCall).call(client, payload, options, cb);
+    const stopCancelling = cancelOnAbort(call, signal);
   });
 }
 
@@ -280,18 +282,19 @@ export const grpcPlugin: TapRootPlugin = {
     const warnings: string[] = [];
     try {
       const call = streaming
-        ? callStreaming(client, methodShape, messages, metadata ?? new bundle.grpcModule.Metadata(), deadlineMs).then((out) => {
+        ? callStreaming(client, methodShape, messages, metadata ?? new bundle.grpcModule.Metadata(), deadlineMs, request.signal).then((out) => {
           if (out.truncated) {
             warnings.push(`response stream stopped at ${out.responses.length} messages. Narrow the request or raise TAPROOT_GRPC_STREAM_MESSAGE_LIMIT.`);
           }
           return out.responses.map((value, seq) => [seq, value]);
         })
-        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs).then((value) => [[value]]);
+        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs, request.signal).then((value) => [[value]]);
       rows = await Promise.race([
         call,
         new Promise<never>((_, reject) => setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500)),
       ]);
     } catch (err) {
+      request.signal?.throwIfAborted();
       const msg = (err as Error).message || String(err);
       if (/deadline exceeded/i.test(msg)) throw queryTimeoutError(deadlineMs);
       throw err;

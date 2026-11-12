@@ -177,6 +177,7 @@ describe('grpcPlugin proto pre-flight validation', () => {
         requestJson: opts.requestJson,
         skipProtoValidate: opts.skipProtoValidate,
       },
+      signal: undefined,
     } as QueryRequest;
   }
 

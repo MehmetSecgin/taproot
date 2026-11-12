@@ -12,6 +12,6 @@ export function verboseLog(ctx: AppContext): (msg: string) => void {
 
 
 export async function runDirectQuery(request: QueryExecutionRequest, ctx: AppContext): Promise<void> {
-  const outcome = await executeQuery(request, { ctx, report: { log: verboseLog(ctx) } });
+  const outcome = await executeQuery(request, { ctx, report: { log: verboseLog(ctx) }, signal: undefined });
   presentQueryOutcome(outcome, randomUUID());
 }

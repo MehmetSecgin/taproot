@@ -80,6 +80,7 @@ function getProfile(datasourceProtoRoot: string, protoRoot: string): QueryReques
     timeoutMs: 5000,
     sessionTimeZone: '+00:00',
     pluginParams: { protoRoot, requestJson: JSON.stringify({ id: '1' }) },
+    signal: undefined,
   } as QueryRequest;
 }
 

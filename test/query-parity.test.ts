@@ -58,7 +58,7 @@ async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => Ta
   };
   const ctx = buildContext({});
   addPlugin(ctx.pluginRegistry);
-  const direct = await executeQuery(request, { ctx, report: silentQueryReport });
+  const direct = await executeQuery(request, { ctx, report: silentQueryReport, signal: undefined });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-parity.sock');
   const daemon = await startDaemon({

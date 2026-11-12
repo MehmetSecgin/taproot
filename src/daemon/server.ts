@@ -74,7 +74,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   const server = net.createServer((socket) => {
     let buffer = '';
     let chain = Promise.resolve();
+    const clientGone = new AbortController();
     socket.setEncoding('utf8');
+    socket.on('close', () => clientGone.abort(new Error('client disconnected before the response')));
 
     const write = (res: RpcResponse): void => {
       socket.write(`${JSON.stringify(res)}\n`);
@@ -119,7 +121,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
               base.ok = false;
               base.error = { code: 'UNKNOWN_METHOD', message: `Unknown RPC method: ${req.method}` };
             } else {
-              const result = await handler({ req, base, deps });
+              const result = await handler({ req, base, deps, clientGone: clientGone.signal });
               postWrite = result?.postWrite;
             }
           } catch (error) {

@@ -31,6 +31,7 @@ describe('MySQL duplicate column names', () => {
         query: 'SELECT p.id, a.id FROM profiles p JOIN addresses a ON a.profile_id = p.id',
         capability: 'executeRead',
         sessionTimeZone: '+00:00',
+        signal: undefined,
       },
       { user: 'reader', password: '' },
     );

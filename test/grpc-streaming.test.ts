@@ -110,6 +110,7 @@ function makeRequest(method: string, body: unknown): QueryRequest {
     timeoutMs: 5000,
     sessionTimeZone: '+00:00',
     pluginParams: { protoRoot, requestJson: JSON.stringify(body) },
+    signal: undefined,
   } as QueryRequest;
 }
 

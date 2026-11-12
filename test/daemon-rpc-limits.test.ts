@@ -1,11 +1,14 @@
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
+import { TAPROOT_VERSION } from '../src/core/version.js';
 import { CredentialStore } from '../src/store/credentials.js';
+import type { TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 
@@ -19,7 +22,7 @@ function makeStateRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-daemon-'));
 }
 
-async function setupDaemon(datasourceCount = 1, holdMs = 0) {
+async function setupDaemon(datasourceCount: number, plugin: TapRootPlugin) {
   const stateRoot = makeStateRoot();
   process.env.TAPROOT_STATE_ROOT = stateRoot;
   process.env.TAPROOT_MASTER_KEY = 'test-master-key';
@@ -49,9 +52,39 @@ async function setupDaemon(datasourceCount = 1, holdMs = 0) {
   const daemon = await startDaemon({
     stateRoot,
     socketPath,
-    configurePlugins: (registry) => registry.set('fake', fakePlugin({ holdMs })),
+    configurePlugins: (registry) => registry.set('fake', plugin),
   });
   return { daemon, socketPath };
+}
+
+function abortWatchingPlugin(seen: { executing: boolean; abortReason?: unknown }): TapRootPlugin {
+  const plugin = fakePlugin();
+  plugin.execute = (request) => {
+    seen.executing = true;
+    return new Promise((_, reject) => {
+      request.signal?.addEventListener('abort', () => {
+        seen.abortReason = request.signal?.reason;
+        reject(request.signal?.reason);
+      });
+    });
+  };
+  return plugin;
+}
+
+function sendQueryAndHangUp(socketPath: string, seen: { executing: boolean }): Promise<void> {
+  const socket = net.createConnection(socketPath);
+  socket.write(
+    `${JSON.stringify({
+      protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
+      clientVersion: TAPROOT_VERSION,
+      requestId: 'gone-agent',
+      method: 'query.execute',
+      params: { datasource: 'qa-fake-0', query: 'SELECT 1 AS ok' },
+    })}\n`,
+  );
+  return vi.waitFor(() => expect(seen.executing).toBe(true)).then(() => {
+    socket.destroy();
+  });
 }
 
 afterEach(() => {
@@ -64,7 +97,7 @@ describe('daemon rpc limits', () => {
   it('returns OVERLOADED when queue limit is exceeded', async () => {
     const total =
       RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + RUNTIME_CONSTANTS.daemon.maxQueuedQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total, 900);
+    const { daemon, socketPath } = await setupDaemon(total, fakePlugin({ holdMs: 900 }));
     try {
       const calls = Array.from({ length: total }, (_, i) =>
         rpcCall({
@@ -87,7 +120,7 @@ describe('daemon rpc limits', () => {
   }, 15_000);
 
   it('runs 8 parallel queries on one datasource without rejecting any', async () => {
-    const { daemon, socketPath } = await setupDaemon(1, 500);
+    const { daemon, socketPath } = await setupDaemon(1, fakePlugin({ holdMs: 500 }));
     try {
       const calls = Array.from({ length: 8 }, () =>
         rpcCall({
@@ -108,7 +141,7 @@ describe('daemon rpc limits', () => {
   });
 
   it('reports limiter stats and limits in daemon.status', async () => {
-    const { daemon, socketPath } = await setupDaemon(1);
+    const { daemon, socketPath } = await setupDaemon(1, fakePlugin());
     try {
       const res = await rpcCall({ socketPath, method: 'daemon.status' });
       expect(res.ok).toBe(true);
@@ -124,7 +157,7 @@ describe('daemon rpc limits', () => {
 
   it('counts queue wait time against timeoutMs', async () => {
     const total = RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total, 900);
+    const { daemon, socketPath } = await setupDaemon(total, fakePlugin({ holdMs: 900 }));
     try {
       const blockers = Array.from({ length: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries }, (_, i) =>
         rpcCall({
@@ -158,6 +191,23 @@ describe('daemon rpc limits', () => {
       expect(elapsedMs).toBeLessThan(800);
 
       await Promise.all(blockers);
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it('aborts the in-flight query and frees its slot when the client disconnects', async () => {
+    // arrange
+    const seen: { executing: boolean; abortReason?: unknown } = { executing: false };
+    const { daemon, socketPath } = await setupDaemon(1, abortWatchingPlugin(seen));
+    try {
+      // act
+      await sendQueryAndHangUp(socketPath, seen);
+
+      // assert
+      await vi.waitFor(() => expect(String(seen.abortReason)).toContain('client disconnected'));
+      const status = await rpcCall({ socketPath, method: 'daemon.status' });
+      expect(status.data?.queryLimiter).toMatchObject({ inFlight: 0 });
     } finally {
       await daemon.stop();
     }

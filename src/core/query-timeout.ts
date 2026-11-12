@@ -1,3 +1,4 @@
+import { RUNTIME_CONSTANTS } from './constants.js';
 import { badInput, queryTimeoutErr } from './error-classification.js';
 
 export function queryTimeoutError(timeoutMs: number): Error {
@@ -17,23 +18,32 @@ export function parseTimeoutMs(value: unknown, fallbackMs: number): number {
   return Math.floor(parsed);
 }
 
+export function preflightBudgetMs(timeoutMs: number): number {
+  return Math.max(timeoutMs, RUNTIME_CONSTANTS.connector.preflightTimeoutMs);
+}
+
+export function queryBudgetMs(timeoutMs: number): number {
+  const queueWaitMs = timeoutMs;
+  const executeMs = timeoutMs;
+  return queueWaitMs + preflightBudgetMs(timeoutMs) + executeMs;
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+}
+
 export async function withQueryTimeout<T>(input: {
   timeoutMs: number;
-  run: () => Promise<T>;
-  onTimeout?: () => void | Promise<void>;
+  signal: AbortSignal | undefined;
+  run: (signal: AbortSignal) => Promise<T>;
 }): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(queryTimeoutError(input.timeoutMs)), input.timeoutMs);
+  const runSignal = input.signal ? AbortSignal.any([input.signal, timeout.signal]) : timeout.signal;
   try {
-    return await Promise.race([
-      input.run(),
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => {
-          void Promise.resolve(input.onTimeout?.()).catch(() => {});
-          reject(queryTimeoutError(input.timeoutMs));
-        }, input.timeoutMs);
-      }),
-    ]);
+    runSignal.throwIfAborted();
+    return await Promise.race([input.run(runSignal), rejectOnAbort(runSignal)]);
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }

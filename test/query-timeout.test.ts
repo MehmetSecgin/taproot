@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseTimeoutMs, queryTimeoutError, withQueryTimeout } from '../src/core/query-timeout.js';
+import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
+import { parseTimeoutMs, queryBudgetMs, queryTimeoutError, withQueryTimeout } from '../src/core/query-timeout.js';
 
 describe('query timeout helpers', () => {
   it('uses the fallback timeout when omitted', () => {
@@ -27,11 +28,39 @@ describe('query timeout helpers', () => {
     await expect(
       withQueryTimeout({
         timeoutMs: 25,
+        signal: undefined,
         run: async () => {
           await new Promise((resolve) => setTimeout(resolve, 100));
           return 'late';
         },
       }),
     ).rejects.toThrow(queryTimeoutError(25).message);
+  });
+
+  it('stops the run when the caller aborts before the timeout', async () => {
+    // arrange
+    const caller = new AbortController();
+    let runSignal: AbortSignal | undefined;
+    const pending = withQueryTimeout({
+      timeoutMs: 5_000,
+      signal: caller.signal,
+      run: (signal) => {
+        runSignal = signal;
+        return new Promise(() => undefined);
+      },
+    });
+
+    // act
+    caller.abort(new Error('client disconnected'));
+
+    // assert
+    await expect(pending).rejects.toThrow('client disconnected');
+    expect(runSignal?.aborted).toBe(true);
+  });
+
+  it('lets the client wait for queue wait, connector preflight and execution', () => {
+    const preflightMs = RUNTIME_CONSTANTS.connector.preflightTimeoutMs;
+    expect(queryBudgetMs(1_000)).toBe(1_000 + preflightMs + 1_000);
+    expect(queryBudgetMs(preflightMs * 2)).toBe(preflightMs * 6);
   });
 });
