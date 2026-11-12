@@ -330,7 +330,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           database: String(database),
         },
         request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
-        { capability: request.capability, inSession: Boolean(sessionId), signal: request.signal },
+        { capability: request.capability, sessionId, signal: request.signal },
       );
       try {
         const result = await queryRows(conn, request.query, request.timeoutMs, request.signal);

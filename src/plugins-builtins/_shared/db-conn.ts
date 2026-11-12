@@ -10,13 +10,13 @@ export interface BaseConnConfig {
   database: string | undefined;
 }
 
-const pools = new Map<string, Pool>();
+const poolsBySession = new Map<string, Map<string, Pool>>();
 const connectionTimeZones = new WeakMap<object, string>();
 const READ_ONLY_UNENFORCED_ERRNOS = new Set([1193, 1235]);
 
 export interface MysqlLeaseRequest {
   capability: QueryRequest['capability'];
-  inSession: boolean;
+  sessionId: string | undefined;
   signal: AbortSignal | undefined;
 }
 
@@ -45,12 +45,14 @@ export async function loadMysql() {
   return (await import('mysql2/promise')).default;
 }
 
-function poolFor(mysql: Awaited<ReturnType<typeof loadMysql>>, config: ConnectionOptions): Pool {
+function poolFor(mysql: Awaited<ReturnType<typeof loadMysql>>, sessionId: string, config: ConnectionOptions): Pool {
+  const sessionPools = poolsBySession.get(sessionId) ?? new Map<string, Pool>();
+  poolsBySession.set(sessionId, sessionPools);
   const key = JSON.stringify(config);
-  let pool = pools.get(key);
+  let pool = sessionPools.get(key);
   if (!pool) {
     pool = mysql.createPool({ ...config, connectionLimit: 4, maxIdle: 1, idleTimeout: 5 * 60 * 1000 });
-    pools.set(key, pool);
+    sessionPools.set(key, pool);
   }
   return pool;
 }
@@ -72,7 +74,7 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
   const readOnly = lease.capability === 'executeRead';
   const mysql = await loadMysql();
   const sessionConfig = { ...config, supportBigNumbers: true, ...readTemporalsIn(timeZone) };
-  const poolConn = readOnly && lease.inSession ? await poolFor(mysql, sessionConfig).getConnection() : undefined;
+  const poolConn = readOnly && lease.sessionId ? await poolFor(mysql, lease.sessionId, sessionConfig).getConnection() : undefined;
   const conn = poolConn ?? (await mysql.createConnection(sessionConfig));
   const physical = (conn as unknown as { connection: object }).connection;
   if (connectionTimeZones.get(physical) !== timeZone) {
@@ -111,8 +113,12 @@ export async function queryRows(
   }
 }
 
-export async function closeAllMysqlPools(): Promise<void> {
-  const open = [...pools.values()];
-  pools.clear();
+export async function closeMysqlSessionPools(sessionId: string): Promise<void> {
+  const open = [...(poolsBySession.get(sessionId)?.values() ?? [])];
+  poolsBySession.delete(sessionId);
   await Promise.all(open.map((pool) => pool.end().catch(() => undefined)));
+}
+
+export async function closeAllMysqlPools(): Promise<void> {
+  await Promise.all([...poolsBySession.keys()].map(closeMysqlSessionPools));
 }

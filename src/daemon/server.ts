@@ -11,7 +11,7 @@ import type { PluginRegistry } from '../plugins/load-builtins.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
-import { closeAllMysqlPools } from '../plugins-builtins/_shared/db-conn.js';
+import { closeAllMysqlPools, closeMysqlSessionPools } from '../plugins-builtins/_shared/db-conn.js';
 import { rpcCall } from './client.js';
 import { handleVersionMismatch } from './handlers/daemon-status.js';
 import { HANDLERS, type HandlerDeps } from './handlers/index.js';
@@ -167,6 +167,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     if (sweep.expiredSessionIds.length) {
       for (const sessionId of sweep.expiredSessionIds) {
         void closeTeleportMysqlSessionProxies(sessionId);
+        void closeMysqlSessionPools(sessionId);
       }
     }
     if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) onSignal();

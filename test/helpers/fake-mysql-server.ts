@@ -30,6 +30,7 @@ export interface FakeMysqlError {
 
 export interface FakeMysqlServer {
   port: number;
+  openConnections(): Promise<number>;
   close(): void;
 }
 
@@ -91,5 +92,9 @@ export async function startFakeMysqlServer(
     });
   }) as unknown as MysqlServer;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return { port: (server._server.address() as AddressInfo).port, close: () => server.close() };
+  return {
+    port: (server._server.address() as AddressInfo).port,
+    openConnections: () => new Promise((resolve, reject) => server._server.getConnections((error, count) => (error ? reject(error) : resolve(count)))),
+    close: () => server.close(),
+  };
 }

@@ -42,7 +42,7 @@ afterAll(() => {
 async function selectCreatedAt(sessionTimeZone: string): Promise<unknown> {
   const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, sessionTimeZone, {
     capability: 'executeRead',
-    inSession: false,
+    sessionId: undefined,
     signal: undefined,
   });
   try {
@@ -96,7 +96,7 @@ describe('MySQL read lease session', () => {
     // act
     const { release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'writer', password: '' }, '+00:00', {
       capability: 'executeMutate',
-      inSession: false,
+      sessionId: undefined,
       signal: undefined,
     });
     await release();
