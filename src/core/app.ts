@@ -106,12 +106,34 @@ async function withConnectorTimeout(name: string, mode: string, timeoutMs: numbe
   }
 }
 
-export async function runDatasourceConnectors(input: {
+interface ConnectorRunInput {
   datasource: DatasourceProfile;
   credentialStore: { get: (ref: string) => Promise<Record<string, string>> };
   pluginRegistry: PluginRegistry;
   mode: 'doctor' | 'connect';
-}): Promise<DoctorCheck[]> {
+}
+
+const recentConnects = new Map<string, { checks: Promise<DoctorCheck[]>; expiresAt: number }>();
+
+export function runDatasourceConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
+  if (input.mode === 'doctor') return runConnectors(input);
+  const name = input.datasource.name;
+  const recent = recentConnects.get(name);
+  if (recent && recent.expiresAt > Date.now()) return recent.checks;
+
+  const run = { checks: runConnectors(input), expiresAt: Number.POSITIVE_INFINITY };
+  recentConnects.set(name, run);
+  void run.checks.then((checks) => {
+    if (checks.every((c) => c.status === DoctorStatus.Ok)) {
+      run.expiresAt = Date.now() + RUNTIME_CONSTANTS.connector.connectReuseMs;
+    } else if (recentConnects.get(name) === run) {
+      recentConnects.delete(name);
+    }
+  });
+  return run.checks;
+}
+
+async function runConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
   const connectors = input.datasource.connectors || [];
   const perCheckTimeoutMs =
     input.mode === 'connect'

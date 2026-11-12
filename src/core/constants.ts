@@ -33,6 +33,7 @@ export const RUNTIME_CONSTANTS = {
     preflightTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_PREFLIGHT_MS', 15 * 1000),
     statusCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_STATUS_MS', 3 * 1000),
     connectCheckTimeoutMs: intFromEnv('TAPROOT_CONNECTOR_CONNECT_MS', 12 * 1000),
+    connectReuseMs: intFromEnv('TAPROOT_CONNECTOR_REUSE_MS', 30 * 1000),
   },
   plugin: {
     dbConnectTimeoutMs: 5_000,
