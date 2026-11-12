@@ -24,7 +24,7 @@ function fakeConnector(statuses: DoctorCheck['status'][]) {
     { check: 'fake connect', status: statuses[Math.min(connect.mock.calls.length - 1, statuses.length - 1)], detail: 'ok' },
   ]);
   const plugin: TapRootPlugin = {
-    manifest: { name: 'fake', kind: 'connector', capabilities: ['doctor'], priority: 1 },
+    manifest: { name: 'fake', capabilities: ['doctor'] },
     connect,
   };
   return { connect, pluginRegistry: new Map([['fake', plugin]]) };
@@ -115,7 +115,7 @@ describe('connector preflight reuse', () => {
   it('runs doctor checks on every call', async () => {
     // arrange
     const doctor = vi.fn(async (): Promise<DoctorCheck[]> => [{ check: 'fake status', status: 'ok', detail: 'ok' }]);
-    const plugin: TapRootPlugin = { manifest: { name: 'fake', kind: 'connector', capabilities: ['doctor'], priority: 1 }, doctor };
+    const plugin: TapRootPlugin = { manifest: { name: 'fake', capabilities: ['doctor'] }, doctor };
     const input = { ...connectInput(datasource('doctor'), new Map([['fake', plugin]])), mode: 'doctor' as const };
 
     // act

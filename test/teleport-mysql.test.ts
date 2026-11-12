@@ -1,27 +1,17 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import mysql from 'mysql2';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { closeAllMysqlPools } from '../src/plugins-builtins/_shared/db-conn.js';
 import { closeTeleportMysqlSessionProxies, teleportMysqlPlugin } from '../src/plugins-builtins/teleport-mysql/index.js';
 import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
 import { column, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
-
-function seedTeleportState(prefix: string, resolverHints: Record<string, string>): string {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+function seedTeleportState(resolverHints: Record<string, string>): string {
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
     JSON.stringify([
@@ -141,9 +131,7 @@ describe('teleport mysql proxy reuse', () => {
 
 describe('teleport mysql execution', () => {
   it('fails cleanly without tsh db exec fallback when tsh is missing', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -185,9 +173,7 @@ describe('teleport mysql execution', () => {
   });
 
   it('resolves dbUser from datasource resolverHints when credentials lack one', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-hint-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -217,9 +203,7 @@ describe('teleport mysql execution', () => {
   });
 
   it('names a remedy when dbUser is missing everywhere', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-teleport-nouser-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -247,7 +231,7 @@ describe('teleport mysql execution', () => {
 
   it('takes the db user from tsh db ls when exactly one is allowed', () => {
     // arrange
-    const stateRoot = seedTeleportState('taproot-teleport-tshuser-', {});
+    const stateRoot = seedTeleportState({});
     const pathEnv = stubTsh([{ metadata: { name: 'orders-tidb' }, spec: { protocol: 'mysql' }, users: { allowed: ['reader', '*'] } }]);
 
     // act
@@ -260,7 +244,7 @@ describe('teleport mysql execution', () => {
 
   it('lists the allowed users when tsh db ls offers several', () => {
     // arrange
-    const stateRoot = seedTeleportState('taproot-teleport-tshusers-', {});
+    const stateRoot = seedTeleportState({});
     const pathEnv = stubTsh([{ metadata: { name: 'orders-tidb' }, spec: { protocol: 'mysql' }, users: { allowed: ['reader', 'writer'] } }]);
 
     // act
@@ -276,7 +260,7 @@ describe('teleport mysql execution', () => {
 
   it('prefers an explicit dbUser hint over the tsh db ls user', () => {
     // arrange
-    const stateRoot = seedTeleportState('taproot-teleport-explicit-', { dbUser: 'writer' });
+    const stateRoot = seedTeleportState({ dbUser: 'writer' });
     const pathEnv = stubTsh([{ metadata: { name: 'orders-tidb' }, spec: { protocol: 'mysql' }, users: { allowed: ['reader'] } }]);
 
     // act

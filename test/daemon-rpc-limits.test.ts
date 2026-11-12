@@ -1,6 +1,4 @@
-import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
@@ -11,6 +9,7 @@ import { CredentialStore } from '../src/store/credentials.js';
 import type { TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { DatasourceStore } from '../src/store/datasources.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 const previousEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -18,18 +17,12 @@ const previousEnv = {
   NODE_ENV: process.env.NODE_ENV,
 };
 
-function makeStateRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-daemon-'));
-}
-
 async function setupDaemon(datasourceCount: number, plugin: TapRootPlugin) {
-  const stateRoot = makeStateRoot();
+  const { stateRoot, configDir } = tempStateRoot();
   process.env.TAPROOT_STATE_ROOT = stateRoot;
   process.env.TAPROOT_MASTER_KEY = 'test-master-key';
   process.env.NODE_ENV = 'test';
 
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
   const dsStore = new DatasourceStore(path.join(configDir, 'datasources.json'));
   for (let i = 0; i < datasourceCount; i += 1) {
     dsStore.save({

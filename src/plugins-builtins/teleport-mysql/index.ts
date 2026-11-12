@@ -260,9 +260,7 @@ function proxyUnavailable(error: Error): never {
 export const teleportMysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport-mysql',
-    kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    priority: 100,
   },
 
   async doctor(input) {

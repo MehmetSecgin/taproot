@@ -11,8 +11,6 @@ export interface BootstrapResult {
   profile: DatasourceProfile;
   source: 'store-existing' | 'kb-bootstrap' | 'kb-repaired';
   credentialRefs: string[];
-  connectors: string[];
-  warnings: string[];
 }
 
 interface CredentialDefaultSpec {
@@ -33,18 +31,14 @@ interface KbBootstrapOptions {
   confidence?: number;
 }
 
-function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapResult, 'credentialRefs' | 'connectors' | 'warnings'> {
+function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapResult, 'credentialRefs'> {
   const refs = new Set<string>();
   if (profile.credentialRef) refs.add(profile.credentialRef);
   for (const value of Object.values(profile.resolverHints || {})) {
     const ref = str(value).trim();
     if (ref) refs.add(ref);
   }
-  return {
-    credentialRefs: [...refs],
-    connectors: profile.connectors || [],
-    warnings: [],
-  };
+  return { credentialRefs: [...refs] };
 }
 
 async function ensureCredentialDefaults(

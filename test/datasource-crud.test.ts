@@ -1,22 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupState() {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-datasource-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), '{}');
@@ -81,7 +71,7 @@ describe('datasource CRUD', () => {
     addProfile(env);
     const out = runCli(['datasource', 'list'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.some((row: { name: string }) => row.name === 'qa-svc')).toBe(true);
+    expect(JSON.parse(out.stdout).data.rows.map((row: unknown[]) => row[0])).toContain('qa-svc');
   });
 
   it('datasource list filters by name and shows host and database', () => {
@@ -89,10 +79,11 @@ describe('datasource CRUD', () => {
     addProfile(env);
     const out = runCli(['datasource', 'list', 'SVC'], env);
     const none = runCli(['datasource', 'list', 'nomatch'], env);
-    expect(JSON.parse(out.stdout).data).toEqual([
-      { name: 'qa-svc', kind: 'mysql', env: 'qa', namespace: '', service: 'svc', host: '127.0.0.1', database: 'svcdb' },
-    ]);
-    expect(JSON.parse(none.stdout).data).toEqual([]);
+    expect(JSON.parse(out.stdout).data).toEqual({
+      columns: ['name', 'kind', 'env', 'service', 'host', 'database'],
+      rows: [['qa-svc', 'mysql', 'qa', 'svc', '127.0.0.1', 'svcdb']],
+    });
+    expect(JSON.parse(none.stdout).data).toEqual({ columns: [], rows: [] });
   });
 
   it('datasource add --probe keeps the profile when plugin doctor fails', () => {
@@ -155,8 +146,10 @@ describe('datasource CRUD', () => {
 
     const out = runCli(['datasource', 'list'], env);
     expect(out.status).toBe(0);
-    const rows = JSON.parse(out.stdout).data as Array<{ name: string; env: string; namespace: string; service: string }>;
-    expect(rows.map((r) => r.name)).toEqual(['prod-billing', 'qa-alpha', 'qa-zeta', 'qa-beta-dev']);
+    const { columns, rows } = JSON.parse(out.stdout).data as { columns: string[]; rows: unknown[][] };
+    expect(columns).toContain('namespace');
+    expect(rows.map((row) => row[0])).toEqual(['prod-billing', 'qa-alpha', 'qa-zeta', 'qa-beta-dev']);
+    expect(rows.find((row) => row[0] === 'qa-alpha')![columns.indexOf('namespace')]).toBeNull();
   });
 
   it('datasource remove deletes profile', () => {
@@ -313,8 +306,8 @@ describe('datasource CRUD', () => {
     addProfile(env, ['--port', '3307']);
 
     // assert
-    expect(listed.data.map((row: { name: string }) => row.name)).toEqual(['qa-svc']);
-    expect(listed.meta.warnings).toEqual([expect.stringContaining('qa-broken: connection.port')]);
+    expect(listed.data.rows.map((row: unknown[]) => row[0])).toEqual(['qa-svc']);
+    expect(listed.data.warnings).toEqual([expect.stringContaining('qa-broken: connection.port')]);
     const names = JSON.parse(fs.readFileSync(file, 'utf8')).map((row: { name: string }) => row.name);
     expect(names.sort()).toEqual(['qa-broken', 'qa-svc']);
   });

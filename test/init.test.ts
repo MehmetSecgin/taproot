@@ -1,22 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
-
-function makeStateRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-init-state-'));
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function makeKbDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-init-kb-'));
@@ -55,11 +43,9 @@ function setupCustomKb(kbDir: string, services: Array<Record<string, unknown>>) 
 }
 
 function initDatasourceOverSavedOrdersProfile(savedPort: number) {
-  const stateRoot = makeStateRoot();
+  const { stateRoot, configDir } = tempStateRoot();
   const kbDir = makeKbDir();
   setupKb(kbDir);
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
     JSON.stringify([
@@ -93,8 +79,57 @@ function initDatasourceOverSavedOrdersProfile(savedPort: number) {
 }
 
 describe('init command', () => {
+  it('reports a malformed datasources.json as a failed check instead of throwing', () => {
+    // arrange
+    const { stateRoot, configDir } = tempStateRoot();
+    fs.writeFileSync(path.join(configDir, 'datasources.json'), '{"not": "an array"}');
+
+    // act
+    const out = runCli(['init'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: setupKb(makeKbDir()) });
+
+    // assert
+    expect(out.status).toBe(0);
+    const data = JSON.parse(out.stdout).data;
+    expect(data.checks.find((check: { check: string }) => check.check === 'datasources')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('must hold a JSON array of datasource profiles'),
+    });
+    expect(data.readiness).toBe('missing_datasource');
+  });
+
+  it('counts valid profiles toward readiness and warns about skipped rows', () => {
+    // arrange
+    const { stateRoot, configDir } = tempStateRoot();
+    const valid = {
+      name: 'qa-cache',
+      kind: 'redis',
+      env: 'qa',
+      service: 'cache',
+      tags: [],
+      connection: { host: '127.0.0.1', port: 6379 },
+      credentialRef: 'qa:cache',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: new Date().toISOString(),
+      confidence: 0.9,
+    };
+    fs.writeFileSync(path.join(configDir, 'datasources.json'), JSON.stringify([valid, { name: 'qa-broken', kind: 'mysql' }]));
+
+    // act
+    const out = runCli(['init'], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: setupKb(makeKbDir()) });
+
+    // assert
+    expect(out.status).toBe(0);
+    const data = JSON.parse(out.stdout).data;
+    expect(data.readiness).toBe('ready');
+    expect(data.checks.find((check: { check: string }) => check.check === 'datasources')).toEqual({ check: 'datasources', status: 'ok' });
+    expect(data.checks.find((check: { check: string }) => check.check === 'skipped_datasources')).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('skipped invalid datasource qa-broken'),
+    });
+  });
+
   it('creates starter config with environmentPolicies and serviceAliases', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const out = runCli(['init'], {
@@ -114,7 +149,7 @@ describe('init command', () => {
 
   it('saves --kb-dir so later commands find the KB without TAPROOT_KB_DIR', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' };
@@ -132,7 +167,7 @@ describe('init command', () => {
 
   it('keeps a saved kbDir when TAPROOT_KB_DIR points elsewhere', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const savedKbDir = makeKbDir();
     setupKb(savedKbDir);
     runCli(['init', '--kb-dir', savedKbDir], { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' });
@@ -148,7 +183,7 @@ describe('init command', () => {
 
   it('fails KB commands with KB_MISSING naming the directory when no KB is set up', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: '' };
     const expectedDir = path.join(stateRoot, 'kb');
 
@@ -167,7 +202,7 @@ describe('init command', () => {
   });
 
   it('is idempotent when run twice', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const env = {
@@ -185,7 +220,7 @@ describe('init command', () => {
   });
 
   it('reports missing KB deterministically', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     const out = runCli(['init'], {
       TAPROOT_STATE_ROOT: stateRoot,
@@ -201,7 +236,7 @@ describe('init command', () => {
 
   it('reports credentials as optional when only redis datasources are configured', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const env = {
@@ -227,7 +262,7 @@ describe('init command', () => {
 
   it('does not ask for credentials when every datasource kind is auth-free', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const env = {
@@ -253,7 +288,7 @@ describe('init command', () => {
   });
 
   it('treats a missing master key as optional', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const out = runCli(['init'], {
@@ -268,7 +303,7 @@ describe('init command', () => {
 
   it('warns when the credential file uses the key derived from $USER', () => {
     // arrange
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_KB_DIR: kbDir, TAPROOT_MASTER_KEY: '', TAPROOT_NO_KEYCHAIN: '1' };
@@ -285,7 +320,7 @@ describe('init command', () => {
   });
 
   it('returns machine-readable init summary', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const out = runCli(['init'], {
@@ -300,7 +335,7 @@ describe('init command', () => {
   });
 
   it('creates datasource profile from KB', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupKb(kbDir);
     const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], {
@@ -319,7 +354,9 @@ describe('init command', () => {
   it('skips existing datasource profile', () => {
     const parsed = initDatasourceOverSavedOrdersProfile(qaPortforwardLocalPort('qa', 'develop', 'orders'));
     expect(parsed.source).toBe('store-existing');
-    expect(parsed.skipped).toBe(true);
+    expect(parsed).not.toHaveProperty('skipped');
+    expect(parsed).not.toHaveProperty('connectors');
+    expect(parsed).not.toHaveProperty('warnings');
   });
 
   it('rewrites a profile saved with the legacy shared qa-portforward port', () => {
@@ -329,7 +366,7 @@ describe('init command', () => {
   });
 
   it('creates namespace-aware datasource profile from KB when namespace is targeted explicitly', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const kbDir = makeKbDir();
     setupCustomKb(kbDir, [
       {
@@ -377,7 +414,7 @@ describe('init command', () => {
   });
 
   it('repairs existing datasource profile when it critically conflicts with KB', () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot, configDir } = tempStateRoot();
     const kbDir = makeKbDir();
     setupCustomKb(kbDir, [
       {
@@ -396,8 +433,6 @@ describe('init command', () => {
         ],
       },
     ]);
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -432,7 +467,6 @@ describe('init command', () => {
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data;
     expect(parsed.source).toBe('kb-repaired');
-    expect(parsed.skipped).toBe(false);
     expect(parsed.profile.kind).toBe('teleport-mysql');
     expect(parsed.profile.connection.target).toBe('orders-tidb');
     expect(parsed.profile.credentialRef).toBe('prod');

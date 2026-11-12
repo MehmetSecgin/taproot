@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { buildContext } from '../../src/core/app.js';
 import type { AppContext } from '../../src/core/app.js';
@@ -7,6 +5,7 @@ import type { QueryExecutionRequest } from '../../src/core/execute-query.js';
 import { CredentialStore } from '../../src/store/credentials.js';
 import { DatasourceStore } from '../../src/store/datasources.js';
 import type { DatasourceProfile, TapRootPlugin } from '../../src/types/core.js';
+import { tempStateRoot } from './state-root.js';
 
 const savedEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -15,12 +14,10 @@ const savedEnv = {
 };
 
 export async function setupQueryState(overrides: Partial<DatasourceProfile> = {}): Promise<string> {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-query-'));
+  const { stateRoot, configDir } = tempStateRoot();
   process.env.TAPROOT_STATE_ROOT = stateRoot;
   process.env.TAPROOT_MASTER_KEY = 'test-master-key';
   process.env.NODE_ENV = 'test';
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
   const dsStore = new DatasourceStore(path.join(configDir, 'datasources.json'));
   dsStore.save({
     name: 'qa-fake',

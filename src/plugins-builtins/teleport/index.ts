@@ -19,9 +19,7 @@ function summarizeTshStatus(detail: string, ok: boolean): string {
 export const teleportPlugin: TapRootPlugin = {
   manifest: {
     name: 'teleport',
-    kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    priority: 90,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {

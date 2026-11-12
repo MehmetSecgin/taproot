@@ -39,7 +39,7 @@ export interface RpcResponse {
   };
 }
 
-export type SessionState = 'recovering' | 'opening' | 'ready' | 'degraded' | 'closing' | 'closed';
+export type SessionState = 'recovering' | 'ready' | 'closed';
 
 export interface SessionRecord {
   sessionId: string;

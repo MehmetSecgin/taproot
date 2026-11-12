@@ -18,17 +18,11 @@ function normalizeKey(value?: string): string {
 }
 
 export class RuntimeConfigStore {
-  private checked?: { raw: unknown; config: RuntimeConfig };
-
   constructor(private readonly file: string) {}
 
   get(): RuntimeConfig {
-    const raw = readJsonFile<unknown>(this.file, {});
-    if (this.checked && this.checked.raw === raw) return this.checked.config;
-    const parsed = RuntimeConfigSchema.safeParse(raw);
-    const config = parsed.success ? parsed.data : {};
-    this.checked = { raw, config };
-    return config;
+    const parsed = RuntimeConfigSchema.safeParse(readJsonFile<unknown>(this.file, {}));
+    return parsed.success ? parsed.data : {};
   }
 
   saveKbDir(kbDir: string): void {

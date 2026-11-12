@@ -1,22 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string>) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupStateRoot() {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-connector-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
     JSON.stringify([
@@ -48,9 +37,7 @@ function setupStateRoot() {
 describe('connector UX', () => {
 
   it('doctor reports the missing connector command as a coded check', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-connector-missing-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([

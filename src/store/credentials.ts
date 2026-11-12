@@ -6,6 +6,7 @@ import { readJsonFile, writeOwnerOnlyJsonFile } from '../core/json.js';
 import { str } from '../core/strings.js';
 
 const SERVICE_NAME = 'taproot';
+const PBKDF2_ITERATIONS = 200_000;
 
 interface FallbackFileShape {
   salt: string;
@@ -22,13 +23,13 @@ function getMasterSecret(): string {
   return process.env.TAPROOT_MASTER_KEY || derivedSecret();
 }
 
-let lastKey: { id: string; key: Buffer } | undefined;
+let lastDerivedKey: { saltAndSecret: string; key: Buffer } | undefined;
 
 function deriveKey(secret: string, salt: Buffer): Buffer {
-  const id = `${salt.toString('base64')}:${secret}`;
-  if (lastKey?.id === id) return lastKey.key;
-  const key = crypto.pbkdf2Sync(secret, salt, 200000, 32, 'sha256');
-  lastKey = { id, key };
+  const saltAndSecret = `${salt.toString('base64')}:${secret}`;
+  if (lastDerivedKey?.saltAndSecret === saltAndSecret) return lastDerivedKey.key;
+  const key = crypto.pbkdf2Sync(secret, salt, PBKDF2_ITERATIONS, 32, 'sha256');
+  lastDerivedKey = { saltAndSecret, key };
   return key;
 }
 

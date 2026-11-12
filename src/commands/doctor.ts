@@ -72,9 +72,6 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
           const checks = unresolvedTargetChecks(target);
           printEnvelope(true, {
-            datasource: null,
-            plugin: null,
-            warnings,
             checks,
             summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
           });
@@ -109,7 +106,6 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
             printEnvelope(true, {
               datasource: datasource.name,
               plugin: plugin.manifest.name,
-              warnings,
               checks,
               summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
             });
@@ -133,7 +129,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
       printEnvelope(true, {
         datasource: datasource.name,
         plugin: plugin.manifest.name,
-        warnings,
+        ...(warnings.length ? { warnings } : {}),
         checks,
         summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
       });

@@ -1,18 +1,9 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
 
 function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
   const configDir = path.join(stateRoot, 'config');

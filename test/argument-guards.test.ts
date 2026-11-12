@@ -1,20 +1,9 @@
-import path from 'node:path';
-import fs from 'node:fs';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[]) {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-arg-guards-'));
-  return spawnSync(process.execPath, [path.join(process.cwd(), 'dist', 'index.js'), ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key' },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function expectBadInput(args: string[], fragment: string) {
-  const out = runCli(args);
+  const out = runCli(args, { TAPROOT_STATE_ROOT: tempStateRoot().stateRoot, TAPROOT_MASTER_KEY: 'test-key' });
   expect(out.status).toBe(2);
   const envelope = JSON.parse(out.stdout);
   expect(envelope.error.code).toBe('BAD_INPUT');

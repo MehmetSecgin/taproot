@@ -103,7 +103,7 @@ export class SessionRegistry {
     const existing = existingId ? this.sessionsById.get(existingId) : undefined;
     if (existing && existing.state !== 'closed') {
       existing.lastUsedAt = nowIso();
-      if (existing.state === 'recovering' || existing.state === 'opening') existing.state = 'ready';
+      if (existing.state === 'recovering') existing.state = 'ready';
       return existing;
     }
 

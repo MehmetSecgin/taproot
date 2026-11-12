@@ -1,22 +1,11 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupKbState() {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kb-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'deterministic-config.json'),
     JSON.stringify({
@@ -226,9 +215,7 @@ describe('kb resolution', () => {
   });
 
   it('kb resolve honors namespace when provided', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kb-ns-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({}));
     const kbDir = path.join(stateRoot, 'kb');
     fs.mkdirSync(kbDir, { recursive: true });

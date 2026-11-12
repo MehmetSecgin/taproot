@@ -16,9 +16,7 @@ export function fakePlugin(options: FakePluginOptions = {}): TapRootPlugin {
   return {
     manifest: {
       name: kind,
-      kind: kind as never,
-      capabilities: ['executeRead', 'executeMutate'] as never,
-      priority: 100,
+      capabilities: ['executeRead', 'executeMutate'],
     },
     connect: async () => [],
     execute: async (request): Promise<QueryResult> => {

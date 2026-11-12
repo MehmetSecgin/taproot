@@ -1,14 +1,4 @@
-export type Capability =
-  | 'doctor'
-  | 'resolveConnection'
-  | 'resolveCredentials'
-  | 'resolveDatabase'
-  | 'executeRead'
-  | 'executeMutate'
-  | 'discoverSchema'
-  | 'normalizeIds';
-
-export type PluginKind = 'connector' | 'executor' | 'resolver';
+export type Capability = 'doctor' | 'resolveConnection' | 'executeRead' | 'executeMutate';
 
 export const DatasourceKind = {
   Mysql: 'mysql',
@@ -41,9 +31,7 @@ export type KbRelationSource = (typeof KbRelationSource)[keyof typeof KbRelation
 
 export interface PluginManifest {
   name: string;
-  kind: PluginKind;
   capabilities: Capability[];
-  priority?: number;
 }
 
 export interface DatasourcePolicy {

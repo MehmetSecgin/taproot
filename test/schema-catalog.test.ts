@@ -32,7 +32,7 @@ function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('in
   const sessions: Array<string | undefined> = [];
   const registry = new Map<string, TapRootPlugin>();
   registry.set('mysql', {
-    manifest: { name: 'mysql', kind: 'executor', capabilities: ['executeRead'] },
+    manifest: { name: 'mysql', capabilities: ['executeRead'] },
     async execute(request, creds) {
       seen.push(request.query);
       sessions.push(creds.__sessionId);

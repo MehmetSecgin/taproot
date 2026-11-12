@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readJsonFile, writeJsonFile } from '../src/core/json.js';
 import { CredentialStore } from '../src/store/credentials.js';
-import { RuntimeConfigStore } from '../src/store/runtime-config.js';
 
 function tmpFile(content: unknown): string {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-json-')), 'data.json');
@@ -70,21 +69,6 @@ describe('readJsonFile cache', () => {
 
     // assert
     expect(readJsonFile(file, {})).toEqual({ name: 'bbbb' });
-  });
-});
-
-describe('runtime config', () => {
-  it('checks an unchanged file once', () => {
-    // arrange
-    const store = new RuntimeConfigStore(tmpFile({ serviceAliases: { legacy: 'sample-service' } }));
-
-    // act
-    const first = store.get();
-    const second = store.get();
-
-    // assert
-    expect(second).toEqual({ serviceAliases: { legacy: 'sample-service' } });
-    expect(second).toBe(first);
   });
 });
 

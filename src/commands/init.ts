@@ -43,14 +43,6 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
       if (!result) {
         throw new Error(`No KB data found for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       }
-      const data = {
-        source: result.source,
-        skipped: result.source === 'store-existing',
-        profile: result.profile,
-        credentialRefs: result.credentialRefs,
-        connectors: result.connectors,
-        warnings: result.warnings,
-      };
-      printEnvelope(true, data);
+      printEnvelope(true, { source: result.source, profile: result.profile, credentialRefs: result.credentialRefs });
     });
 }

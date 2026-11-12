@@ -1,22 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupState() {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-bootstrap-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({}));
@@ -81,7 +71,7 @@ describe('doctor with an unresolved env/service target', () => {
     // assert
     expect(out.status).toBe(7);
     const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.datasource).toBe(null);
+    expect(Object.keys(parsed)).toEqual(['checks', 'summary']);
     expect(parsed.checks.find((check: { check: string }) => check.check === 'target_datasource')).toMatchObject({
       status: 'fail',
     });

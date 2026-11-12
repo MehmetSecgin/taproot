@@ -4,25 +4,33 @@ import type { AppContext } from '../core/app.js';
 import { defaultDatasourceName, normalizeNamespace, normalizeService, runDatasourceConnectors } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { badInput } from '../core/error-classification.js';
+import { parseKeyValuePairs } from '../core/key-value.js';
 import { nowIso } from '../core/time.js';
 import { printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
 import { DoctorStatus } from '../types/core.js';
-import type { Capability } from '../types/core.js';
+import type { Capability, DatasourceProfile } from '../types/core.js';
 import { str } from '../core/strings.js';
 import { parseDatasourceProfile } from '../store/schemas.js';
 
-function parseHintPairs(values: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const value of values) {
-    const idx = value.indexOf('=');
-    if (idx <= 0) throw badInput(`Invalid --hint '${value}'. Expected key=value.`);
-    const key = value.slice(0, idx).trim();
-    const val = value.slice(idx + 1);
-    if (!key) throw badInput(`Invalid --hint '${value}'. Empty key.`);
-    out[key] = val;
-  }
-  return out;
+const LIST_COLUMNS = ['name', 'kind', 'env', 'namespace', 'service', 'host', 'target', 'database'];
+const DETAILED_LIST_COLUMNS = [...LIST_COLUMNS, 'confidence', 'updatedAt'];
+
+function listCells(d: DatasourceProfile, detailed: boolean): unknown[] {
+  const cells = [d.name, d.kind, d.env, d.namespace, d.service, d.connection.host, d.connection.target, d.connection.database];
+  return detailed ? [...cells, d.confidence, d.updatedAt] : cells;
+}
+
+function isEmptyCell(cell: unknown): boolean {
+  return cell === undefined || cell === null || cell === '';
+}
+
+function withoutEmptyColumns(columns: string[], rows: unknown[][]): { columns: string[]; rows: unknown[][] } {
+  const kept = columns.map((_, index) => index).filter((index) => rows.some((row) => !isEmptyCell(row[index])));
+  return {
+    columns: kept.map((index) => columns[index]),
+    rows: rows.map((row) => kept.map((index) => (isEmptyCell(row[index]) ? null : row[index]))),
+  };
 }
 
 function probeFailed(name: string, detail: string): Error {
@@ -31,17 +39,9 @@ function probeFailed(name: string, detail: string): Error {
   return new Error(`PROBE_FAILED: profile ${name} saved, probe failed. ${detail}. Re-run: ${rerun}. Remove: ${remove}`);
 }
 
-function parseConnectorRefPairs(values: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const value of values) {
-    const idx = value.indexOf('=');
-    if (idx <= 0) throw badInput(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
-    const connector = value.slice(0, idx).trim();
-    const ref = value.slice(idx + 1).trim();
-    if (!connector || !ref) throw badInput(`Invalid --connector-ref '${value}'. Expected connector=credentialRef.`);
-    out[`${connector}CredentialRef`] = ref;
-  }
-  return out;
+function connectorCredentialRefHints(values: string[]): Record<string, string> {
+  const refs = Object.entries(parseKeyValuePairs('--connector-ref', values));
+  return Object.fromEntries(refs.map(([connector, ref]) => [`${connector}CredentialRef`, ref.trim()]));
 }
 
 export function registerDatasource(program: Command, getCtx: () => AppContext): void {
@@ -58,30 +58,15 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const { profiles, warnings } = ctx.datasourceStore.load();
       const rows = profiles
         .filter((d) => d.name.toLowerCase().includes(needle))
-        .map((d) => {
-          const row: Record<string, unknown> = {
-            name: d.name,
-            kind: d.kind,
-            env: d.env || '',
-            namespace: d.namespace || '',
-            service: d.service || '',
-            ...(d.connection.host ? { host: d.connection.host } : {}),
-            ...(d.connection.target ? { target: d.connection.target } : {}),
-            ...(d.connection.database ? { database: d.connection.database } : {}),
-          };
-          if (detailed) {
-            row.confidence = d.confidence;
-            row.updatedAt = d.updatedAt;
-          }
-          return row;
-        })
         .sort((a, b) =>
-          String(a.env).localeCompare(String(b.env))
-          || String(a.namespace).localeCompare(String(b.namespace))
-          || String(a.service).localeCompare(String(b.service))
-          || String(a.name).localeCompare(String(b.name)),
-        );
-      printEnvelope(true, rows, undefined, warnings.length ? { warnings } : undefined);
+          str(a.env).localeCompare(str(b.env))
+          || str(a.namespace).localeCompare(str(b.namespace))
+          || str(a.service).localeCompare(str(b.service))
+          || a.name.localeCompare(b.name),
+        )
+        .map((d) => listCells(d, detailed));
+      const table = withoutEmptyColumns(detailed ? DETAILED_LIST_COLUMNS : LIST_COLUMNS, rows);
+      printEnvelope(true, { ...table, ...(warnings.length ? { warnings } : {}) });
     });
 
   ds.command('show')
@@ -150,8 +135,8 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
             : (['executeRead'] satisfies Capability[]),
         },
         resolverHints: {
-          ...parseConnectorRefPairs(opts.connectorRef || []),
-          ...parseHintPairs(opts.hint || []),
+          ...connectorCredentialRefHints(opts.connectorRef || []),
+          ...parseKeyValuePairs('--hint', opts.hint || []),
           ...(opts.teleportRef ? { teleportCredentialRef: opts.teleportRef } : {}),
         },
         updatedAt: nowIso(),

@@ -1,17 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
 
 function setupStateRoot() {
   const stateRoot = path.join(os.tmpdir(), `taproot-output-${Date.now()}-${Math.random().toString(16).slice(2)}`);

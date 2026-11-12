@@ -1,27 +1,12 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-
-function runCli(args: string[], env: Record<string, string>) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
-
-function makeStateRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-contract-'));
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+  fs.writeFileSync(path.join(stateRoot, 'config', 'deterministic-config.json'), JSON.stringify(config));
 }
 
 const envelopeMetaSchema = z.object({
@@ -49,7 +34,7 @@ const errorEnvelopeSchema = z.object({
 
 describe('agent JSON contract', () => {
   it('daemon status JSON uses envelope with requestId after a query starts the daemon', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
     runCli(['query', '--datasource', 'missing', '--sql', 'SELECT 1'], env);
     try {
@@ -63,7 +48,7 @@ describe('agent JSON contract', () => {
   });
 
   it('query JSON error keeps request correlation metadata when daemon responds with error', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
         prod: {
@@ -85,7 +70,7 @@ describe('agent JSON contract', () => {
   });
 
   it('direct-mode query error emits the same error envelope', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
         prod: {

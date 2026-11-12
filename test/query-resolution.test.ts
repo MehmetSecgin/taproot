@@ -1,26 +1,16 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupState(input?: {
   runtimeConfig?: Record<string, unknown>;
   datasources?: Array<Record<string, unknown>>;
   kbServices?: Array<Record<string, unknown>>;
 }) {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-query-resolution-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
     JSON.stringify(

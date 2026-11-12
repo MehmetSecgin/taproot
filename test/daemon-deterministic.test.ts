@@ -1,11 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 const previousEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -13,14 +13,8 @@ const previousEnv = {
   NODE_ENV: process.env.NODE_ENV,
 };
 
-function makeStateRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'trd-'));
-}
-
 function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>): void {
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+  fs.writeFileSync(path.join(stateRoot, 'config', 'deterministic-config.json'), JSON.stringify(config));
 }
 
 afterEach(() => {
@@ -31,7 +25,7 @@ afterEach(() => {
 
 describe('daemon deterministic resolution', () => {
   it('returns DETERMINISTIC_REQUIRED in prod when datasource is unresolved', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
         prod: {
@@ -62,7 +56,7 @@ describe('daemon deterministic resolution', () => {
   });
 
   it('resolves deterministically in the daemon even when allowDiscovery is requested', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {
       environmentPolicies: {
         prod: {
@@ -94,13 +88,11 @@ describe('daemon deterministic resolution', () => {
   });
 
   it('returns QUERY_TIMEOUT when execution exceeds timeoutMs', async () => {
-    const stateRoot = makeStateRoot();
+    const { stateRoot, configDir } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {});
     process.env.TAPROOT_STATE_ROOT = stateRoot;
     process.env.TAPROOT_MASTER_KEY = 'test-master-key';
     process.env.NODE_ENV = 'test';
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([

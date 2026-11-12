@@ -1,22 +1,10 @@
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
-import { badInput } from '../core/error-classification.js';
+import { parseKeyValuePairs } from '../core/key-value.js';
 import { printEnvelope } from '../core/output.js';
 
-const PLAIN_CREDENTIAL_KEYS = new Set(['user', 'dbUser', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']);
-
-function parseKv(values: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const value of values) {
-    const idx = value.indexOf('=');
-    if (idx <= 0) throw badInput(`Invalid --kv '${value}'. Expected key=value.`);
-    const key = value.slice(0, idx).trim();
-    const val = value.slice(idx + 1);
-    if (!key) throw badInput(`Invalid --kv '${value}'. Key cannot be empty.`);
-    out[key] = val;
-  }
-  return out;
-}
+const PLAIN_CREDENTIAL_KEYS = ['user', 'dbUser', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand'];
+const SECRET_CREDENTIAL_KEYS = ['password', 'token'];
 
 export function registerCreds(program: Command, getCtx: () => AppContext): void {
   const c = program.command('creds').description('Credential reference management');
@@ -35,18 +23,9 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     .option('--kv <key=value>', 'repeatable extra credential value', (v, p: string[]) => (p || []).concat(v), [])
     .action(async (opts) => {
       const ctx = getCtx();
-      const value: Record<string, string> = parseKv(opts.kv || []);
-      for (const k of [
-        'user',
-        'dbUser',
-        'password',
-        'token',
-        'statusCommand',
-        'connectCommand',
-        'disconnectCommand',
-        'loginCommand',
-      ] as const) {
-        if (opts[k]) value[k] = String(opts[k]);
+      const value = parseKeyValuePairs('--kv', opts.kv || []);
+      for (const key of [...PLAIN_CREDENTIAL_KEYS, ...SECRET_CREDENTIAL_KEYS]) {
+        if (opts[key]) value[key] = String(opts[key]);
       }
       await ctx.credentialStore.set(opts.ref, value);
       printEnvelope(true, { saved: true, ref: opts.ref, keys: Object.keys(value) });
@@ -57,7 +36,7 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     const value = await ctx.credentialStore.get(opts.ref);
     if (!Object.keys(value).length) throw new Error(`Credential ref not found: ${opts.ref}`);
     const redacted = Object.fromEntries(
-      Object.entries(value).map(([key, val]) => [key, PLAIN_CREDENTIAL_KEYS.has(key) ? val : '[REDACTED]']),
+      Object.entries(value).map(([key, val]) => [key, PLAIN_CREDENTIAL_KEYS.includes(key) ? val : '[REDACTED]']),
     );
     printEnvelope(true, { ref: opts.ref, values: redacted });
   });

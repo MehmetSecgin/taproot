@@ -51,7 +51,6 @@ function parseLine(line: string): RpcRequest {
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
   const runDir = defaultRunDir(opts.stateRoot);
   const socketPath = opts.socketPath || path.join(runDir, 'taprootd.sock');
-  const lockFile = path.join(runDir, 'taprootd.pid');
   fs.mkdirSync(runDir, { recursive: true });
 
   if (fs.existsSync(socketPath)) {
@@ -59,7 +58,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     if (alive) throw new Error(`taprootd already running on ${socketPath}`);
     fs.rmSync(socketPath, { force: true });
   }
-  if (fs.existsSync(lockFile)) fs.rmSync(lockFile, { force: true });
 
   const sessions = new SessionRegistry(runDir);
   const queryLimiter = new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries);
@@ -159,7 +157,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     });
   });
 
-  fs.writeFileSync(lockFile, `${process.pid}\n`, 'utf8');
   fs.chmodSync(socketPath, 0o600);
 
   const interval = setInterval(() => {
@@ -178,7 +175,6 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
     if (released) return;
     released = true;
     fs.rmSync(socketPath, { force: true });
-    fs.rmSync(lockFile, { force: true });
   };
 
   let stopped = false;

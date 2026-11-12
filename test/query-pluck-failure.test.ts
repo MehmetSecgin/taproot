@@ -1,13 +1,11 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function setupStateRoot(): string {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-pluck-'));
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
+  const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
     JSON.stringify([
@@ -29,15 +27,6 @@ function setupStateRoot(): string {
   );
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
   return stateRoot;
-}
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
 }
 
 describe('query failure with --pluck', () => {
@@ -90,7 +79,7 @@ describe('datasource list with --lines', () => {
     // act / assert
     expect(out.status).toBe(0);
     const lines = out.stdout.trim().split('\n').map((line) => JSON.parse(line));
-    expect(lines[0]).toEqual({ ok: true });
-    expect(lines.slice(1).map((d) => d.name)).toEqual(['prod-orders']);
+    expect(lines[0]).toMatchObject({ ok: true, columns: expect.arrayContaining(['name']) });
+    expect(lines.slice(1).map((row) => row[0])).toEqual(['prod-orders']);
   });
 });

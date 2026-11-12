@@ -2,17 +2,11 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { spawn } from 'node:child_process';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function connection(target: string) {
   return {
@@ -29,7 +23,7 @@ function connection(target: string) {
 }
 
 function setupState(extraEnv: Record<string, string> = {}) {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-qa-portforward-'));
+  const { stateRoot } = tempStateRoot();
   const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-qa-portforward-kb-'));
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
@@ -84,6 +78,32 @@ function portforwardStatus(service: string, env: Record<string, string>): string
   const checks: Array<{ check: string; status: string }> = JSON.parse(out.stdout).data.checks;
   return checks.find((c) => c.check === 'kubectl-portforward status')!.status;
 }
+
+describe('TAPROOT_QA_LOCAL_PORT', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('overrides the derived port', () => {
+    // arrange
+    vi.stubEnv('TAPROOT_QA_LOCAL_PORT', '4406');
+
+    // act
+    const port = qaPortforwardLocalPort('qa', 'develop', 'profile');
+
+    // assert
+    expect(port).toBe(4406);
+  });
+
+  it.each(['abc', '0', '70000', '12.5'])('rejects %j as BAD_INPUT', (value) => {
+    // arrange
+    vi.stubEnv('TAPROOT_QA_LOCAL_PORT', value);
+
+    // act
+    const port = () => qaPortforwardLocalPort('qa', 'develop', 'profile');
+
+    // assert
+    expect(port).toThrow(`BAD_INPUT: TAPROOT_QA_LOCAL_PORT must be a port from 1 to 65535, got '${value}'.`);
+  });
+});
 
 describe('qa-portforward profiles', () => {
   it('give two services in one env different local ports', () => {

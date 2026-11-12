@@ -16,7 +16,7 @@ export class SchemaCatalogStore {
     return path.join(this.dir, `${datasource.replace(/[^a-z0-9._-]/gi, '_')}.json`);
   }
 
-  private readOrMissing(file: string): SchemaCatalog | undefined {
+  private readTreatingCorruptAsMissing(file: string): SchemaCatalog | undefined {
     try {
       return readJsonFile<SchemaCatalog | undefined>(file, undefined);
     } catch {
@@ -25,7 +25,7 @@ export class SchemaCatalogStore {
   }
 
   get(datasource: string): SchemaCatalog | undefined {
-    return this.readOrMissing(this.file(datasource));
+    return this.readTreatingCorruptAsMissing(this.file(datasource));
   }
 
   save(datasource: string, tables: Record<string, TableContext>): SchemaCatalog {
@@ -39,7 +39,7 @@ export class SchemaCatalogStore {
     if (!fs.existsSync(this.dir)) return [];
     return fs.readdirSync(this.dir)
       .filter((name) => name.endsWith('.json'))
-      .map((name) => this.readOrMissing(path.join(this.dir, name)))
+      .map((name) => this.readTreatingCorruptAsMissing(path.join(this.dir, name)))
       .filter((catalog): catalog is SchemaCatalog => Boolean(catalog))
       .map((catalog) => ({ datasource: catalog.datasource, fetchedAt: catalog.fetchedAt, tables: Object.keys(catalog.tables || {}).length }));
   }

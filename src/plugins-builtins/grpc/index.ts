@@ -148,9 +148,7 @@ function callMetadata(grpc: GrpcModule, creds: Record<string, string>, ds: Query
 export const grpcPlugin: TapRootPlugin = {
   manifest: {
     name: 'grpc',
-    kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    priority: 100,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {

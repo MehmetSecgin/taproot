@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from './app.js';
 import { DoctorStatus } from '../types/core.js';
-import type { DoctorCheck } from '../types/core.js';
+import type { DatasourceProfile, DoctorCheck } from '../types/core.js';
 import { defaultSocketPath, rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
 import { str } from './strings.js';
@@ -60,9 +60,9 @@ async function daemonCheck(ctx: AppContext): Promise<DoctorCheck> {
 
 const AUTH_REQUIRED_KINDS = new Set(['mysql', 'teleport-mysql']);
 
-async function credentialRefsCheck(ctx: AppContext): Promise<DoctorCheck> {
+async function credentialRefsCheck(ctx: AppContext, datasources: DatasourceProfile[]): Promise<DoctorCheck> {
   const refToDatasources = new Map<string, string[]>();
-  for (const d of ctx.datasourceStore.list()) {
+  for (const d of datasources) {
     if (!AUTH_REQUIRED_KINDS.has(d.kind)) continue;
     const ref = str(d.credentialRef).trim();
     if (!ref) continue;
@@ -87,10 +87,9 @@ async function credentialRefsCheck(ctx: AppContext): Promise<DoctorCheck> {
   };
 }
 
-function credentialsCheck(ctx: AppContext): DoctorCheck {
+function credentialsCheck(ctx: AppContext, datasources: DatasourceProfile[]): DoctorCheck {
   const file = ctx.paths.credentialFile;
   if (fs.existsSync(file)) return { check: 'credentials', status: DoctorStatus.Ok, detail: file };
-  const datasources = ctx.datasourceStore.list();
   if (datasources.length && !datasources.some((d) => AUTH_REQUIRED_KINDS.has(d.kind))) {
     const optionalKinds = [...new Set(datasources.filter((d) => AUTH_OPTIONAL_KINDS.has(d.kind)).map((d) => d.kind))];
     return {
@@ -106,6 +105,22 @@ function credentialsCheck(ctx: AppContext): DoctorCheck {
     status: DoctorStatus.Warn,
     detail: `${file} (created on first \`taproot creds set\`)`,
   };
+}
+
+function loadDatasources(ctx: AppContext): { datasources: DatasourceProfile[]; checks: DoctorCheck[] } {
+  let loaded: { profiles: DatasourceProfile[]; warnings: string[] };
+  try {
+    loaded = ctx.datasourceStore.load();
+  } catch (error) {
+    return { datasources: [], checks: [{ check: 'datasources', status: DoctorStatus.Fail, detail: str((error as Error).message) }] };
+  }
+  const { profiles, warnings } = loaded;
+  const countCheck: DoctorCheck = profiles.length
+    ? { check: 'datasources', status: DoctorStatus.Ok, detail: `${profiles.length} datasource profile(s)` }
+    : { check: 'datasources', status: DoctorStatus.Warn, detail: 'none yet; add one with `taproot datasource add`' };
+  if (!warnings.length) return { datasources: profiles, checks: [countCheck] };
+  const skippedCheck: DoctorCheck = { check: 'skipped_datasources', status: DoctorStatus.Warn, detail: warnings.join('; ') };
+  return { datasources: profiles, checks: [countCheck, skippedCheck] };
 }
 
 function masterKeyCheck(ctx: AppContext): DoctorCheck {
@@ -134,7 +149,7 @@ export async function collectReadinessSnapshot(
   input?: { createdConfig?: boolean },
 ): Promise<ReadinessSnapshot> {
   const pluginNames = [...ctx.pluginRegistry.keys()];
-  const datasources = ctx.datasourceStore.list();
+  const { datasources, checks: datasourceChecks } = loadDatasources(ctx);
   const checks: DoctorCheck[] = [
     { check: 'node_version', status: DoctorStatus.Ok, detail: process.version },
     { check: 'state_root', status: fs.existsSync(ctx.paths.stateRoot) ? DoctorStatus.Ok : DoctorStatus.Fail, detail: ctx.paths.stateRoot },
@@ -142,15 +157,9 @@ export async function collectReadinessSnapshot(
     { check: 'plugins', status: DoctorStatus.Ok, detail: `${pluginNames.length} loaded: ${pluginNames.join(', ')}` },
     masterKeyCheck(ctx),
     configCheck(ctx, Boolean(input?.createdConfig)),
-    {
-      check: 'datasources',
-      status: datasources.length > 0 ? DoctorStatus.Ok : DoctorStatus.Warn,
-      detail: datasources.length > 0
-        ? `${datasources.length} datasource profile(s)`
-        : 'none yet; add one with `taproot datasource add`',
-    },
-    credentialsCheck(ctx),
-    await credentialRefsCheck(ctx),
+    ...datasourceChecks,
+    credentialsCheck(ctx, datasources),
+    await credentialRefsCheck(ctx, datasources),
     await daemonCheck(ctx),
   ];
 

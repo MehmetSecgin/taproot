@@ -1,23 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-
-function runCli(args: string[], env: Record<string, string> = {}) {
-  const distCli = path.join(process.cwd(), 'dist', 'index.js');
-  return spawnSync(process.execPath, [distCli, ...args], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  });
-}
+import { runCli } from './helpers/cli.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 describe('doctor executor codes', () => {
   it('returns executor_connectivity for mysql doctor connection failures', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-executor-mysql-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -53,9 +42,7 @@ describe('doctor executor codes', () => {
   });
 
   it('returns executor_missing_tool when tsh is not on PATH', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-executor-teleport-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([
@@ -94,9 +81,7 @@ describe('doctor executor codes', () => {
   });
 
   it('returns executor_configuration_missing when the profile has no connection', () => {
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-doctor-executor-config-'));
-    const configDir = path.join(stateRoot, 'config');
-    fs.mkdirSync(configDir, { recursive: true });
+    const { stateRoot, configDir } = tempStateRoot();
     fs.writeFileSync(
       path.join(configDir, 'datasources.json'),
       JSON.stringify([

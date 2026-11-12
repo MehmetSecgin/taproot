@@ -77,8 +77,4 @@ export class DatasourceStore {
     }
     return undefined;
   }
-
-  candidatesByService(service: string): DatasourceProfile[] {
-    return this.list().filter((d) => d.service === service);
-  }
 }

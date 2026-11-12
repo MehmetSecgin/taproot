@@ -16,9 +16,7 @@ function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string
 export const mysqlPlugin: TapRootPlugin = {
   manifest: {
     name: 'mysql',
-    kind: 'executor',
     capabilities: ['doctor', 'executeRead'],
-    priority: 100,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {

@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/core/app.js';
@@ -11,6 +9,7 @@ import { CredentialStore } from '../src/store/credentials.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 import type { QueryResult, TapRootPlugin } from '../src/types/core.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function queryRecordingPlugin(seen: string[]): TapRootPlugin {
   const plugin = fakePlugin();
@@ -75,12 +74,11 @@ async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => Ta
 }
 
 beforeEach(async () => {
-  stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-parity-'));
+  stateRoot = tempStateRoot().stateRoot;
   process.env.TAPROOT_STATE_ROOT = stateRoot;
   process.env.TAPROOT_MASTER_KEY = 'test-master-key';
   process.env.NODE_ENV = 'test';
   const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
   const dsStore = new DatasourceStore(path.join(configDir, 'datasources.json'));
   dsStore.save({
     name: 'qa-fake',

@@ -1,18 +1,15 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { resolveKbDir } from '../src/core/paths.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 const originalKbDir = process.env.TAPROOT_KB_DIR;
 
 function stateRootWithSavedKbDir(kbDir?: string): string {
-  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kb-dir-test-state-'));
-  if (kbDir) {
-    fs.mkdirSync(path.join(stateRoot, 'config'), { recursive: true });
-    fs.writeFileSync(path.join(stateRoot, 'config', 'deterministic-config.json'), JSON.stringify({ kbDir }));
-  }
+  const { stateRoot, configDir } = tempStateRoot();
+  if (kbDir) fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ kbDir }));
   return stateRoot;
 }
 

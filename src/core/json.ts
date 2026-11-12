@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
+const OWNER_ONLY_FILE_MODE = 0o600;
+
 interface ParsedFile {
   mtimeMs: number;
   size: number;
@@ -40,8 +42,6 @@ export function readJsonFile<T>(file: string, fallback: T): T {
   parsedFiles.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, value });
   return value;
 }
-
-const OWNER_ONLY_FILE_MODE = 0o600;
 
 function jsonText(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;

@@ -1,12 +1,12 @@
 import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
 import { startDaemon } from '../src/daemon/server.js';
 import type { RpcResponse } from '../src/daemon/types.js';
+import { tempStateRoot } from './helpers/state-root.js';
 
 function rawRpc(socketPath: string, clientVersion: string): Promise<RpcResponse> {
   return new Promise((resolve, reject) => {
@@ -41,9 +41,8 @@ async function waitForDaemon(socketPath: string): Promise<void> {
 describe('daemon version handoff', () => {
   it('stops a daemon of another version and leaves the socket to its successor', async () => {
     // arrange
-    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'trd-'));
+    const { stateRoot } = tempStateRoot();
     const socketPath = path.join(stateRoot, 'run', 'taprootd.sock');
-    const pidFile = path.join(stateRoot, 'run', 'taprootd.pid');
     const old = spawn(process.execPath, [path.join(process.cwd(), 'dist', 'daemon-main.js')], {
       env: { ...process.env, TAPROOT_STATE_ROOT: stateRoot },
       stdio: 'ignore',
@@ -61,9 +60,9 @@ describe('daemon version handoff', () => {
     try {
       expect(res.error?.code).toBe('DAEMON_VERSION_MISMATCH');
       expect(socketLeftAfterMismatch).toBe(false);
-      expect(fs.readFileSync(pidFile, 'utf8').trim()).toBe(String(process.pid));
       const status = await rpcCall({ socketPath, method: 'daemon.status' });
       expect(status.ok).toBe(true);
+      expect(status.data?.pid).toBe(process.pid);
     } finally {
       await successor.stop();
     }

@@ -6,9 +6,7 @@ import { runShellCommand } from '../shell-command.js';
 export const kubectlPortforwardPlugin: TapRootPlugin = {
   manifest: {
     name: 'kubectl-portforward',
-    kind: 'connector',
     capabilities: ['doctor', 'resolveConnection'],
-    priority: 85,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {

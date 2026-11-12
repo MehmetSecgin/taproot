@@ -300,9 +300,7 @@ function redisFailure(r: RunResult, timeoutMs: number | undefined): Error | unde
 export const redisPlugin: TapRootPlugin = {
   manifest: {
     name: 'redis',
-    kind: 'executor',
     capabilities: ['doctor', 'executeRead', 'executeMutate'],
-    priority: 100,
   },
 
   async doctor(input): Promise<DoctorCheck[]> {
