@@ -2,7 +2,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import mysql from 'mysql2';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { closeAllMysqlPools } from '../src/plugins-builtins/_shared/db-conn.js';
+import { closeTeleportMysqlSessionProxies, teleportMysqlPlugin } from '../src/plugins-builtins/teleport-mysql/index.js';
+import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
+import { column, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
 
 function runCli(args: string[], env: Record<string, string> = {}) {
   const distCli = path.join(process.cwd(), 'dist', 'index.js');
@@ -56,6 +61,82 @@ function runQuery(stateRoot: string, pathEnv: string) {
     { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_FORCE_DIRECT: '1', PATH: pathEnv },
   );
 }
+
+function stubForwardingTsh(upstreamPort: number): { pathEnv: string; proxyPids: () => number[] } {
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-tsh-forward-'));
+  const pids = path.join(binDir, 'pids');
+  const forwarder = path.join(binDir, 'forward.mjs');
+  fs.writeFileSync(
+    forwarder,
+    [
+      "import net from 'node:net';",
+      "const port = Number(process.argv[process.argv.indexOf('--port') + 1]);",
+      'net.createServer((client) => {',
+      `  const upstream = net.connect(${upstreamPort}, '127.0.0.1');`,
+      "  client.on('error', () => upstream.destroy());",
+      "  upstream.on('error', () => client.destroy());",
+      '  client.pipe(upstream).pipe(client);',
+      "}).listen(port, '127.0.0.1');",
+    ].join('\n'),
+  );
+  const script = path.join(binDir, 'tsh');
+  fs.writeFileSync(script, `#!/bin/sh\necho $$ >> '${pids}'\nexec '${process.execPath}' '${forwarder}' "$@"\n`);
+  fs.chmodSync(script, 0o755);
+  return {
+    pathEnv: `${binDir}:${process.env.PATH}`,
+    proxyPids: () => (fs.existsSync(pids) ? fs.readFileSync(pids, 'utf8').trim().split('\n').map(Number) : []),
+  };
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntilReaped(pid: number): Promise<void> {
+  while (isRunning(pid)) await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+describe('teleport mysql proxy reuse', () => {
+  const sessionId = 'proxy-exit-session';
+  let server: FakeMysqlServer | undefined;
+
+  afterEach(async () => {
+    await closeTeleportMysqlSessionProxies(sessionId);
+    await closeAllMysqlPools();
+    server?.close();
+    vi.unstubAllEnvs();
+  });
+
+  it('starts a fresh proxy when the previous one exited on its own', async () => {
+    // arrange
+    server = await startFakeMysqlServer(() => ({ columns: [column('profiles', 'ok', mysql.Types.LONG)], row: ['1'] }), () => undefined);
+    const tsh = stubForwardingTsh(server.port);
+    vi.stubEnv('PATH', tsh.pathEnv);
+    const request: QueryRequest = {
+      datasource: { name: 'qa-profiles', kind: 'teleport-mysql', connection: { target: 'profiles-db', database: 'profiles' } } as DatasourceProfile,
+      query: 'SELECT 1 AS ok',
+      capability: 'executeRead',
+      sessionTimeZone: '+00:00',
+    };
+    const creds = { dbUser: 'reader', password: '', __sessionId: sessionId };
+    await teleportMysqlPlugin.execute!(request, creds);
+    const [firstProxy] = tsh.proxyPids();
+    process.kill(firstProxy, 'SIGTERM');
+    await waitUntilReaped(firstProxy);
+
+    // act
+    const result = await teleportMysqlPlugin.execute!(request, creds);
+
+    // assert
+    expect(result.result.rows).toEqual([[1]]);
+    expect(tsh.proxyPids()).toHaveLength(2);
+  });
+});
 
 describe('teleport mysql execution', () => {
   it('fails cleanly without tsh db exec fallback when tsh is missing', () => {

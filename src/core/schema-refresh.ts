@@ -5,6 +5,7 @@ import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition, Tabl
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
+import { rowObject } from './rows.js';
 import { DEFAULT_SESSION_TIME_ZONE } from './session-timezone.js';
 
 function escapeSqlString(value: string): string {
@@ -66,6 +67,10 @@ async function executeRead(ctx: AppContext, datasource: DatasourceProfile, sql: 
     },
     creds,
   );
+}
+
+function namedRows(result: QueryResult): Array<Record<string, unknown>> {
+  return result.result.rows.map((row) => rowObject(result.result.columns, row));
 }
 
 function executeCatalogRead(ctx: AppContext, datasource: DatasourceProfile, sql: string): Promise<QueryResult> {
@@ -130,7 +135,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   const partitionResult = await executeCatalogRead(ctx, datasource, partitionSql(datasource));
 
   const columnsByTable = new Map<string, Set<string>>();
-  for (const row of tableResult.result.rows) {
+  for (const row of namedRows(tableResult)) {
     const table = String(row.table_name || '').trim();
     const column = String(row.column_name || '').trim();
     if (!table) continue;
@@ -140,7 +145,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const indexesByTable = new Map<string, Map<string, SchemaIndex>>();
-  for (const row of indexResult.result.rows) {
+  for (const row of namedRows(indexResult)) {
     const table = String(row.table_name || '').trim();
     const name = String(row.index_name || '').trim();
     const column = String(row.column_name || '').trim();
@@ -156,7 +161,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
   }
 
   const partitionsByTable = new Map<string, SchemaPartition>();
-  for (const row of partitionResult.result.rows) {
+  for (const row of namedRows(partitionResult)) {
     const table = String(row.table_name || '').trim();
     if (!table || partitionsByTable.has(table)) continue;
     const method = String(row.partition_method || row.subpartition_method || '').trim();

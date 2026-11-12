@@ -66,6 +66,31 @@ describe('executeQuery success', () => {
     expect(outcome.data.rowsForm).toBeUndefined();
   });
 
+  it('keeps both values when two columns share a name', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin({ columns: ['id', 'id'], rows: [[7, 9]] }));
+
+    // act
+    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });
+
+    // assert
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.columns).toEqual(['id', 'id']);
+    expect(outcome.data.rows).toEqual([[7, 9]]);
+  });
+
+  it('keys each value by its column name when rowsObject is set', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin({ columns: ['id', 'name', 'payload'], rows: [[7, 'Ada', '{"order":{"id":3}}']] }));
+
+    // act
+    const outcome = await executeQuery(queryRequest({ rowsObject: true, jsonExtract: ['payload:order.id'] }), { ctx, report: silentQueryReport });
+
+    // assert
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.rows).toEqual([{ id: 7, name: 'Ada', payload: '{"order":{"id":3}}', 'payload.order.id': 3 }]);
+  });
+
   it('wraps the query with EXPLAIN when explain is set', async () => {
     const capture: { query?: string } = {};
     const ctx = contextWith(capturingPlugin(capture));
@@ -74,7 +99,7 @@ describe('executeQuery success', () => {
   });
 
   it('applies json extract specs to the returned columns', async () => {
-    const ctx = contextWith(fakePlugin({ columns: ['payload'], rows: [{ payload: '{"order":{"id":7}}' }] }));
+    const ctx = contextWith(fakePlugin({ columns: ['payload'], rows: [['{"order":{"id":7}}']] }));
     const outcome = await executeQuery(queryRequest({ jsonExtract: ['payload:order.id'] }), {
       ctx,
       report: silentQueryReport,

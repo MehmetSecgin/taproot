@@ -4,7 +4,7 @@ export interface FakePluginOptions {
   kind?: string;
   holdMs?: number;
   columns?: string[];
-  rows?: Array<Record<string, unknown>>;
+  rows?: unknown[][];
   warnings?: string[];
   failWith?: string;
 }
@@ -12,7 +12,7 @@ export interface FakePluginOptions {
 export function fakePlugin(options: FakePluginOptions = {}): TapRootPlugin {
   const kind = options.kind || 'fake';
   const columns = options.columns || ['ok'];
-  const rows = options.rows || [{ ok: 1 }];
+  const rows = options.rows || [[1]];
   return {
     manifest: {
       name: kind,

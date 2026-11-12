@@ -31,7 +31,7 @@ function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('in
         plugin: 'mysql',
         capability: request.capability,
         query: { native: request.query },
-        result: { columns: Object.keys(rows[0] || {}), rows },
+        result: { columns: Object.keys(rows[0] || {}), rows: rows.map((row) => Object.values(row)) },
         timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
         warnings: [],
         classification: 'success',

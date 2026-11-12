@@ -316,31 +316,28 @@ export const redisPlugin: TapRootPlugin = {
     }
     const warnings: string[] = [];
     const columns = ['value'];
-    let rows: Array<Record<string, unknown>> = [];
+    let rows: unknown[][] = [];
     if (decode) {
       const root = (await loadProtobufRoot(protoRoot as string)).protobufRoot;
       const entries = splitReplies(r.stdout);
+      let undecodable = 0;
       rows = entries.map((entry) => {
-        if (entry.kind === 'text') return { value: entry.text };
+        if (entry.kind === 'text') return [entry.text];
         const bytes = entry.bytes as Buffer;
         try {
-          const obj = decodeWith(root, protoMessage as string, bytes);
-          return { value: obj };
-        } catch (err) {
-          if (looksPrintableAscii(bytes)) return { value: bytes.toString('utf8') };
-          return {
-            value: bytes.toString('base64'),
-            _decodeError: (err as Error).message,
-            _encoding: 'base64',
-          };
+          return [decodeWith(root, protoMessage as string, bytes)];
+        } catch {
+          if (looksPrintableAscii(bytes)) return [bytes.toString('utf8')];
+          undecodable += 1;
+          return [bytes.toString('base64')];
         }
       });
-      if (rows.some((r) => '_decodeError' in r)) warnings.push('proto_decode_partial_failure');
+      if (undecodable) warnings.push('proto_decode_partial_failure');
     } else {
       const trimmed = r.stdout.replace(/\r/g, '');
       const lines = trimmed.split('\n');
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
-      rows = lines.map((line) => ({ value: line }));
+      rows = lines.map((line) => [line]);
     }
     return {
       datasource: request.datasource.name,

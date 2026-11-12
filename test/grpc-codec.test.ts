@@ -117,6 +117,6 @@ describe('grpcPlugin message codec', () => {
     const result = await getProfile({ id: 'p1' });
 
     // assert
-    expect(result.result.rows[0].value).toMatchObject({ id: 'p1', address: { city: 'Lagos' } });
+    expect(result.result.rows[0][0]).toMatchObject({ id: 'p1', address: { city: 'Lagos' } });
   });
 });

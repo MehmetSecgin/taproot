@@ -27,38 +27,40 @@ describe('applyJsonExtract', () => {
     const result = applyJsonExtract(
       ['id', 'payload'],
       [
-        { id: 1, payload: '{"order":{"id":"A1"}}' },
-        { id: 2, payload: '{"order":{"id":"B2"}}' },
+        [1, '{"order":{"id":"A1"}}'],
+        [2, '{"order":{"id":"B2"}}'],
       ],
       specs,
     );
     expect(result.columns).toEqual(['id', 'payload', 'payload.order.id']);
-    expect(result.rows[0]['payload.order.id']).toBe('A1');
-    expect(result.rows[1]['payload.order.id']).toBe('B2');
+    expect(result.rows).toEqual([
+      [1, '{"order":{"id":"A1"}}', 'A1'],
+      [2, '{"order":{"id":"B2"}}', 'B2'],
+    ]);
   });
 
   it('parses already-object columns and missing paths yield null', () => {
-    const result = applyJsonExtract(
-      ['payload'],
-      [{ payload: { order: { id: 'C3' } } }, { payload: '{"order":{}}' }, { payload: null }],
-      specs,
-    );
-    expect(result.rows[0]['payload.order.id']).toBe('C3');
-    expect(result.rows[1]['payload.order.id']).toBeNull();
-    expect(result.rows[2]['payload.order.id']).toBeNull();
+    const result = applyJsonExtract(['payload'], [[{ order: { id: 'C3' } }], ['{"order":{}}'], [null]], specs);
+    expect(result.rows.map((row) => row[1])).toEqual(['C3', null, null]);
   });
 
   it('yields null for unparseable JSON instead of throwing', () => {
-    const result = applyJsonExtract(['payload'], [{ payload: 'not json' }], specs);
-    expect(result.rows[0]['payload.order.id']).toBeNull();
+    const result = applyJsonExtract(['payload'], [['not json']], specs);
+    expect(result.rows[0][1]).toBeNull();
+  });
+
+  it('keeps every column when two share a name', () => {
+    const result = applyJsonExtract(['id', 'id', 'payload'], [[1, 2, '{"order":{"id":"D4"}}']], specs);
+    expect(result.columns).toEqual(['id', 'id', 'payload', 'payload.order.id']);
+    expect(result.rows).toEqual([[1, 2, '{"order":{"id":"D4"}}', 'D4']]);
   });
 
   it('throws when the referenced column is absent', () => {
-    expect(() => applyJsonExtract(['id'], [{ id: 1 }], specs)).toThrow(/BAD_INPUT/);
+    expect(() => applyJsonExtract(['id'], [[1]], specs)).toThrow(/BAD_INPUT/);
   });
 
   it('is a no-op when there are no specs', () => {
-    const rows = [{ id: 1 }];
+    const rows = [[1]];
     const result = applyJsonExtract(['id'], rows, []);
     expect(result.columns).toEqual(['id']);
     expect(result.rows).toBe(rows);

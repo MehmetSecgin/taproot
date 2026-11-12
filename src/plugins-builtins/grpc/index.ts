@@ -284,7 +284,7 @@ export const grpcPlugin: TapRootPlugin = {
     }
     const deadlineMs = request.timeoutMs && request.timeoutMs > 0 ? request.timeoutMs : 5000;
     const streaming = isStreamingMethod(methodShape);
-    let rows: Array<Record<string, unknown>>;
+    let rows: unknown[][];
     const warnings: string[] = [];
     try {
       const call = streaming
@@ -292,9 +292,9 @@ export const grpcPlugin: TapRootPlugin = {
           if (out.truncated) {
             warnings.push(`response stream stopped at ${out.responses.length} messages. Narrow the request or raise TAPROOT_GRPC_STREAM_MESSAGE_LIMIT.`);
           }
-          return out.responses.map((value, seq) => ({ seq, value }));
+          return out.responses.map((value, seq) => [seq, value]);
         })
-        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs).then((value) => [{ value }]);
+        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs).then((value) => [[value]]);
       rows = await Promise.race([
         call,
         new Promise<never>((_, reject) => setTimeout(() => reject(queryTimeoutError(deadlineMs)), deadlineMs + 500)),

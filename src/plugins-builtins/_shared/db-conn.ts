@@ -1,6 +1,6 @@
 import type { Connection, ConnectionOptions, Pool } from 'mysql2/promise';
 import { isUtcOffset } from '../../core/session-timezone.js';
-import type { QueryRequest } from '../../types/core.js';
+import type { QueryRequest, QueryResult } from '../../types/core.js';
 
 export interface BaseConnConfig {
   host: string;
@@ -84,6 +84,14 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
     connectionTimeZones.set(physical, timeZone);
   }
   return { conn, release: async () => (poolConn ? poolConn.release() : closeMysqlConnection(conn)) };
+}
+
+export async function queryRows(conn: Connection, sql: string, timeoutMs: number | undefined): Promise<QueryResult['result']> {
+  const [rows, fields] = await conn.query({ sql, rowsAsArray: true, timeout: timeoutMs });
+  return {
+    columns: Array.isArray(fields) ? fields.map((field) => field.name) : [],
+    rows: Array.isArray(rows) ? (rows as unknown[][]) : [],
+  };
 }
 
 export async function closeAllMysqlPools(): Promise<void> {

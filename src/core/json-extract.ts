@@ -51,9 +51,9 @@ function extractFromCell(cell: unknown, path: string): unknown {
 
 export function applyJsonExtract(
   columns: string[],
-  rows: Array<Record<string, unknown>>,
+  rows: unknown[][],
   specs: JsonExtractSpec[],
-): { columns: string[]; rows: Array<Record<string, unknown>> } {
+): { columns: string[]; rows: unknown[][] } {
   if (!specs.length) return { columns, rows };
   const missing = specs.filter((spec) => !columns.includes(spec.column));
   if (missing.length) {
@@ -67,9 +67,14 @@ export function applyJsonExtract(
   for (const spec of specs) {
     if (!nextColumns.includes(spec.alias)) nextColumns.push(spec.alias);
   }
+  const extractions = specs.map((spec) => ({
+    source: columns.indexOf(spec.column),
+    target: nextColumns.indexOf(spec.alias),
+    path: spec.path,
+  }));
   const nextRows = rows.map((row) => {
-    const out: Record<string, unknown> = { ...row };
-    for (const spec of specs) out[spec.alias] = extractFromCell(row[spec.column], spec.path);
+    const out = [...row];
+    for (const { source, target, path } of extractions) out[target] = extractFromCell(row[source], path);
     return out;
   });
   return { columns: nextColumns, rows: nextRows };

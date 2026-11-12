@@ -121,9 +121,9 @@ describe('grpcPlugin streaming calls', () => {
     // assert
     expect(result.result.columns).toEqual(['seq', 'value']);
     expect(result.result.rows).toEqual([
-      { seq: 0, value: { profile: { id: 'a', name: 'profile-a' } } },
-      { seq: 1, value: { profile: { id: 'b', name: 'profile-b' } } },
-      { seq: 2, value: { profile: { id: 'c', name: 'profile-c' } } },
+      [0, { profile: { id: 'a', name: 'profile-a' } }],
+      [1, { profile: { id: 'b', name: 'profile-b' } }],
+      [2, { profile: { id: 'c', name: 'profile-c' } }],
     ]);
     expect(result.warnings).toEqual([]);
   });
@@ -133,7 +133,7 @@ describe('grpcPlugin streaming calls', () => {
     const result = await grpcPlugin.execute!(makeRequest('LookupProfiles', { id: 'solo' }), {});
 
     // assert
-    expect(result.result.rows).toEqual([{ seq: 0, value: { profile: { id: 'solo', name: 'profile-solo' } } }]);
+    expect(result.result.rows).toEqual([[0, { profile: { id: 'solo', name: 'profile-solo' } }]]);
   });
 
   it('fails a bidi call that the server aborts and keeps the rows received before it', async () => {
@@ -155,7 +155,7 @@ describe('grpcPlugin streaming calls', () => {
     const result = await grpcPlugin.execute!(makeRequest('CountProfiles', [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]), {});
 
     // assert
-    expect(result.result.rows).toEqual([{ seq: 0, value: { count: 4 } }]);
+    expect(result.result.rows).toEqual([[0, { count: 4 }]]);
   });
 
   it('collects every message of a server-streaming call', async () => {
@@ -163,8 +163,8 @@ describe('grpcPlugin streaming calls', () => {
     const result = await grpcPlugin.execute!(makeRequest('ListProfiles', { count: 3 }), {});
 
     // assert
-    expect(result.result.rows.map((row) => row.seq)).toEqual([0, 1, 2]);
-    expect(result.result.rows[2]).toEqual({ seq: 2, value: { id: '2', name: 'profile-2' } });
+    expect(result.result.rows.map(([seq]) => seq)).toEqual([0, 1, 2]);
+    expect(result.result.rows[2]).toEqual([2, { id: '2', name: 'profile-2' }]);
   });
 
   it('stops a server stream at the message limit and warns', async () => {
@@ -182,7 +182,7 @@ describe('grpcPlugin streaming calls', () => {
 
     // assert
     expect(result.result.columns).toEqual(['value']);
-    expect(result.result.rows).toEqual([{ value: { profile: { id: 'u', name: 'profile-u' } } }]);
+    expect(result.result.rows).toEqual([[{ profile: { id: 'u', name: 'profile-u' } }]]);
   });
 
   it('rejects an array for a method that takes one request message', async () => {

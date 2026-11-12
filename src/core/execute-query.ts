@@ -7,6 +7,7 @@ import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
 import type { JsonExtractSpec } from './json-extract.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
+import { rowObject } from './rows.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate } from './safety.js';
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
 import { ensureDatasourceCatalog } from './schema-refresh.js';
@@ -310,15 +311,10 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     };
     const mergedSchema = mergeSchemaContext(schemaContext, result.meta?.schemaContext);
 
-    const presented = jsonExtractSpecs.length
-      ? applyJsonExtract(result.result.columns || [], result.result.rows, jsonExtractSpecs)
-      : { columns: result.result.columns || [], rows: result.result.rows };
-    const columns = presented.columns;
+    const { columns, rows } = applyJsonExtract(result.result.columns, result.result.rows, jsonExtractSpecs);
     const data: QuerySuccessData = {
       columns,
-      rows: request.rowsObject
-        ? presented.rows
-        : presented.rows.map((row) => columns.map((col) => (row as Record<string, unknown>)[col] ?? null)),
+      rows: request.rowsObject ? rows.map((row) => rowObject(columns, row)) : rows,
       datasource: datasource.name,
       plugin: result.plugin,
       classification: result.classification,

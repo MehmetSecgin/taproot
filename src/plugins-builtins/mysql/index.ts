@@ -6,7 +6,7 @@ import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-hints.js';
 import { nowIso } from '../../core/time.js';
-import { baseConnConfig, leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
+import { baseConnConfig, leaseMysqlConnection, loadMysql, queryRows } from '../_shared/db-conn.js';
 import { str } from '../../core/strings.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
@@ -47,17 +47,13 @@ export const mysqlPlugin: TapRootPlugin = {
       { capability: request.capability, inSession: Boolean(creds.__sessionId) },
     );
     try {
-      const [rows, fields] = await conn.query(
-        request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
-      );
-      const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-      const columns = Array.isArray(fields) ? fields.map((f: any) => str(f.name)) : Object.keys(normalizedRows[0] || {});
+      const result = await queryRows(conn, request.query, request.timeoutMs);
       return {
         datasource: request.datasource.name,
         plugin: 'mysql',
         capability: request.capability,
         query: { native: request.query },
-        result: { columns, rows: normalizedRows },
+        result,
         timings: {
           startedAt,
           endedAt: nowIso(),

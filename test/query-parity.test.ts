@@ -145,7 +145,7 @@ describe('query parity between the direct and daemon adapters', () => {
 
   it('adds the json-extract derived column on both paths', async () => {
     const { direct, rpc } = await runBothPaths(baseRequest({ jsonExtract: ['payload:order.id'] }), () =>
-      fakePlugin({ columns: ['payload'], rows: [{ payload: '{"order":{"id":"A1"}}' }] }),
+      fakePlugin({ columns: ['payload'], rows: [['{"order":{"id":"A1"}}']] }),
     );
 
     if (!direct.ok) throw new Error('direct path failed');

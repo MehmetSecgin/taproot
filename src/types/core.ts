@@ -125,7 +125,7 @@ export interface QueryResult {
   query: { native: string };
   result: {
     columns: string[];
-    rows: Array<Record<string, unknown>>;
+    rows: unknown[][];
   };
   timings: {
     startedAt: string;

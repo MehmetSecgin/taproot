@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { registerCleanup } from '../../core/cleanup.js';
-import { leaseMysqlConnection, loadMysql } from '../_shared/db-conn.js';
+import { leaseMysqlConnection, loadMysql, queryRows } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
@@ -76,6 +76,16 @@ function removeSessionProxy(sessionId: string, key: string): void {
   if (!set.size) proxyKeyBySession.delete(sessionId);
 }
 
+function forgetProxy(sessionId: string, key: string, proxy: Promise<ProxyRuntime>): void {
+  if (proxiesByKey.get(key) !== proxy) return;
+  proxiesByKey.delete(key);
+  removeSessionProxy(sessionId, key);
+}
+
+function hasExited(proc: ChildProcess): boolean {
+  return proc.exitCode !== null || proc.signalCode !== null;
+}
+
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = net.createServer();
@@ -124,7 +134,7 @@ async function stopProxy(proxy: ProxyRuntime): Promise<void> {
     proxy.cleanupRegistered = false;
   }
   try {
-    if (!proxy.process.killed) {
+    if (!proxy.process.killed && !hasExited(proxy.process)) {
       proxy.process.kill('SIGTERM');
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
@@ -166,25 +176,26 @@ async function ensureProxy(sessionId: string, target: string, user: string, data
   ensureGlobalCleanup();
   const key = proxyKey(sessionId, target, user, database);
   const existing = proxiesByKey.get(key);
-  if (existing) {
-    const proxy = await existing;
-    if (!proxy.process.killed) return proxy;
-  }
-  const starting = startProxy(key, sessionId, target, user, database);
+  if (existing) return await existing;
+  const starting = startProxy(key, sessionId, target, user, database, () => forgetProxy(sessionId, key, starting));
   proxiesByKey.set(key, starting);
   markSessionProxy(sessionId, key);
   try {
     return await starting;
   } catch (error) {
-    if (proxiesByKey.get(key) === starting) {
-      proxiesByKey.delete(key);
-      removeSessionProxy(sessionId, key);
-    }
+    forgetProxy(sessionId, key, starting);
     throw error;
   }
 }
 
-async function startProxy(key: string, sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
+async function startProxy(
+  key: string,
+  sessionId: string,
+  target: string,
+  user: string,
+  database: string,
+  onExit: () => void,
+): Promise<ProxyRuntime> {
   const port = await getFreePort();
   const args = ['proxy', 'db', '--tunnel', '--port', String(port), '--db-user', user, '--db-name', database, target];
   const proc = spawn('tsh', args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -203,6 +214,7 @@ async function startProxy(key: string, sessionId: string, target: string, user: 
   });
   proc.once('exit', (code, signal) => {
     exitState.value = { code, signal };
+    onExit();
   });
 
   const runtime: ProxyRuntime = {
@@ -321,17 +333,13 @@ export const teleportMysqlPlugin: TapRootPlugin = {
         { capability: request.capability, inSession: Boolean(sessionId) },
       );
       try {
-        const [rows, fields] = await conn.query(
-          request.timeoutMs ? ({ sql: request.query, timeout: request.timeoutMs } as any) : request.query,
-        );
-        const normalizedRows = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
-        const columns = Array.isArray(fields) ? fields.map((f: any) => str(f.name)) : Object.keys(normalizedRows[0] || {});
+        const result = await queryRows(conn, request.query, request.timeoutMs);
         return {
           datasource: request.datasource.name,
           plugin: 'teleport-mysql',
           capability: request.capability,
           query: { native: request.query },
-          result: { columns, rows: normalizedRows },
+          result,
           timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
           warnings,
           classification: 'success',
