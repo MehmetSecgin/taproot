@@ -17,6 +17,7 @@ export const DatasourceKind = {
   Grpc: 'grpc',
 } as const;
 export type DatasourceKind = (typeof DatasourceKind)[keyof typeof DatasourceKind];
+export const SQL_DATASOURCE_KINDS: ReadonlySet<string> = new Set([DatasourceKind.Mysql, DatasourceKind.TeleportMysql]);
 
 export const AccessMethod = {
   Native: 'native',
