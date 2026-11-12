@@ -1,16 +1,51 @@
+import { SQL_DATASOURCE_KINDS } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { missingPartitionPredicate } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
+import { explainAnalyzeTarget, parseExecutedStatements } from './sql-parser.js';
 import { str } from './strings.js';
 
-const MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
-const READ_PREFIX_RE = /^\s*(select|show|describe|desc|explain|with)\b/i;
+type QueryMode = 'read' | 'mutate';
 
-export function classifyMutation(sql: string): 'read' | 'mutate' {
-  if (READ_PREFIX_RE.test(sql)) return 'read';
-  return MUTATE_RE.test(sql) ? 'mutate' : 'read';
+const COMMAND_MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
+const LEADING_KEYWORD_RE = /^[\s(]*([a-z]+)/i;
+const EXPLAIN_KEYWORDS = new Set(['explain', 'describe', 'desc']);
+const ANALYZE_RE = /\banalyze\b/i;
+const SIDE_EFFECT_RE = /\binto\b|:=|\b(get_lock|release_lock|release_all_locks|nextval|setval)\b|\bnext\s+value\s+for\b/i;
+const SECOND_STATEMENT_RE = /;\s*\S/;
+const DATA_CHANGE_RE = /\b(insert|update|delete|replace)\b/i;
+
+export function classifySql(sql: string): QueryMode {
+  if (SIDE_EFFECT_RE.test(sql)) return 'mutate';
+  const keyword = LEADING_KEYWORD_RE.exec(sql)?.[1].toLowerCase() ?? '';
+  if (keyword === 'select' || keyword === 'with') return classifyQuery(sql, keyword);
+  if (SECOND_STATEMENT_RE.test(sql)) return 'mutate';
+  if (keyword === 'show') return 'read';
+  if (EXPLAIN_KEYWORDS.has(keyword)) return classifyExplain(sql);
+  return 'mutate';
+}
+
+function isSelect(statement: unknown): boolean {
+  return (statement as { type?: unknown }).type === 'select';
+}
+
+function classifyQuery(sql: string, keyword: 'select' | 'with'): QueryMode {
+  const statements = parseExecutedStatements(sql);
+  if (statements) return statements.every(isSelect) ? 'read' : 'mutate';
+  if (SECOND_STATEMENT_RE.test(sql)) return 'mutate';
+  return keyword === 'with' && DATA_CHANGE_RE.test(sql) ? 'mutate' : 'read';
+}
+
+function classifyExplain(sql: string): QueryMode {
+  const target = explainAnalyzeTarget(sql);
+  if (target !== undefined) return classifySql(target);
+  return ANALYZE_RE.test(sql) ? 'mutate' : 'read';
+}
+
+function classifyCommand(command: string): QueryMode {
+  return COMMAND_MUTATE_RE.test(command) ? 'mutate' : 'read';
 }
 
 export function enforceMutationPolicy(input: {
@@ -18,7 +53,7 @@ export function enforceMutationPolicy(input: {
   allowMutate: boolean;
   datasource: DatasourceProfile;
 }): void {
-  const mode = classifyMutation(input.sql);
+  const mode = SQL_DATASOURCE_KINDS.has(input.datasource.kind) ? classifySql(input.sql) : classifyCommand(input.sql);
   if (mode === 'read') {
     if (!input.datasource.policy.allowRead) {
       throw new Error('Datasource policy disallows read queries.');

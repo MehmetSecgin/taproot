@@ -3,9 +3,10 @@ import mysql from 'mysql2';
 
 interface ServerConnection {
   sequenceId: number;
-  on(event: string, listener: () => void): void;
+  on(event: string, listener: (sql: string) => void): void;
   serverHandshake(args: Record<string, unknown>): void;
   writeOk(): void;
+  writeError(error: { code: number; message: string }): void;
   writeColumns(columns: unknown[]): void;
   writeTextRow(row: unknown[]): void;
   writeEof(): void;
@@ -20,6 +21,11 @@ interface MysqlServer {
 interface ServedRow {
   columns: unknown[];
   row: unknown[];
+}
+
+export interface FakeMysqlError {
+  errno: number;
+  message: string;
 }
 
 export interface FakeMysqlServer {
@@ -49,7 +55,10 @@ function reply(conn: ServerConnection, write: () => void): void {
   conn.sequenceId = 0;
 }
 
-export async function startFakeMysqlServer(servedRow: () => ServedRow): Promise<FakeMysqlServer> {
+export async function startFakeMysqlServer(
+  servedRow: () => ServedRow,
+  answerSet: (sql: string) => FakeMysqlError | undefined,
+): Promise<FakeMysqlServer> {
   const server = mysql.createServer((conn) => {
     const client = conn as unknown as ServerConnection;
     client.on('error', () => undefined);
@@ -65,7 +74,13 @@ export async function startFakeMysqlServer(servedRow: () => ServedRow): Promise<
         client.sequenceId = 0;
       },
     });
-    client.on('stmt_prepare', () => reply(client, () => client.writeOk()));
+    client.on('stmt_prepare', (sql: string) =>
+      reply(client, () => {
+        const error = answerSet(sql);
+        if (error) client.writeError({ code: error.errno, message: error.message });
+        else client.writeOk();
+      }),
+    );
     client.on('query', () =>
       reply(client, () => {
         const { columns, row } = servedRow();

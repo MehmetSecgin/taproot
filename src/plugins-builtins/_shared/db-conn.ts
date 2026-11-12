@@ -12,6 +12,12 @@ export interface BaseConnConfig {
 
 const pools = new Map<string, Pool>();
 const connectionTimeZones = new WeakMap<object, string>();
+const READ_ONLY_UNENFORCED_ERRNOS = new Set([1193, 1235]);
+
+export interface MysqlLease {
+  capability: QueryRequest['capability'];
+  inSession: boolean;
+}
 
 export function baseConnConfig(
   ds: QueryRequest['datasource'],
@@ -52,15 +58,25 @@ function readTemporalsIn(timeZone: string): ConnectionOptions {
   return isUtcOffset(timeZone) ? { timezone: timeZone } : { dateStrings: true };
 }
 
-export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, pooled: boolean) {
+function ignoreUnenforcedReadOnly(error: { errno?: number }): void {
+  if (!READ_ONLY_UNENFORCED_ERRNOS.has(Number(error.errno))) throw error;
+}
+
+async function prepareSession(conn: Connection, timeZone: string, readOnly: boolean): Promise<void> {
+  await conn.query('SET time_zone = ?', [timeZone]);
+  if (readOnly) await conn.query('SET SESSION transaction_read_only = 1').catch(ignoreUnenforcedReadOnly);
+}
+
+export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, lease: MysqlLease) {
+  const readOnly = lease.capability === 'executeRead';
   const mysql = await loadMysql();
   const sessionConfig = { ...config, supportBigNumbers: true, ...readTemporalsIn(timeZone) };
-  const poolConn = pooled ? await poolFor(mysql, sessionConfig).getConnection() : undefined;
+  const poolConn = readOnly && lease.inSession ? await poolFor(mysql, sessionConfig).getConnection() : undefined;
   const conn = poolConn ?? (await mysql.createConnection(sessionConfig));
   const physical = (conn as unknown as { connection: object }).connection;
   if (connectionTimeZones.get(physical) !== timeZone) {
     try {
-      await conn.query('SET time_zone = ?', [timeZone]);
+      await prepareSession(conn, timeZone, readOnly);
     } catch (error) {
       conn.destroy();
       throw error;

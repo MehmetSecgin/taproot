@@ -1,6 +1,6 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './app.js';
-import { DatasourceKind, DoctorStatus } from '../types/core.js';
+import { DoctorStatus, SQL_DATASOURCE_KINDS } from '../types/core.js';
 import type { DatasourceProfile, QueryResult, SchemaIndex, SchemaPartition, TableContext } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
 import { connectivity } from './error-classification.js';
@@ -10,8 +10,6 @@ import { DEFAULT_SESSION_TIME_ZONE } from './session-timezone.js';
 function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''");
 }
-
-const isSqlDatasource = (kind: string) => kind === DatasourceKind.Mysql || kind === DatasourceKind.TeleportMysql;
 
 function databaseLiteral(datasource: DatasourceProfile): string {
   return escapeSqlString(String(datasource.connection.database || ''));
@@ -195,7 +193,7 @@ export function ensureDatasourceCatalog(
   datasource: DatasourceProfile,
   opts: { force?: boolean } = {},
 ): Promise<CatalogEnsureResult> {
-  if (!isSqlDatasource(datasource.kind)) return Promise.resolve({ outcome: 'unsupported', tableCount: 0 });
+  if (!SQL_DATASOURCE_KINDS.has(datasource.kind)) return Promise.resolve({ outcome: 'unsupported', tableCount: 0 });
   const cached = ctx.schemaCatalogStore.get(datasource.name);
   const cachedCount = Object.keys(cached?.tables || {}).length;
   const ttlMs = RUNTIME_CONSTANTS.query.catalogTtlHours * 3600 * 1000;

@@ -184,6 +184,18 @@ describe('executeQuery failure', () => {
     expect(outcome.message).toContain('--allow-mutate');
   });
 
+  it('blocks a statement outside the SQL read allowlist', async () => {
+    stateRoot = await setupQueryState({ kind: 'mysql' });
+    const ctx = contextWith(fakePlugin({ kind: 'mysql' }));
+    const outcome = await executeQuery(queryRequest({ query: 'CALL refresh_totals()' }), {
+      ctx,
+      report: silentQueryReport,
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.message).toContain('--allow-mutate');
+  });
+
   it('classifies a plugin failure and keeps the schema context', async () => {
     const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport });

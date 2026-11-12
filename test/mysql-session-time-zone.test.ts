@@ -1,17 +1,37 @@
 import mysql from 'mysql2';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { leaseMysqlConnection } from '../src/plugins-builtins/_shared/db-conn.js';
-import { column, startFakeMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
+import { column, startFakeMysqlServer, type FakeMysqlError, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
+
+const READ_ONLY_SESSION_SQL = 'SET SESSION transaction_read_only = 1';
 
 let servedTimestamp = '';
+let readOnlySessionUnsupported = false;
+const receivedSets: string[] = [];
 let server: FakeMysqlServer;
+
+function answerSet(sql: string): FakeMysqlError | undefined {
+  receivedSets.push(sql);
+  if (readOnlySessionUnsupported && sql === READ_ONLY_SESSION_SQL) {
+    return { errno: 1235, message: 'function READ ONLY has only noop implementation' };
+  }
+  return undefined;
+}
 
 beforeAll(async () => {
   vi.stubEnv('TZ', 'Asia/Tokyo');
-  server = await startFakeMysqlServer(() => ({
-    columns: [column('orders', 'created_at', mysql.Types.TIMESTAMP)],
-    row: [servedTimestamp],
-  }));
+  server = await startFakeMysqlServer(
+    () => ({
+      columns: [column('orders', 'created_at', mysql.Types.TIMESTAMP)],
+      row: [servedTimestamp],
+    }),
+    answerSet,
+  );
+});
+
+beforeEach(() => {
+  receivedSets.length = 0;
+  readOnlySessionUnsupported = false;
 });
 
 afterAll(() => {
@@ -20,7 +40,10 @@ afterAll(() => {
 });
 
 async function selectCreatedAt(sessionTimeZone: string): Promise<unknown> {
-  const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, sessionTimeZone, false);
+  const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, sessionTimeZone, {
+    capability: 'executeRead',
+    inSession: false,
+  });
   try {
     const [rows] = await conn.query('SELECT created_at FROM orders');
     return (rows as Array<{ created_at: unknown }>)[0].created_at;
@@ -53,5 +76,30 @@ describe('MySQL session time zone', () => {
 
     // assert
     expect(createdAt).toBe('2026-11-07 11:42:00');
+  });
+});
+
+describe('MySQL read lease session', () => {
+  it('runs the read in a read-only session', async () => {
+    // arrange
+    servedTimestamp = '2026-11-07 10:42:00';
+
+    // act
+    await selectCreatedAt('+00:00');
+
+    // assert
+    expect(receivedSets).toContain(READ_ONLY_SESSION_SQL);
+  });
+
+  it('still reads from a server that cannot enforce a read-only session', async () => {
+    // arrange
+    servedTimestamp = '2026-11-07 10:42:00';
+    readOnlySessionUnsupported = true;
+
+    // act
+    const createdAt = await selectCreatedAt('+00:00');
+
+    // assert
+    expect((createdAt as Date).toISOString()).toBe('2026-11-07T10:42:00.000Z');
   });
 });

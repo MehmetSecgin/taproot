@@ -44,7 +44,7 @@ export const mysqlPlugin: TapRootPlugin = {
     const { conn, release } = await leaseMysqlConnection(
       connConfig(request.datasource, creds),
       request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
-      Boolean(creds.__sessionId) && request.capability === 'executeRead',
+      { capability: request.capability, inSession: Boolean(creds.__sessionId) },
     );
     try {
       const [rows, fields] = await conn.query(

@@ -88,7 +88,6 @@ describe('partition predicate gate', () => {
       'DESC order_items',
       'DESCRIBE order_items',
       'EXPLAIN SELECT id FROM order_items WHERE customer_id = 1',
-      'EXPLAIN ANALYZE SELECT id FROM order_items WHERE customer_id = 1',
     ]) {
       expect(enforcePartitionPredicate({ sql, schemaContext })).toEqual([]);
     }
@@ -107,6 +106,19 @@ describe('partition predicate gate', () => {
     ]) {
       expect(enforcePartitionPredicate({ sql, schemaContext })).toEqual([]);
     }
+  });
+
+  it('gates EXPLAIN ANALYZE by the statement it runs', () => {
+    const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
+    expect(() =>
+      enforcePartitionPredicate({ sql: 'EXPLAIN ANALYZE SELECT id FROM order_items WHERE customer_id = 1', schemaContext }),
+    ).toThrow(/MISSING_PARTITION_PREDICATE/);
+    expect(
+      enforcePartitionPredicate({
+        sql: "EXPLAIN ANALYZE SELECT id FROM order_items WHERE order_date = '2026-01-01'",
+        schemaContext,
+      }),
+    ).toEqual([]);
   });
 
   it('still throws for a plain SELECT on a RANGE partitioned table', () => {

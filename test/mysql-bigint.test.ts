@@ -15,7 +15,7 @@ beforeAll(async () => {
       column('accounts', 'version', mysql.Types.LONGLONG),
     ],
     row: ['9007199254740993', '18446744073709551615', '42'],
-  }));
+  }), () => undefined);
 });
 
 afterAll(() => server?.close());
@@ -23,7 +23,7 @@ afterAll(() => server?.close());
 describe('MySQL BIGINT', () => {
   it('returns values beyond Number.MAX_SAFE_INTEGER as exact strings and small values as numbers', async () => {
     // arrange
-    const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, '+00:00', false);
+    const { conn, release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'reader', password: '' }, '+00:00', { capability: 'executeRead', inSession: false });
 
     // act
     const [rows] = await conn.query('SELECT id, external_id, version FROM accounts').finally(release);

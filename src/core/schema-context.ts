@@ -1,7 +1,7 @@
 import type { SchemaContext, TableContext } from '../types/core.js';
 import type { SchemaCatalog } from '../store/schema-catalog.js';
 import { suggestNames } from './grpc-introspect.js';
-import { astifySql } from './sql-parser.js';
+import { explainAnalyzeTarget, parseExecutedStatements } from './sql-parser.js';
 import { str } from './strings.js';
 
 export interface PredicateColumnRefs {
@@ -39,18 +39,6 @@ function safeAlias(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
   const value = (node as Record<string, unknown>).as;
   return typeof value === 'string' ? normalizeName(value) : '';
-}
-
-function parseAst(sql: string): unknown | null {
-  try {
-    return astifySql(sql);
-  } catch {
-    return null;
-  }
-}
-
-function eachAst(ast: unknown): unknown[] {
-  return Array.isArray(ast) ? ast : [ast];
 }
 
 function eachChild(obj: Record<string, unknown>, visit: (child: unknown) => void): void {
@@ -94,19 +82,19 @@ function collectTablesFromNode(node: unknown, cteNames: Set<string>, tables: Set
   eachChild(obj, (child) => collectTablesFromNode(child, cteNames, tables, aliasToTable));
 }
 
-function scanTables(ast: unknown): { tables: Set<string>; aliasToTable: Map<string, string> } {
+function scanTables(statements: unknown[]): { tables: Set<string>; aliasToTable: Map<string, string> } {
   const cteNames = new Set<string>();
   const tables = new Set<string>();
   const aliasToTable = new Map<string, string>();
-  for (const item of eachAst(ast)) collectCteNames(item, cteNames);
-  for (const item of eachAst(ast)) collectTablesFromNode(item, cteNames, tables, aliasToTable);
+  for (const item of statements) collectCteNames(item, cteNames);
+  for (const item of statements) collectTablesFromNode(item, cteNames, tables, aliasToTable);
   return { tables, aliasToTable };
 }
 
 export function collectReferencedTables(sql: string): string[] {
-  const ast = parseAst(sql);
-  if (!ast) return [];
-  return [...scanTables(ast).tables].sort((a, b) => a.localeCompare(b));
+  const statements = parseExecutedStatements(sql);
+  if (!statements) return [];
+  return [...scanTables(statements).tables].sort((a, b) => a.localeCompare(b));
 }
 
 function collectColumnRefs(expr: unknown, aliasToTable: Map<string, string>, out: PredicateColumnRefs): void {
@@ -141,14 +129,15 @@ function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string
 
 export function collectPredicateColumns(sql: string): PredicateColumnRefs {
   const out: PredicateColumnRefs = { byTable: new Map(), bare: new Set() };
-  const ast = parseAst(sql);
-  if (!ast) return out;
-  const { aliasToTable } = scanTables(ast);
-  for (const item of eachAst(ast)) collectPredicateColumnsFromNode(item, aliasToTable, out);
+  const statements = parseExecutedStatements(sql);
+  if (!statements) return out;
+  const { aliasToTable } = scanTables(statements);
+  for (const item of statements) collectPredicateColumnsFromNode(item, aliasToTable, out);
   return out;
 }
 
 export function isSchemaMetadataQuery(sql: string): boolean {
+  if (explainAnalyzeTarget(sql) !== undefined) return false;
   const text = str(sql).trim().replace(/\s+/g, ' ').toLowerCase();
   return /^(show\s+(create\s+(table|view)\b|tables\b|(full\s+)?(columns|fields)\b|(index(es)?|keys)\b)|describe\b|desc\b|explain\b)/.test(text);
 }

@@ -318,7 +318,7 @@ export const teleportMysqlPlugin: TapRootPlugin = {
           database: String(database),
         },
         request.sessionTimeZone || DEFAULT_SESSION_TIME_ZONE,
-        Boolean(sessionId) && request.capability === 'executeRead',
+        { capability: request.capability, inSession: Boolean(sessionId) },
       );
       try {
         const [rows, fields] = await conn.query(
