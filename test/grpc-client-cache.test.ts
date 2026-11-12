@@ -3,9 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import * as grpc from '@grpc/grpc-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { loadGrpcPackage } from '../src/core/proto-loader.js';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
+import type { QueryRequest } from '../src/types/core.js';
+import { testDatasource } from './helpers/datasource.js';
+import { profileServiceDefinition, startGrpcServer } from './helpers/grpc-server.js';
 
 function profileProto(responseFields: string): string {
   return `syntax = "proto3";
@@ -38,17 +39,11 @@ let port = 0;
 let server: grpc.Server;
 
 beforeAll(async () => {
-  const bundle = await loadGrpcPackage(protoRootWith(NAME_AND_CITY));
-  const pkg = bundle.grpcPackage as unknown as { taproot: { test: { ProfileService: { service: grpc.ServiceDefinition } } } };
-  server = new grpc.Server();
-  server.addService(pkg.taproot.test.ProfileService.service, {
+  ({ server, port } = await startGrpcServer(await profileServiceDefinition(protoRootWith(NAME_AND_CITY)), {
     GetProfile: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
       callback(null, { name: 'Ada', city: 'Lyon' });
     },
-  });
-  port = await new Promise<number>((resolve, reject) => {
-    server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (err, bound) => (err ? reject(err) : resolve(bound)));
-  });
+  }));
 });
 
 afterAll(() => {
@@ -60,21 +55,8 @@ afterEach(() => {
 });
 
 function getProfile(datasourceProtoRoot: string, protoRoot: string): QueryRequest {
-  const datasource = {
-    name: 'unit-grpc-client',
-    kind: 'grpc',
-    env: 'unit',
-    service: 'profiles',
-    tags: [],
-    connection: { host: '127.0.0.1', port },
-    credentialRef: 'unit-grpc-client',
-    connectors: [],
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-    resolverHints: { protoRoot: datasourceProtoRoot },
-    updatedAt: new Date().toISOString(),
-  } as unknown as DatasourceProfile;
   return {
-    datasource,
+    datasource: testDatasource('grpc', port, { protoRoot: datasourceProtoRoot }),
     query: 'taproot.test.ProfileService/GetProfile',
     capability: 'executeRead',
     timeoutMs: 5000,

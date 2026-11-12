@@ -5,7 +5,6 @@ import type {
   QueryResult,
   RpcMethodShape,
   RpcServiceShape,
-  SchemaContext,
   TapRootPlugin,
 } from '../../types/core.js';
 import { DoctorStatus } from '../../types/core.js';
@@ -15,12 +14,13 @@ import { nowIso } from '../../core/time.js';
 import {
   loadGrpcPackage,
   lookupServiceCtor,
+  resolveProtoRoot,
   type GrpcModule,
 } from '../../core/proto-loader.js';
-import { describeProto, listServices, resolveName, suggestNames } from '../../core/grpc-introspect.js';
+import { listServices, matchName, resolveName } from '../../core/grpc-introspect.js';
 import { validateGrpcRequest } from '../../core/grpc-proto-validate.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { callStreaming, cancelOnAbort, isStreamingMethod } from './stream-call.js';
+import { callStreaming, callUnary, isStreamingMethod } from './call.js';
 
 interface GrpcClient extends Record<string, unknown> {
   waitForReady: (deadline: number, callback: (err?: Error) => void) => void;
@@ -28,6 +28,8 @@ interface GrpcClient extends Record<string, unknown> {
 }
 
 type ServiceConstructor = new (t: string, c: unknown) => Record<string, unknown>;
+
+type Metadata = InstanceType<GrpcModule['Metadata']>;
 
 const clientCache = new Map<string, { ServiceCtor: ServiceConstructor; client: GrpcClient }>();
 
@@ -68,14 +70,25 @@ function parseQuery(input: string): ParsedQuery {
   return { service: text.slice(0, slash), method: text.slice(slash + 1) };
 }
 
-function resolveProtoRoot(request: QueryRequest): string {
-  const pp = request.pluginParams || {};
-  const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const root = str(pp.protoRoot || hints.protoRoot).trim();
-  if (!root) {
-    throw new Error("grpc plugin needs a proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
+function nameHint(query: string, names: string[]): string {
+  const near = resolveName(query, names);
+  if (near.match) return ` Did you mean '${near.match}'?`;
+  return near.candidates.length ? ` Closest: ${near.candidates.slice(0, 5).join(', ')}.` : '';
+}
+
+function resolveMethod(services: RpcServiceShape[], query: ParsedQuery): { service: string; method: RpcMethodShape } {
+  const serviceNames = services.map((s) => s.name);
+  const service = matchName(query.service, serviceNames);
+  if (!service) {
+    throw new Error(`grpc service '${query.service}' not found in proto root.${nameHint(query.service, serviceNames)} Run 'taproot grpc list' to see services.`);
   }
-  return root;
+  const methods = services.find((s) => s.name === service)!.methods;
+  const methodNames = methods.map((m) => m.name);
+  const methodName = matchName(query.method, methodNames);
+  if (!methodName) {
+    throw new Error(`grpc method '${query.method}' not found on ${service}.${nameHint(query.method, methodNames)} Available: ${methodNames.join(', ')}.`);
+  }
+  return { service, method: methods.find((m) => m.name === methodName)! };
 }
 
 function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string, string>): Record<string, unknown> | unknown[] {
@@ -123,54 +136,13 @@ function requestMessages(
   return payload as Record<string, unknown>[];
 }
 
-function callUnary(
-  client: GrpcClient,
-  method: string,
-  payload: Record<string, unknown>,
-  metadata: { add: (k: string, v: string) => void } | undefined,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
-): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    const fn = client[method];
-    if (typeof fn !== 'function') {
-      reject(new Error(`grpc method '${method}' not found on service. Check spelling and that the .proto defines it.`));
-      return;
-    }
-    type GrpcCallback = (err: (Error & { code?: number; details?: string }) | null, response: Record<string, unknown>) => void;
-    type UnaryCall = { cancel: () => void };
-    const cb: GrpcCallback = (err, response) => {
-      stopCancelling();
-      if (err) {
-        const msg = err.details || err.message || 'grpc call failed';
-        const code = typeof err.code === 'number' ? `grpc_code=${err.code} ` : '';
-        reject(new Error(`${code}${msg}`));
-        return;
-      }
-      resolve(response || {});
-    };
-    const options = { deadline: Date.now() + Math.max(1, deadlineMs) };
-    const call = metadata
-      ? (fn as (req: unknown, md: unknown, opts: unknown, cb: GrpcCallback) => UnaryCall).call(client, payload, metadata, options, cb)
-      : (fn as (req: unknown, opts: unknown, cb: GrpcCallback) => UnaryCall).call(client, payload, options, cb);
-    const stopCancelling = cancelOnAbort(call, signal);
-  });
-}
-
-function schemaContextFor(
-  descriptor: ReturnType<typeof describeProto>,
-  serviceName: string,
-): SchemaContext {
-  const services: Record<string, RpcServiceShape> = {};
-  for (const svc of descriptor.services) {
-    if (svc.name === serviceName) services[svc.name] = svc;
+function callMetadata(grpc: GrpcModule, creds: Record<string, string>, ds: QueryRequest['datasource']): Metadata {
+  const metadata = new grpc.Metadata();
+  if (creds.token) metadata.add('authorization', `Bearer ${creds.token}`);
+  for (const [key, value] of Object.entries(ds.resolverHints || {})) {
+    if (key.startsWith('metadata.')) metadata.add(key.slice('metadata.'.length), value);
   }
-  return {
-    tables: {},
-    services,
-    messages: descriptor.messages,
-    enums: descriptor.enums,
-  };
+  return metadata;
 }
 
 export const grpcPlugin: TapRootPlugin = {
@@ -183,23 +155,18 @@ export const grpcPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     const ds = input.datasource;
-    const hints = (ds.resolverHints || {}) as Record<string, string>;
-    const protoRoot = hints.protoRoot;
+    const protoRoot = resolveProtoRoot(undefined, ds.resolverHints);
     if (!protoRoot) {
       return [{ check: 'grpc proto-root', status: DoctorStatus.Warn, detail: "no resolverHints.protoRoot configured; doctor can only open a channel, not exercise a real method.", code: 'executor_configuration_missing' }];
     }
     try {
-      const { grpc, pkg, protobufRoot } = await loadGrpcPackage(protoRoot).then((b) => ({
-        grpc: b.grpcModule,
-        pkg: b.grpcPackage,
-        protobufRoot: b.protobufRoot,
-      }));
-      const probe = hints.probeService || listServices(protobufRoot)[0]?.name;
+      const bundle = await loadGrpcPackage(protoRoot);
+      const probe = ds.resolverHints?.probeService || listServices(bundle.protobufRoot)[0]?.name;
       if (!probe) {
         return [{ check: 'grpc proto load', status: DoctorStatus.Warn, detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
       }
-      const ServiceCtor = lookupServiceCtor(pkg, probe);
-      const client = buildClient(grpc, ServiceCtor, ds);
+      const ServiceCtor = lookupServiceCtor(bundle.grpcPackage, probe);
+      const client = buildClient(bundle.grpcModule, ServiceCtor, ds);
       try {
         await new Promise<void>((resolve, reject) => {
           client.waitForReady(Date.now() + RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs, (err) => (err ? reject(err) : resolve()));
@@ -217,43 +184,22 @@ export const grpcPlugin: TapRootPlugin = {
   async execute(request, creds): Promise<QueryResult> {
     const startedAt = nowIso();
     const start = Date.now();
-    const { service, method } = parseQuery(request.query);
-    const protoRoot = resolveProtoRoot(request);
+    const query = parseQuery(request.query);
     const pp = request.pluginParams || {};
-    const paramPairs = pp.params || {};
-    const payload = resolveRequestPayload(request, paramPairs);
+    const protoRoot = resolveProtoRoot(pp.protoRoot, request.datasource.resolverHints);
+    if (!protoRoot) {
+      throw new Error("grpc plugin needs a proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
+    }
+    const payload = resolveRequestPayload(request, pp.params || {});
     const bundle = await loadGrpcPackage(protoRoot);
-    const services = listServices(bundle.protobufRoot);
-    const svcShape = services.find((s) => s.name === service);
-    if (!svcShape) {
-      const res = resolveName(service, services.map((s) => s.name));
-      const hint = res.match
-        ? ` Did you mean '${res.match}'?`
-        : res.candidates.length
-          ? ` Closest: ${res.candidates.slice(0, 5).join(', ')}.`
-          : '';
-      throw new Error(`grpc service '${service}' not found in proto root.${hint} Run 'taproot grpc list' to see services.`);
-    }
-    const methodNames = svcShape.methods.map((m) => m.name);
-    let canonicalMethod = methodNames.find((m) => m === method);
-    if (!canonicalMethod) {
-      const ci = methodNames.filter((m) => m.toLowerCase() === method.toLowerCase());
-      if (ci.length === 1) {
-        canonicalMethod = ci[0];
-      } else {
-        const close = suggestNames(method, methodNames, 3);
-        const hint = close.length ? ` Did you mean ${close.map((m) => `'${m}'`).join(', ')}?` : '';
-        throw new Error(`grpc method '${method}' not found on ${service}.${hint} Available: ${methodNames.join(', ')}.`);
-      }
-    }
-    const methodShape = svcShape.methods.find((m) => m.name === canonicalMethod)!;
-    const messages = requestMessages(payload, service, methodShape);
+    const { service, method } = resolveMethod(listServices(bundle.protobufRoot), query);
+    const messages = requestMessages(payload, service, method);
     if (!pp.skipProtoValidate) {
       for (const [index, message] of messages.entries()) {
-        const validationError = validateGrpcRequest(bundle.protobufRoot, methodShape.requestType, message);
+        const validationError = validateGrpcRequest(bundle.protobufRoot, method.requestType, message);
         if (validationError) {
           const position = Array.isArray(payload) ? `request[${index}]` : '';
-          const skeleton = `taproot grpc describe --datasource ${request.datasource.name} --method ${canonicalMethod} --skeleton`;
+          const skeleton = `taproot grpc describe --datasource ${request.datasource.name} --method ${method.name} --skeleton`;
           const detail = position ? `${position}: ${validationError.message}` : validationError.message;
           throw badInput(`${detail}. The request shape is printed by '${skeleton}'.`, {
             field: position ? `[${index}].${validationError.field}` : validationError.field,
@@ -264,32 +210,21 @@ export const grpcPlugin: TapRootPlugin = {
     }
     const ServiceCtor = lookupServiceCtor(bundle.grpcPackage, service);
     const client = getOrCreateClient(bundle.grpcModule, ServiceCtor, request.datasource, protoRoot, service);
-    let metadata: { add: (k: string, v: string) => void } | undefined;
-    if (creds.token) {
-      metadata = new bundle.grpcModule.Metadata();
-      metadata.add('authorization', `Bearer ${creds.token}`);
-    }
-    const metaHints = Object.entries((request.datasource.resolverHints || {}) as Record<string, string>)
-      .filter(([k]) => k.startsWith('metadata.'))
-      .map(([k, v]) => [k.slice('metadata.'.length), v] as const);
-    if (metaHints.length) {
-      if (!metadata) metadata = new bundle.grpcModule.Metadata();
-      for (const [k, v] of metaHints) metadata.add(k, v);
-    }
+    const metadata = callMetadata(bundle.grpcModule, creds, request.datasource);
     const deadlineMs = request.timeoutMs && request.timeoutMs > 0 ? request.timeoutMs : 5000;
-    const streaming = isStreamingMethod(methodShape);
+    const streaming = isStreamingMethod(method);
     let rows: unknown[][];
     const warnings: string[] = [];
     let backupTimer: NodeJS.Timeout | undefined;
     try {
       const call = streaming
-        ? callStreaming(client, methodShape, messages, metadata ?? new bundle.grpcModule.Metadata(), deadlineMs, request.signal).then((out) => {
+        ? callStreaming(client, method, messages, metadata, deadlineMs, request.signal).then((out) => {
           if (out.truncated) {
             warnings.push(`response stream stopped at ${out.responses.length} messages. Narrow the request or raise TAPROOT_GRPC_STREAM_MESSAGE_LIMIT.`);
           }
           return out.responses.map((value, seq) => [seq, value]);
         })
-        : callUnary(client, canonicalMethod, messages[0], metadata, deadlineMs, request.signal).then((value) => [[value]]);
+        : callUnary(client, method, messages[0], metadata, deadlineMs, request.signal).then((value) => [[value]]);
       rows = await Promise.race([
         call,
         new Promise<never>((_, reject) => {
@@ -304,18 +239,11 @@ export const grpcPlugin: TapRootPlugin = {
     } finally {
       clearTimeout(backupTimer);
     }
-    let schemaContext: SchemaContext | undefined;
-    try {
-      const descriptor = describeProto(bundle.protobufRoot, { service, method: canonicalMethod });
-      schemaContext = schemaContextFor(descriptor, service);
-    } catch {
-      schemaContext = undefined;
-    }
-    const result: QueryResult = {
+    return {
       datasource: request.datasource.name,
       plugin: 'grpc',
       capability: request.capability,
-      query: { native: `${service}/${canonicalMethod}` },
+      query: { native: `${service}/${method.name}` },
       result: { columns: streaming ? ['seq', 'value'] : ['value'], rows },
       timings: {
         startedAt,
@@ -325,7 +253,5 @@ export const grpcPlugin: TapRootPlugin = {
       warnings,
       classification: 'success',
     };
-    if (schemaContext) result.meta = { schemaContext };
-    return result;
   },
 };

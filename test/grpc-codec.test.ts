@@ -5,7 +5,9 @@ import * as grpc from '@grpc/grpc-js';
 import protobuf from 'protobufjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { DatasourceProfile, QueryRequest, QueryResult } from '../src/types/core.js';
+import type { QueryRequest, QueryResult } from '../src/types/core.js';
+import { testDatasource } from './helpers/datasource.js';
+import { startGrpcServer } from './helpers/grpc-server.js';
 
 const PROTO = `syntax = "proto3";
 package taproot.test;
@@ -47,8 +49,7 @@ beforeAll(async () => {
   const serverRoot = protobuf.loadSync(protoFile);
   const Request = serverRoot.lookupType('taproot.test.GetProfileRequest');
   const Response = serverRoot.lookupType('taproot.test.Profile');
-  server = new grpc.Server();
-  server.addService(
+  ({ server, port } = await startGrpcServer(
     {
       GetProfile: {
         path: '/taproot.test.ProfileService/GetProfile',
@@ -66,10 +67,7 @@ beforeAll(async () => {
         callback(null, { id: call.request.id, address: { city: 'Lagos' } });
       },
     },
-  );
-  port = await new Promise<number>((resolve, reject) => {
-    server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (err, bound) => (err ? reject(err) : resolve(bound)));
-  });
+  ));
 });
 
 afterAll(() => {
@@ -77,22 +75,9 @@ afterAll(() => {
 });
 
 function getProfile(body: Record<string, unknown>): Promise<QueryResult> {
-  const datasource = {
-    name: 'unit-grpc-codec',
-    kind: 'grpc',
-    env: 'unit',
-    service: 'profiles',
-    tags: [],
-    connection: { host: '127.0.0.1', port },
-    credentialRef: 'unit-grpc-codec',
-    connectors: [],
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-    resolverHints: { protoRoot },
-    updatedAt: new Date().toISOString(),
-  } as unknown as DatasourceProfile;
   return grpcPlugin.execute!(
     {
-      datasource,
+      datasource: testDatasource('grpc', port, { protoRoot }),
       query: 'taproot.test.ProfileService/GetProfile',
       capability: 'executeRead',
       timeoutMs: 5000,

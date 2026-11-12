@@ -3,9 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import * as grpc from '@grpc/grpc-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loadGrpcPackage } from '../src/core/proto-loader.js';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
+import type { QueryRequest } from '../src/types/core.js';
+import { testDatasource } from './helpers/datasource.js';
+import { profileServiceDefinition, startGrpcServer } from './helpers/grpc-server.js';
 
 const PROTO = `syntax = "proto3";
 package taproot.test;
@@ -48,10 +49,7 @@ let server: grpc.Server;
 beforeAll(async () => {
   protoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-grpc-stream-'));
   fs.writeFileSync(path.join(protoRoot, 'profile.proto'), PROTO, 'utf8');
-  const bundle = await loadGrpcPackage(protoRoot);
-  const pkg = bundle.grpcPackage as unknown as { taproot: { test: { ProfileService: { service: grpc.ServiceDefinition } } } };
-  server = new grpc.Server();
-  server.addService(pkg.taproot.test.ProfileService.service, {
+  ({ server, port } = await startGrpcServer(await profileServiceDefinition(protoRoot), {
     GetProfile: (call: grpc.ServerUnaryCall<{ id: string }, unknown>, callback: grpc.sendUnaryData<unknown>) => {
       callback(null, { profile: { id: call.request.id, name: `profile-${call.request.id}` } });
     },
@@ -79,10 +77,7 @@ beforeAll(async () => {
         if (!failed) call.end();
       });
     },
-  });
-  port = await new Promise<number>((resolve, reject) => {
-    server.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (err, bound) => (err ? reject(err) : resolve(bound)));
-  });
+  }));
 });
 
 afterAll(() => {
@@ -90,21 +85,8 @@ afterAll(() => {
 });
 
 function makeRequest(method: string, body: unknown): QueryRequest {
-  const datasource = {
-    name: 'unit-grpc-stream',
-    kind: 'grpc',
-    env: 'unit',
-    service: 'profiles',
-    tags: [],
-    connection: { host: '127.0.0.1', port },
-    credentialRef: 'unit-grpc-stream',
-    connectors: [],
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-    resolverHints: { protoRoot },
-    updatedAt: new Date().toISOString(),
-  } as unknown as DatasourceProfile;
   return {
-    datasource,
+    datasource: testDatasource('grpc', port, { protoRoot }),
     query: `taproot.test.ProfileService/${method}`,
     capability: 'executeRead',
     timeoutMs: 5000,
@@ -183,6 +165,16 @@ describe('grpcPlugin streaming calls', () => {
 
     // assert
     expect(result.result.columns).toEqual(['value']);
+    expect(result.result.rows).toEqual([[{ profile: { id: 'u', name: 'profile-u' } }]]);
+    expect(result.meta).toBeUndefined();
+  });
+
+  it('accepts the short service name and method name in another case', async () => {
+    // act
+    const result = await grpcPlugin.execute!({ ...makeRequest('GetProfile', { id: 'u' }), query: 'profileservice/getprofile' }, {});
+
+    // assert
+    expect(result.query.native).toBe('taproot.test.ProfileService/GetProfile');
     expect(result.result.rows).toEqual([[{ profile: { id: 'u', name: 'profile-u' } }]]);
   });
 

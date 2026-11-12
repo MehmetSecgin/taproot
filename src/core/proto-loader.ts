@@ -30,6 +30,10 @@ export interface GrpcPackageBundle extends LoadedProtoBundle {
   grpcPackage: Record<string, unknown>;
 }
 
+export function resolveProtoRoot(flag: string | undefined, resolverHints: Record<string, string> | undefined): string | undefined {
+  return str(flag || resolverHints?.protoRoot).trim() || undefined;
+}
+
 export function splitProtoRoots(value: string): string[] {
   return str(value)
     .split(/[,;:]/)
@@ -59,7 +63,7 @@ function listProtoFiles(rootDir: string): string[] {
 
 function listAllProtoFiles(roots: string[]): string[] {
   const byImportPath = new Map<string, string>();
-  for (const root of roots.map((r) => path.resolve(r))) {
+  for (const root of roots) {
     for (const file of listProtoFiles(root)) {
       const importPath = path.relative(root, file);
       if (!byImportPath.has(importPath)) byImportPath.set(importPath, file);
@@ -81,14 +85,13 @@ function protoFilesStamp(files: string[]): string {
 
 const IMPORT_RE = /^\s*import\s+(?:public\s+|weak\s+)?"([^"]+)"\s*;/gm;
 
-function importResolves(target: string, importerDir: string, roots: string[], basenames: Set<string>): boolean {
-  if (target.startsWith('google/protobuf/')) return true;
-  if (path.isAbsolute(target) && fs.existsSync(target)) return true;
-  if (fs.existsSync(path.resolve(importerDir, target))) return true;
-  for (const r of roots) {
-    if (fs.existsSync(path.resolve(r, target))) return true;
-  }
-  return basenames.has(path.basename(target));
+function findImport(target: string, importer: string, roots: string[], files: string[]): string | undefined {
+  const direct = [path.dirname(importer), ...roots]
+    .map((dir) => path.resolve(dir, target))
+    .find((candidate) => fs.existsSync(candidate));
+  if (direct) return direct;
+  const sameImportPath = files.filter((file) => file.endsWith(`${path.sep}${path.normalize(target)}`));
+  return sameImportPath.length === 1 ? sameImportPath[0] : undefined;
 }
 
 interface UnresolvedImport {
@@ -97,7 +100,6 @@ interface UnresolvedImport {
 }
 
 function findUnresolvedImports(files: string[], roots: string[]): UnresolvedImport[] {
-  const basenames = new Set(files.map((f) => path.basename(f)));
   const out: UnresolvedImport[] = [];
   const seen = new Set<string>();
   for (const file of files) {
@@ -105,7 +107,7 @@ function findUnresolvedImports(files: string[], roots: string[]): UnresolvedImpo
     try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
     for (const match of content.matchAll(IMPORT_RE)) {
       const target = match[1];
-      if (importResolves(target, path.dirname(file), roots, basenames)) continue;
+      if (target.startsWith('google/protobuf/') || findImport(target, file, roots, files)) continue;
       const key = `${target}|${file}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -129,10 +131,6 @@ function unresolvedImportsError(unresolved: UnresolvedImport[], roots: string[])
   );
 }
 
-function normalizeCacheKey(roots: string[]): string {
-  return roots.map((r) => path.resolve(r)).sort().join('|');
-}
-
 async function parseProtoFiles(files: string[], roots: string[]): Promise<LoadedProtoBundle> {
   const unresolved = findUnresolvedImports(files, roots);
   if (unresolved.length) throw unresolvedImportsError(unresolved, roots);
@@ -142,20 +140,7 @@ async function parseProtoFiles(files: string[], roots: string[]): Promise<Loaded
     resolvePath: (origin: string, target: string) => string;
     load: (files: string[], opts: { keepCase: boolean }) => Promise<unknown>;
   };
-  root.resolvePath = (origin: string, target: string): string => {
-    if (path.isAbsolute(target) && fs.existsSync(target)) return target;
-    if (origin) {
-      const rel = path.resolve(path.dirname(origin), target);
-      if (fs.existsSync(rel)) return rel;
-    }
-    for (const r of roots) {
-      const absUnder = path.resolve(r, target);
-      if (fs.existsSync(absUnder)) return absUnder;
-    }
-    const byBasename = files.find((f) => path.basename(f) === path.basename(target));
-    if (byBasename) return byBasename;
-    return target;
-  };
+  root.resolvePath = (origin: string, target: string): string => findImport(target, origin, roots, files) ?? target;
   await root.load(files, { keepCase: true });
   return { files, protobufRoot: root as unknown as ProtobufRoot };
 }
@@ -182,9 +167,9 @@ const protobufCache = new Map<string, { stamp: string; bundle: Promise<LoadedPro
 const grpcCache = new WeakMap<LoadedProtoBundle, Promise<GrpcPackageBundle>>();
 
 export async function loadProtobufRoot(protoRoot: string): Promise<LoadedProtoBundle> {
-  const roots = splitProtoRoots(protoRoot);
+  const roots = splitProtoRoots(protoRoot).map((root) => path.resolve(root));
   if (!roots.length) throw new Error(`empty proto root: '${protoRoot}'`);
-  const key = normalizeCacheKey(roots);
+  const key = [...roots].sort().join('|');
   const files = listAllProtoFiles(roots);
   const stamp = protoFilesStamp(files);
   const cached = protobufCache.get(key);

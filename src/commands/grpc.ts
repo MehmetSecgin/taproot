@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
 import { printEnvelope, printJson } from '../core/output.js';
-import { loadProtobufRoot } from '../core/proto-loader.js';
+import { loadProtobufRoot, resolveProtoRoot } from '../core/proto-loader.js';
 import {
   buildRequestSkeleton,
   describeProto,
@@ -10,10 +10,10 @@ import {
   resolveName,
   searchMethods,
 } from '../core/grpc-introspect.js';
-import { str } from '../core/strings.js';
 
-function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string; datasource?: string } {
-  if (opts.protoRoot) return { root: String(opts.protoRoot), source: 'flag', datasource: opts.datasource };
+function protoRootFor(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string } {
+  const flagRoot = resolveProtoRoot(opts.protoRoot, undefined);
+  if (flagRoot) return { root: flagRoot, source: 'flag' };
   if (!opts.datasource) {
     throw badInput('--proto-root or --datasource required for grpc describe.');
   }
@@ -22,9 +22,9 @@ function resolveProtoRoot(ctx: AppContext, opts: { datasource?: string; protoRoo
   if (ds.kind !== 'grpc') {
     throw new Error(`Datasource '${opts.datasource}' is kind=${ds.kind}; grpc describe needs a grpc datasource.`);
   }
-  const root = str((ds.resolverHints || {})['protoRoot']);
+  const root = resolveProtoRoot(undefined, ds.resolverHints);
   if (!root) throw new Error(`Datasource '${opts.datasource}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
-  return { root, source: `datasource:${opts.datasource}`, datasource: opts.datasource };
+  return { root, source: `datasource:${opts.datasource}` };
 }
 
 function resolveOrThrow(query: string, names: string[], label: string): string {
@@ -52,7 +52,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--max-depth <n>', 'message expansion depth cap (default 4)', '4')
     .action(async (opts) => {
       const ctx = getCtx();
-      const { root, source } = resolveProtoRoot(ctx, opts);
+      const { root, source } = protoRootFor(ctx, opts);
       const maxDepth = Number(opts.maxDepth);
       if (!Number.isInteger(maxDepth) || maxDepth < 0) {
         throw badInput(`--max-depth must be a non-negative integer, got '${opts.maxDepth}'.`);
@@ -111,7 +111,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--service <name>', 'restrict to one service (fully-qualified, short name, or unambiguous substring)')
     .action(async (pattern, opts) => {
       const ctx = getCtx();
-      const { root, source } = resolveProtoRoot(ctx, opts);
+      const { root, source } = protoRootFor(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const services = listServices(protobufRoot);
       const serviceName = opts.service
@@ -143,7 +143,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .action(async (pattern, opts) => {
       const ctx = getCtx();
-      const { root, source } = resolveProtoRoot(ctx, opts);
+      const { root, source } = protoRootFor(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));
       printEnvelope(true, { matches }, undefined, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });

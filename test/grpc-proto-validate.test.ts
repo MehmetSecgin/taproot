@@ -6,7 +6,8 @@ import { _resetProtoCachesForTest, loadProtobufRoot } from '../src/core/proto-lo
 import { buildRequestSkeleton } from '../src/core/grpc-introspect.js';
 import { validateGrpcRequest } from '../src/core/grpc-proto-validate.js';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
+import type { QueryRequest } from '../src/types/core.js';
+import { testDatasource } from './helpers/datasource.js';
 
 function tmpDir(name: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `taproot-${name}-`));
@@ -153,21 +154,8 @@ describe('grpcPlugin proto pre-flight validation', () => {
   beforeEach(() => _resetProtoCachesForTest());
 
   function makeRequest(opts: { protoRoot: string; requestJson?: string; skipProtoValidate?: boolean }): QueryRequest {
-    const datasource: DatasourceProfile = {
-      name: 'unit-grpc',
-      kind: 'grpc',
-      env: 'unit',
-      service: 'items',
-      tags: [],
-      connection: { host: '127.0.0.1', port: 65535 },
-      credentialRef: 'unit-grpc',
-      connectors: [],
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      resolverHints: { protoRoot: opts.protoRoot },
-      updatedAt: new Date().toISOString(),
-    } as unknown as DatasourceProfile;
     return {
-      datasource,
+      datasource: testDatasource('grpc', 65535, { protoRoot: opts.protoRoot }),
       query: 'taproot.test.ItemService/GetItem',
       capability: 'executeRead',
       timeoutMs: 5000,

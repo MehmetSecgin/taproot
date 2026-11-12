@@ -266,14 +266,24 @@ export interface NameResolution {
   candidates: string[];
 }
 
+function sameNames(query: string, names: string[]): string[] {
+  if (names.includes(query)) return [query];
+  const ql = query.toLowerCase();
+  return names.filter((n) => shortName(n).toLowerCase() === ql);
+}
+
+export function matchName(query: string, names: string[]): string | undefined {
+  const same = sameNames(query, names);
+  return same.length === 1 ? same[0] : undefined;
+}
+
 export function resolveName(query: string, names: string[]): NameResolution {
   const q = str(query).trim();
   if (!q) return { candidates: names };
-  if (names.includes(q)) return { match: q, candidates: [q] };
+  const same = sameNames(q, names);
+  if (same.length === 1) return { match: same[0], candidates: same };
+  if (same.length > 1) return { candidates: same };
   const ql = q.toLowerCase();
-  const shortExact = names.filter((n) => shortName(n).toLowerCase() === ql);
-  if (shortExact.length === 1) return { match: shortExact[0], candidates: shortExact };
-  if (shortExact.length > 1) return { candidates: shortExact };
   const sub = names.filter((n) => n.toLowerCase().includes(ql) || shortName(n).toLowerCase().includes(ql));
   if (sub.length === 1) return { match: sub[0], candidates: sub };
   if (sub.length > 1) return { candidates: sub };

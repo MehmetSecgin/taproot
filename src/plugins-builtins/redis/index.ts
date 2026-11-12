@@ -4,7 +4,7 @@ import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../.
 import { classifyExecutorDoctorCode, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
-import { loadProtobufRoot, type ProtobufRoot } from '../../core/proto-loader.js';
+import { loadProtobufRoot, resolveProtoRoot, type ProtobufRoot } from '../../core/proto-loader.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { str } from '../../core/strings.js';
 
@@ -22,8 +22,7 @@ const READ_COMMANDS = new Set<string>([
   'PFCOUNT',
   'OBJECT', 'INFO', 'PING', 'ECHO', 'TIME', 'CONFIG', 'CLIENT', 'MEMORY', 'COMMAND', 'LATENCY', 'DUMP',
 ]);
-
-const NAME_LISTING_COMMANDS = new Set<string>(['KEYS', 'SCAN', 'RANDOMKEY', 'HKEYS']);
+const READS_REPLYING_WITH_NAMES = new Set<string>(['KEYS', 'SCAN', 'RANDOMKEY', 'HKEYS']);
 
 const MUTATE_COMMANDS = new Set<string>([
   // strings
@@ -96,7 +95,12 @@ interface GateOptions {
   allowFlush: boolean;
 }
 
-function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier {
+interface AllowedCommand {
+  verb: string;
+  tier: CommandTier;
+}
+
+function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedCommand {
   if (!tokens.length) throw new Error('empty redis command');
   const verb = str(tokens[0]).toUpperCase();
   const tier = classifyCommand(verb);
@@ -106,7 +110,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
   // SORT with STORE clause is a mutate even though SORT itself can be read-only.
   if (verb === 'SORT' && !tokens.slice(1).some((t) => t.toUpperCase() === 'STORE')) {
     // SORT without STORE = read. Use SORT_RO for explicit read on replicas.
-    return 'read';
+    return { verb, tier: 'read' };
   }
   // Subcommand allow-list applies only to read-tier composite commands.
   const subAllow = SUBCOMMAND_ALLOW[verb];
@@ -116,7 +120,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
       throw new Error(`redis ${verb} subcommand '${sub || '(none)'}' not in allow-list.`);
     }
   }
-  if (tier === 'read') return tier;
+  if (tier === 'read') return { verb, tier };
   if (opts.capability !== 'executeMutate') {
     throw new Error(`redis command '${verb}' is a ${tier} operation; re-run with --allow-mutate.`);
   }
@@ -129,10 +133,20 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): CommandTier 
   if (tier === 'flush' && !opts.allowFlush) {
     throw new Error(`redis FLUSH-tier command '${verb}' requires --allow-flush in addition to --allow-mutate.`);
   }
-  return tier;
+  return { verb, tier };
 }
 
-function cliArgs(ds: QueryRequest['datasource'], creds: Record<string, string>, decode: boolean): string[] {
+interface RedisCliInvocation {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+}
+
+function redisCli(
+  ds: QueryRequest['datasource'],
+  creds: Record<string, string>,
+  command: string[],
+  decode: boolean,
+): RedisCliInvocation {
   const args: string[] = [
     '-h', String(ds.connection.host || '127.0.0.1'),
     '-p', String(ds.connection.port || RUNTIME_CONSTANTS.defaultPorts.redis),
@@ -145,25 +159,21 @@ function cliArgs(ds: QueryRequest['datasource'], creds: Record<string, string>, 
   }
   if (creds.user) args.push('--user', String(creds.user));
   if (ds.connection.ssl) args.push('--tls');
-  return args;
+  args.push(...command);
+  const env = creds.password ? { ...process.env, REDISCLI_AUTH: String(creds.password) } : process.env;
+  return { args, env };
 }
 
-function cliEnv(creds: Record<string, string>): NodeJS.ProcessEnv {
-  if (!creds.password) return process.env;
-  return { ...process.env, REDISCLI_AUTH: String(creds.password) };
+interface RunOptions {
+  timeoutMs: number | undefined;
+  signal: AbortSignal | undefined;
 }
 
 interface RunResult { stdout: string; stderr: string; code: number; timedOut: boolean }
 
-async function runRedis(
-  args: string[],
-  env: NodeJS.ProcessEnv,
-  tokens: string[],
-  timeoutMs: number | undefined,
-  signal: AbortSignal | undefined,
-): Promise<RunResult> {
+async function runRedis(cli: RedisCliInvocation, { timeoutMs, signal }: RunOptions): Promise<RunResult> {
   return await new Promise((resolve) => {
-    const proc = spawn('redis-cli', [...args, ...tokens], { env, stdio: ['ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL' });
+    const proc = spawn('redis-cli', cli.args, { env: cli.env, stdio: ['ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL' });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -273,10 +283,18 @@ function decodeWith(root: ProtobufRoot, message: string, buf: Buffer): Record<st
 
 function resolveProtoParams(request: QueryRequest): { protoRoot?: string; protoMessage?: string } {
   const pp = request.pluginParams || {};
-  const hints = (request.datasource.resolverHints || {}) as Record<string, string>;
-  const protoRoot = str(pp.protoRoot || hints.protoRoot).trim() || undefined;
-  const protoMessage = str(pp.protoMessage || hints.protoMessage).trim() || undefined;
-  return { protoRoot, protoMessage };
+  const hints = request.datasource.resolverHints;
+  return {
+    protoRoot: resolveProtoRoot(pp.protoRoot, hints),
+    protoMessage: str(pp.protoMessage || hints?.protoMessage).trim() || undefined,
+  };
+}
+
+function redisFailure(r: RunResult, timeoutMs: number | undefined): Error | undefined {
+  if (r.timedOut) return queryTimeoutError(timeoutMs || 0);
+  if (r.code !== 0) return new Error((r.stderr || r.stdout || `redis-cli exit ${r.code}`).trim());
+  if (/^\(error\)/im.test(r.stdout)) return new Error(r.stdout.trim());
+  return undefined;
 }
 
 export const redisPlugin: TapRootPlugin = {
@@ -288,8 +306,10 @@ export const redisPlugin: TapRootPlugin = {
   },
 
   async doctor(input): Promise<DoctorCheck[]> {
-    const args = cliArgs(input.datasource, input.credentials, false);
-    const r = await runRedis(args, cliEnv(input.credentials), ['PING'], RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000, undefined);
+    const r = await runRedis(redisCli(input.datasource, input.credentials, ['PING'], false), {
+      timeoutMs: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs + 2000,
+      signal: undefined,
+    });
     if (r.code === 0 && /PONG/i.test(r.stdout)) {
       return [{ check: 'redis ping', status: DoctorStatus.Ok, detail: 'PING -> PONG' }];
     }
@@ -303,26 +323,25 @@ export const redisPlugin: TapRootPlugin = {
     const tokens = tokenize(request.query);
     const pp = request.pluginParams || {};
     const policy = request.datasource.policy;
-    const tier = assertCommandAllowed(tokens, {
+    const { verb, tier } = assertCommandAllowed(tokens, {
       capability: request.capability,
       allowMutatePolicy: Boolean(policy?.allowMutate),
       allowedCapabilities: (policy?.allowedCapabilities || []) as string[],
       allowFlush: Boolean(pp.allowFlush),
     });
     const { protoRoot, protoMessage } = resolveProtoParams(request);
-    const decode = Boolean(protoMessage) && tier === 'read' && !NAME_LISTING_COMMANDS.has(str(tokens[0]).toUpperCase());
+    const decode = Boolean(protoMessage) && tier === 'read' && !READS_REPLYING_WITH_NAMES.has(verb);
     if (Boolean(protoMessage) && !protoRoot) {
       throw new Error("proto decoding requested but no proto root. Pass --proto-root <dir> or set resolverHints.protoRoot on the datasource.");
     }
-    const args = cliArgs(request.datasource, creds, decode);
-    const r = await runRedis(args, cliEnv(creds), tokens, request.timeoutMs, request.signal);
-    request.signal?.throwIfAborted();
-    if (r.timedOut) throw queryTimeoutError(request.timeoutMs || 0);
-    if (r.code !== 0) {
-      throw new Error((r.stderr || r.stdout || `redis-cli exit ${r.code}`).trim());
-    }
-    if (/^\(error\)/im.test(r.stdout)) {
-      throw new Error(r.stdout.trim());
+    const r = await runRedis(redisCli(request.datasource, creds, tokens, decode), {
+      timeoutMs: request.timeoutMs,
+      signal: request.signal,
+    });
+    const failure = redisFailure(r, request.timeoutMs);
+    if (failure) {
+      request.signal?.throwIfAborted();
+      throw failure;
     }
     const warnings: string[] = [];
     const columns = ['value'];

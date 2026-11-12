@@ -173,6 +173,38 @@ describe('proto-loader', () => {
     expect(Object.keys((protobufRoot.lookup('taproot.common.Address') as { fields: object }).fields)).toEqual(['city']);
   });
 
+  it('fails an import whose path matches no file instead of binding a same-named file', async () => {
+    // arrange
+    const dir = tmpDir('proto-same-basename');
+    fs.mkdirSync(path.join(dir, 'a', 'x'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'a', 'y'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'a', 'x', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.x;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'a', 'y', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.y;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'profile.proto'), 'syntax = "proto3";\npackage taproot.test;\nimport "z/common.proto";\nmessage Profile { string name = 1; }\n', 'utf8');
+
+    // act
+    const load = loadProtobufRoot(dir);
+
+    // assert
+    await expect(load).rejects.toThrow(/unresolved proto import[\s\S]*"z\/common\.proto"/);
+  });
+
+  it('binds an import to the one file whose path ends with the import path', async () => {
+    // arrange
+    const dir = tmpDir('proto-import-suffix');
+    fs.mkdirSync(path.join(dir, 'a', 'x'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'a', 'y'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'a', 'x', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.x;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'a', 'y', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.y;\nmessage Address { string city = 1; }\n', 'utf8');
+    fs.writeFileSync(path.join(dir, 'profile.proto'), 'syntax = "proto3";\npackage taproot.test;\nimport "y/common.proto";\nmessage Profile { taproot.test.y.Address address = 1; }\n', 'utf8');
+
+    // act
+    const { protobufRoot } = await loadProtobufRoot(dir);
+
+    // assert
+    expect(protobufRoot.lookup('taproot.test.Profile')).toBeTruthy();
+  });
+
   it('loads a file once when one root contains another', async () => {
     // arrange
     const dir = tmpDir('proto-nested-roots');

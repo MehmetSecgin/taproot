@@ -1,13 +1,18 @@
 import { spawn } from 'node:child_process';
 
-export async function runShellCommand(command: string, timeoutMs: number): Promise<{ ok: boolean; detail: string }> {
+interface ShellCommandResult {
+  ok: boolean;
+  detail: string;
+}
+
+export async function runShellCommand(command: string, timeoutMs: number): Promise<ShellCommandResult> {
   return await new Promise((resolve) => {
     const proc = spawn('/bin/sh', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let settled = false;
 
-    const finish = (result: { ok: boolean; detail: string }) => {
+    const finish = (result: ShellCommandResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
