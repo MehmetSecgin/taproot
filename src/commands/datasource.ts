@@ -10,6 +10,7 @@ import { extractImportArray, validateImportedProfile } from '../core/datasource-
 import { DoctorStatus } from '../types/core.js';
 import type { Capability } from '../types/core.js';
 import { str } from '../core/strings.js';
+import { parseDatasourceProfile } from '../store/schemas.js';
 
 function parseHintPairs(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -54,7 +55,8 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
       const needle = (pattern || '').toLowerCase();
-      const rows = ctx.datasourceStore.list()
+      const { profiles, warnings } = ctx.datasourceStore.load();
+      const rows = profiles
         .filter((d) => d.name.toLowerCase().includes(needle))
         .map((d) => {
           const row: Record<string, unknown> = {
@@ -79,7 +81,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           || String(a.service).localeCompare(String(b.service))
           || String(a.name).localeCompare(String(b.name)),
         );
-      printEnvelope(true, rows);
+      printEnvelope(true, rows, undefined, warnings.length ? { warnings } : undefined);
     });
 
   ds.command('show')
@@ -155,8 +157,10 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
         updatedAt: nowIso(),
         confidence: Number(opts.confidence),
       };
+      const validated = parseDatasourceProfile(profile);
+      if (!validated.ok) throw badInput(`Invalid datasource ${opts.name}: ${validated.error}`);
       const existed = Boolean(ctx.datasourceStore.get(opts.name));
-      const saved = ctx.datasourceStore.save(profile);
+      const saved = ctx.datasourceStore.save(validated.profile);
       if (opts.probe) {
         const plugin = ctx.pluginRegistry.get(saved.kind);
         if (!plugin?.doctor) {

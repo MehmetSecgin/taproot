@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { z, type ZodError } from 'zod';
+import type { DatasourceProfile } from '../types/core.js';
 
 export const DatasourcePolicySchema = z.object({
   allowRead: z.boolean().default(true),
@@ -28,7 +29,18 @@ export const DatasourceProfileSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-export const DatasourceProfileListSchema = z.array(DatasourceProfileSchema);
+function firstZodError(error: ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return 'invalid profile';
+  const path = issue.path.join('.');
+  return path ? `${path}: ${issue.message}` : issue.message;
+}
+
+export function parseDatasourceProfile(raw: unknown): { ok: true; profile: DatasourceProfile } | { ok: false; error: string } {
+  const parsed = DatasourceProfileSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: firstZodError(parsed.error) };
+  return { ok: true, profile: parsed.data as DatasourceProfile };
+}
 
 export const EnvironmentPolicySchema = z.object({
   deterministicRequired: z.boolean().default(false),

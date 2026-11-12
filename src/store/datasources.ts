@@ -1,15 +1,34 @@
 import { readJsonFile, writeJsonFile } from '../core/json.js';
 import type { DatasourceProfile } from '../types/core.js';
-import { DatasourceProfileListSchema } from './schemas.js';
+import { parseDatasourceProfile } from './schemas.js';
 import { str } from '../core/strings.js';
+
+function rowName(row: unknown): string {
+  return str((row as { name?: unknown } | null)?.name);
+}
 
 export class DatasourceStore {
   constructor(private readonly file: string) {}
 
-  list(): DatasourceProfile[] {
+  private rows(): unknown[] {
     const raw = readJsonFile<unknown>(this.file, []);
-    const parsed = DatasourceProfileListSchema.safeParse(raw);
-    return parsed.success ? (parsed.data as DatasourceProfile[]) : [];
+    if (!Array.isArray(raw)) throw new Error(`${this.file} must hold a JSON array of datasource profiles. Fix it; TapRoot does not overwrite it until then.`);
+    return raw;
+  }
+
+  load(): { profiles: DatasourceProfile[]; warnings: string[] } {
+    const profiles: DatasourceProfile[] = [];
+    const warnings: string[] = [];
+    this.rows().forEach((row, index) => {
+      const parsed = parseDatasourceProfile(row);
+      if (parsed.ok) profiles.push(parsed.profile);
+      else warnings.push(`skipped invalid datasource ${rowName(row) || `#${index}`}: ${parsed.error}`);
+    });
+    return { profiles, warnings };
+  }
+
+  list(): DatasourceProfile[] {
+    return this.load().profiles;
   }
 
   get(name: string): DatasourceProfile | undefined {
@@ -17,16 +36,16 @@ export class DatasourceStore {
   }
 
   save(profile: DatasourceProfile): DatasourceProfile {
-    const all = this.list().filter((d) => d.name !== profile.name);
-    all.push(profile);
-    writeJsonFile(this.file, all);
+    const rows = this.rows().filter((row) => rowName(row) !== profile.name);
+    rows.push(profile);
+    writeJsonFile(this.file, rows);
     return profile;
   }
 
   remove(name: string): boolean {
-    const all = this.list();
-    const next = all.filter((d) => d.name !== name);
-    if (next.length === all.length) return false;
+    const rows = this.rows();
+    const next = rows.filter((row) => rowName(row) !== name);
+    if (next.length === rows.length) return false;
     writeJsonFile(this.file, next);
     return true;
   }

@@ -228,4 +228,21 @@ describe('eager schema catalog', () => {
     expect(cleared).toBe(1);
     expect(ctx.schemaCatalogStore.get('qa-orders')).toBeUndefined();
   });
+
+  it('reads a corrupt cached catalog as missing and replaces it on the next save', () => {
+    // arrange
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-corrupt-'));
+    const store = new SchemaCatalogStore(dir);
+    fs.writeFileSync(path.join(dir, 'qa-orders.json'), '{"datasource":"qa-orders"');
+
+    // act
+    const before = store.get('qa-orders');
+    const listedBefore = store.list();
+    store.save('qa-orders', {});
+
+    // assert
+    expect(before).toBeUndefined();
+    expect(listedBefore).toEqual([]);
+    expect(store.get('qa-orders')).toMatchObject({ datasource: 'qa-orders', tables: {} });
+  });
 });

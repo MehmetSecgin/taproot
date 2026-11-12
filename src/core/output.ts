@@ -25,9 +25,12 @@ export function printJson(data: unknown): void {
 
 export function toLines(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
-  const env = value as { ok?: unknown; data?: unknown } | null;
+  const env = value as { ok?: unknown; data?: unknown; meta?: { warnings?: unknown } } | null;
   if (!env || typeof env !== 'object' || env.ok !== true) return [value];
-  if (Array.isArray(env.data)) return [{ ok: true }, ...env.data];
+  if (Array.isArray(env.data)) {
+    const warnings = env.meta?.warnings;
+    return [Array.isArray(warnings) && warnings.length ? { ok: true, warnings } : { ok: true }, ...env.data];
+  }
   const data = env.data as { columns?: unknown; rows?: unknown; warnings?: unknown } | undefined;
   if (!data || !Array.isArray(data.rows)) return [value];
   const header: Record<string, unknown> = { ok: true, columns: data.columns };

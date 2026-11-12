@@ -282,4 +282,53 @@ describe('datasource CRUD', () => {
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data.confidence).toBe(0.5);
   });
+
+  it('datasource add refuses to overwrite a datasources file that does not parse', () => {
+    // arrange
+    const { env, stateRoot } = setupState();
+    const file = path.join(stateRoot, 'config', 'datasources.json');
+    const torn = '[{"name":"qa-kept","kind":"mysql"';
+    fs.writeFileSync(file, torn);
+
+    // act
+    const out = addProfile(env);
+
+    // assert
+    expect(out.status).not.toBe(0);
+    expect(JSON.parse(out.stdout).error.message).toContain(`${file} is not valid JSON`);
+    expect(fs.readFileSync(file, 'utf8')).toBe(torn);
+  });
+
+  it('datasource list skips an invalid row, warns about it, and add keeps it', () => {
+    // arrange
+    const { env, stateRoot } = setupState();
+    addProfile(env);
+    const file = path.join(stateRoot, 'config', 'datasources.json');
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const broken = { ...stored[0], name: 'qa-broken', connection: { port: null } };
+    fs.writeFileSync(file, JSON.stringify([...stored, broken]));
+
+    // act
+    const listed = JSON.parse(runCli(['datasource', 'list'], env).stdout);
+    addProfile(env, ['--port', '3307']);
+
+    // assert
+    expect(listed.data.map((row: { name: string }) => row.name)).toEqual(['qa-svc']);
+    expect(listed.meta.warnings).toEqual([expect.stringContaining('qa-broken: connection.port')]);
+    const names = JSON.parse(fs.readFileSync(file, 'utf8')).map((row: { name: string }) => row.name);
+    expect(names.sort()).toEqual(['qa-broken', 'qa-svc']);
+  });
+
+  it('datasource add --port abc is BAD_INPUT and saves nothing', () => {
+    // arrange
+    const { env, stateRoot } = setupState();
+
+    // act
+    const out = addProfile(env, ['--port', 'abc']);
+
+    // assert
+    expect(out.status).toBe(2);
+    expect(JSON.parse(out.stdout).error.message).toContain('connection.port');
+    expect(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8')).toBe('[]');
+  });
 });

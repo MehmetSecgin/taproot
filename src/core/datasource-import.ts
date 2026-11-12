@@ -1,6 +1,4 @@
-import type { ZodError } from 'zod';
-import { DatasourceProfileSchema } from '../store/schemas.js';
-import type { DatasourceProfile } from '../types/core.js';
+import { parseDatasourceProfile } from '../store/schemas.js';
 import { nowIso } from './time.js';
 
 export function extractImportArray(parsed: unknown): unknown[] {
@@ -31,16 +29,6 @@ export function normalizeImportedProfile(raw: unknown, defaults: { credentialRef
   return base;
 }
 
-function firstZodError(error: ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'invalid profile';
-  const path = issue.path.join('.');
-  return path ? `${path}: ${issue.message}` : issue.message;
-}
-
-export function validateImportedProfile(raw: unknown, defaults: { credentialRef?: string }): { ok: true; profile: DatasourceProfile } | { ok: false; error: string } {
-  const normalized = normalizeImportedProfile(raw, defaults);
-  const parsed = DatasourceProfileSchema.safeParse(normalized);
-  if (!parsed.success) return { ok: false, error: firstZodError(parsed.error) };
-  return { ok: true, profile: parsed.data as DatasourceProfile };
+export function validateImportedProfile(raw: unknown, defaults: { credentialRef?: string }): ReturnType<typeof parseDatasourceProfile> {
+  return parseDatasourceProfile(normalizeImportedProfile(raw, defaults));
 }

@@ -16,8 +16,16 @@ export class SchemaCatalogStore {
     return path.join(this.dir, `${datasource.replace(/[^a-z0-9._-]/gi, '_')}.json`);
   }
 
+  private readOrMissing(file: string): SchemaCatalog | undefined {
+    try {
+      return readJsonFile<SchemaCatalog | undefined>(file, undefined);
+    } catch {
+      return undefined;
+    }
+  }
+
   get(datasource: string): SchemaCatalog | undefined {
-    return readJsonFile<SchemaCatalog | undefined>(this.file(datasource), undefined);
+    return this.readOrMissing(this.file(datasource));
   }
 
   save(datasource: string, tables: Record<string, TableContext>): SchemaCatalog {
@@ -31,7 +39,7 @@ export class SchemaCatalogStore {
     if (!fs.existsSync(this.dir)) return [];
     return fs.readdirSync(this.dir)
       .filter((name) => name.endsWith('.json'))
-      .map((name) => readJsonFile<SchemaCatalog | undefined>(path.join(this.dir, name), undefined))
+      .map((name) => this.readOrMissing(path.join(this.dir, name)))
       .filter((catalog): catalog is SchemaCatalog => Boolean(catalog))
       .map((catalog) => ({ datasource: catalog.datasource, fetchedAt: catalog.fetchedAt, tables: Object.keys(catalog.tables || {}).length }));
   }
