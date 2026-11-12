@@ -39,7 +39,7 @@ jobs:
 
       - name: Run trufflehog (PR diff)
         if: github.event_name == 'pull_request'
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb
         with:
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
@@ -47,7 +47,7 @@ jobs:
 
       - name: Run trufflehog (push / manual)
         if: github.event_name != 'pull_request'
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@ea68ca03c865c5f324e86e849ced20ed3cf9dbbb
         with:
           path: ./
           extra_args: --only-verified
