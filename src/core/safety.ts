@@ -2,9 +2,9 @@ import { SQL_DATASOURCE_KINDS } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 import type { SchemaContext, SchemaPartition } from '../types/core.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
-import { missingPartitionPredicate } from './error-classification.js';
+import { badInput, missingPartitionPredicate } from './error-classification.js';
 import { collectPredicateColumns, isSchemaMetadataQuery } from './schema-context.js';
-import { explainAnalyzeTarget, parseExecutedStatements } from './sql-parser.js';
+import { explainAnalyzeTarget, hasSecondStatement, isExplainAnalyze, maskCommentsAndLiterals, parseExecutedStatements } from './sql-parser.js';
 import { str } from './strings.js';
 
 type QueryMode = 'read' | 'mutate';
@@ -12,36 +12,43 @@ type QueryMode = 'read' | 'mutate';
 const COMMAND_MUTATE_RE = /\b(insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/i;
 const LEADING_KEYWORD_RE = /^[\s(]*([a-z]+)/i;
 const EXPLAIN_KEYWORDS = new Set(['explain', 'describe', 'desc']);
-const ANALYZE_RE = /\banalyze\b/i;
+const READ_KEYWORDS = new Set(['select', 'with', 'show', ...EXPLAIN_KEYWORDS]);
 const SIDE_EFFECT_RE = /\binto\b|:=|\b(get_lock|release_lock|release_all_locks|nextval|setval)\b|\bnext\s+value\s+for\b/i;
-const SECOND_STATEMENT_RE = /;\s*\S/;
 const DATA_CHANGE_RE = /\b(insert|update|delete|replace)\b/i;
 
 export function classifySql(sql: string): QueryMode {
-  if (SIDE_EFFECT_RE.test(sql)) return 'mutate';
-  const keyword = LEADING_KEYWORD_RE.exec(sql)?.[1].toLowerCase() ?? '';
-  if (keyword === 'select' || keyword === 'with') return classifyQuery(sql, keyword);
-  if (SECOND_STATEMENT_RE.test(sql)) return 'mutate';
+  const code = maskCommentsAndLiterals(sql);
+  if (SIDE_EFFECT_RE.test(code) || hasSecondStatement(code)) return 'mutate';
+  const keyword = leadingKeyword(code);
+  if (keyword === 'select' || keyword === 'with') return classifySelect(code, keyword);
   if (keyword === 'show') return 'read';
-  if (EXPLAIN_KEYWORDS.has(keyword)) return classifyExplain(sql);
+  if (EXPLAIN_KEYWORDS.has(keyword)) return classifyExplain(code);
   return 'mutate';
+}
+
+function leadingKeyword(code: string): string {
+  return LEADING_KEYWORD_RE.exec(code)?.[1].toLowerCase() ?? '';
+}
+
+function isMultiStatementRead(sql: string): boolean {
+  const code = maskCommentsAndLiterals(sql);
+  return READ_KEYWORDS.has(leadingKeyword(code)) && hasSecondStatement(code);
 }
 
 function isSelect(statement: unknown): boolean {
   return (statement as { type?: unknown }).type === 'select';
 }
 
-function classifyQuery(sql: string, keyword: 'select' | 'with'): QueryMode {
-  const statements = parseExecutedStatements(sql);
+function classifySelect(code: string, keyword: 'select' | 'with'): QueryMode {
+  const statements = parseExecutedStatements(code);
   if (statements) return statements.every(isSelect) ? 'read' : 'mutate';
-  if (SECOND_STATEMENT_RE.test(sql)) return 'mutate';
-  return keyword === 'with' && DATA_CHANGE_RE.test(sql) ? 'mutate' : 'read';
+  return keyword === 'with' && DATA_CHANGE_RE.test(code) ? 'mutate' : 'read';
 }
 
-function classifyExplain(sql: string): QueryMode {
-  const target = explainAnalyzeTarget(sql);
-  if (target !== undefined) return classifySql(target);
-  return ANALYZE_RE.test(sql) ? 'mutate' : 'read';
+function classifyExplain(code: string): QueryMode {
+  if (!isExplainAnalyze(code)) return 'read';
+  const target = explainAnalyzeTarget(code);
+  return target === undefined ? 'mutate' : classifySql(target);
 }
 
 function classifyCommand(command: string): QueryMode {
@@ -53,7 +60,11 @@ export function enforceMutationPolicy(input: {
   allowMutate: boolean;
   datasource: DatasourceProfile;
 }): void {
-  const mode = SQL_DATASOURCE_KINDS.has(input.datasource.kind) ? classifySql(input.sql) : classifyCommand(input.sql);
+  const isSql = SQL_DATASOURCE_KINDS.has(input.datasource.kind);
+  if (isSql && isMultiStatementRead(input.sql)) {
+    throw badInput('send one SQL statement per query. Run each statement in its own taproot query call.');
+  }
+  const mode = isSql ? classifySql(input.sql) : classifyCommand(input.sql);
   if (mode === 'read') {
     if (!input.datasource.policy.allowRead) {
       throw new Error('Datasource policy disallows read queries.');

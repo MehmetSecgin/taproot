@@ -91,6 +91,19 @@ describe('MySQL read lease session', () => {
     expect(receivedSets).toContain(READ_ONLY_SESSION_SQL);
   });
 
+  it('leaves a write lease out of the read-only session', async () => {
+    // act
+    const { release } = await leaseMysqlConnection({ host: '127.0.0.1', port: server.port, user: 'writer', password: '' }, '+00:00', {
+      capability: 'executeMutate',
+      inSession: false,
+    });
+    await release();
+
+    // assert
+    expect(receivedSets).toHaveLength(1);
+    expect(receivedSets).not.toContain(READ_ONLY_SESSION_SQL);
+  });
+
   it('still reads from a server that cannot enforce a read-only session', async () => {
     // arrange
     servedTimestamp = '2026-11-07 10:42:00';

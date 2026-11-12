@@ -9,11 +9,70 @@ type ParserBuild = { Parser: new () => SqlParser };
 const require = createRequire(import.meta.url);
 let parser: SqlParser | undefined;
 
+const EXPLAIN_RE = /^[\s(]*(?:explain|describe|desc)\b/i;
+const ANALYZE_RE = /\banalyze\b/i;
 const EXPLAIN_ANALYZE_RE = /^\s*(?:explain|describe|desc)\s+(?:format\s*=\s*\S+\s+)?analyze\s+(?:format\s*=\s*\S+\s+)?/i;
+const SECOND_STATEMENT_RE = /;\s*\S/;
+const QUOTES = new Set(["'", '"', '`']);
+const LITERAL_FILLER = 'x';
 
 function astifySql(sql: string): unknown {
   parser ??= new (require('node-sql-parser/build/mysql.js') as ParserBuild).Parser();
   return parser.astify(sql);
+}
+
+function startsLineComment(sql: string, at: number): boolean {
+  if (sql[at] === '#') return true;
+  return sql.startsWith('--', at) && (at + 2 === sql.length || /\s/.test(sql[at + 2]));
+}
+
+function startsBlockComment(sql: string, at: number): boolean {
+  return sql.startsWith('/*', at) && sql[at + 2] !== '!';
+}
+
+function closingQuoteAt(sql: string, open: number): number {
+  const quote = sql[open];
+  let at = open + 1;
+  while (at < sql.length) {
+    if (sql[at] === '\\' && quote !== '`') at += 2;
+    else if (sql[at] === quote && sql[at + 1] === quote) at += 2;
+    else if (sql[at] === quote) return at;
+    else at += 1;
+  }
+  return sql.length;
+}
+
+export function maskCommentsAndLiterals(sql: string): string {
+  let out = '';
+  let at = 0;
+  while (at < sql.length) {
+    if (startsLineComment(sql, at)) {
+      const newline = sql.indexOf('\n', at);
+      at = newline < 0 ? sql.length : newline;
+      out += ' ';
+    } else if (startsBlockComment(sql, at)) {
+      const close = sql.indexOf('*/', at + 2);
+      at = close < 0 ? sql.length : close + 2;
+      out += ' ';
+    } else if (QUOTES.has(sql[at])) {
+      const close = closingQuoteAt(sql, at);
+      out += sql[at] + LITERAL_FILLER.repeat(Math.min(close, sql.length) - at - 1) + (close < sql.length ? sql[close] : '');
+      at = close + 1;
+    } else {
+      out += sql[at];
+      at += 1;
+    }
+  }
+  return out;
+}
+
+export function hasSecondStatement(sql: string): boolean {
+  return SECOND_STATEMENT_RE.test(maskCommentsAndLiterals(sql));
+}
+
+export function isExplainAnalyze(sql: string): boolean {
+  const code = maskCommentsAndLiterals(sql);
+  return EXPLAIN_RE.test(code) && ANALYZE_RE.test(code);
 }
 
 export function explainAnalyzeTarget(sql: string): string | undefined {

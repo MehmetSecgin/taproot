@@ -14,7 +14,7 @@ const pools = new Map<string, Pool>();
 const connectionTimeZones = new WeakMap<object, string>();
 const READ_ONLY_UNENFORCED_ERRNOS = new Set([1193, 1235]);
 
-export interface MysqlLease {
+export interface MysqlLeaseRequest {
   capability: QueryRequest['capability'];
   inSession: boolean;
 }
@@ -67,7 +67,7 @@ async function prepareSession(conn: Connection, timeZone: string, readOnly: bool
   if (readOnly) await conn.query('SET SESSION transaction_read_only = 1').catch(ignoreUnenforcedReadOnly);
 }
 
-export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, lease: MysqlLease) {
+export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: string, lease: MysqlLeaseRequest) {
   const readOnly = lease.capability === 'executeRead';
   const mysql = await loadMysql();
   const sessionConfig = { ...config, supportBigNumbers: true, ...readTemporalsIn(timeZone) };

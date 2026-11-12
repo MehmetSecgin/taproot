@@ -1,7 +1,7 @@
 import type { SchemaContext, TableContext } from '../types/core.js';
 import type { SchemaCatalog } from '../store/schema-catalog.js';
 import { suggestNames } from './grpc-introspect.js';
-import { explainAnalyzeTarget, parseExecutedStatements } from './sql-parser.js';
+import { isExplainAnalyze, parseExecutedStatements } from './sql-parser.js';
 import { str } from './strings.js';
 
 export interface PredicateColumnRefs {
@@ -137,7 +137,7 @@ export function collectPredicateColumns(sql: string): PredicateColumnRefs {
 }
 
 export function isSchemaMetadataQuery(sql: string): boolean {
-  if (explainAnalyzeTarget(sql) !== undefined) return false;
+  if (isExplainAnalyze(sql)) return false;
   const text = str(sql).trim().replace(/\s+/g, ' ').toLowerCase();
   return /^(show\s+(create\s+(table|view)\b|tables\b|(full\s+)?(columns|fields)\b|(index(es)?|keys)\b)|describe\b|desc\b|explain\b)/.test(text);
 }

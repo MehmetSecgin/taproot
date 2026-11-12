@@ -47,6 +47,28 @@ describe('safety', () => {
     expect(classifySql(sql)).toBe('mutate');
   });
 
+  it.each([
+    '-- daily check\nSELECT * FROM sample_table',
+    '# daily check\nSELECT 1',
+    '/* agent */ SELECT 1',
+    'SELECT 1 -- into the report',
+    "SELECT * FROM sample_table WHERE note = 'moved into archive'",
+    "SELECT * FROM sample_table WHERE note = 'a := b; DELETE'",
+    'SELECT `into` FROM sample_table',
+    "SELECT * FROM sample_table WHERE note = 'it''s into'",
+  ])('reads past comments and quoted text in %s', (sql) => {
+    expect(classifySql(sql)).toBe('read');
+  });
+
+  it.each([
+    '/*!50000 DELETE FROM sample_table */',
+    '-- note\nDELETE FROM sample_table',
+    '/* note */ EXPLAIN ANALYZE DELETE FROM sample_table',
+    "SELECT 'a' INTO @copy",
+  ])('still treats %s as mutate', (sql) => {
+    expect(classifySql(sql)).toBe('mutate');
+  });
+
   it('leaves non-SQL commands to their plugin', () => {
     expect(() =>
       enforceMutationPolicy({
@@ -81,6 +103,64 @@ describe('safety', () => {
         },
       }),
     ).toThrow(/allow-mutate/);
+  });
+
+  it.each([
+    ['SELECT 1; SELECT 2', false],
+    ['-- check\nSHOW TABLES; SHOW DATABASES', false],
+    ['SELECT 1; DELETE FROM x', true],
+  ])('asks for one statement per query instead of --allow-mutate for %s', (sql, allowMutate) => {
+    expect(() =>
+      enforceMutationPolicy({
+        sql,
+        allowMutate,
+        datasource: {
+          name: 'd',
+          kind: 'mysql',
+          connection: {},
+          credentialRef: 'r',
+          policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
+          updatedAt: '',
+          confidence: 1,
+        },
+      }),
+    ).toThrow(/^BAD_INPUT: send one SQL statement per query/);
+  });
+
+  it('asks for --allow-mutate on several writes in one query', () => {
+    expect(() =>
+      enforceMutationPolicy({
+        sql: 'DELETE FROM a; DELETE FROM b',
+        allowMutate: false,
+        datasource: {
+          name: 'd',
+          kind: 'mysql',
+          connection: {},
+          credentialRef: 'r',
+          policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
+          updatedAt: '',
+          confidence: 1,
+        },
+      }),
+    ).toThrow(/allow-mutate/);
+  });
+
+  it('lets a stored procedure body with semicolons through with --allow-mutate', () => {
+    expect(() =>
+      enforceMutationPolicy({
+        sql: 'CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END',
+        allowMutate: true,
+        datasource: {
+          name: 'd',
+          kind: 'mysql',
+          connection: {},
+          credentialRef: 'r',
+          policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
+          updatedAt: '',
+          confidence: 1,
+        },
+      }),
+    ).not.toThrow();
   });
 
   it('blocks mutate when datasource policy disallows', () => {
