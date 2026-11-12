@@ -71,10 +71,10 @@ export function validateGrpcRequest(
     }
     if (depth >= MAX_DEPTH) return null;
     for (const f of fields) {
-      const value = obj[f.name];
-      if (value === undefined || value === null) continue;
+      const fieldValue = obj[f.name];
+      if (fieldValue === undefined || fieldValue === null) continue;
       const here = path ? `${path}.${f.name}` : f.name;
-      const err = checkField(f, value, here, depth);
+      const err = checkField(f, fieldValue, here, depth);
       if (err) return err;
     }
     return null;
