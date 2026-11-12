@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { accessDenied } from '../core/error-classification.js';
-import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { readJsonFile, writeOwnerOnlyJsonFile } from '../core/json.js';
 import { str } from '../core/strings.js';
 
 const SERVICE_NAME = 'taproot';
@@ -104,7 +104,7 @@ export class CredentialStore {
 
   private saveFallback(payload: Record<string, Record<string, string>>): void {
     fs.mkdirSync(path.dirname(this.encryptedFile), { recursive: true });
-    writeJsonFile(this.encryptedFile, encryptJson(payload));
+    writeOwnerOnlyJsonFile(this.encryptedFile, encryptJson(payload));
   }
 
   async get(ref: string): Promise<Record<string, string>> {

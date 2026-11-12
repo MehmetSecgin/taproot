@@ -44,8 +44,12 @@ export function resolvePaths(kbDir?: string): Paths {
   return buildPaths(stateRoot, resolveKbDir(kbDir, stateRoot));
 }
 
+const OWNER_ONLY_DIR_MODE = 0o700;
+
 export function ensurePaths(paths: Paths): void {
-  [paths.stateRoot, paths.configDir, paths.cacheDir].forEach((p) => fs.mkdirSync(p, { recursive: true }));
+  fs.mkdirSync(paths.stateRoot, { recursive: true });
+  fs.mkdirSync(paths.configDir, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
+  fs.mkdirSync(paths.cacheDir, { recursive: true });
 }
 
 export function resolveFallbackPaths(kbDir?: string): Paths {

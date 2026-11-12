@@ -108,6 +108,18 @@ function credentialsCheck(ctx: AppContext): DoctorCheck {
   };
 }
 
+function masterKeyCheck(ctx: AppContext): DoctorCheck {
+  if (process.env.TAPROOT_MASTER_KEY) return { check: 'master_key', status: DoctorStatus.Ok, detail: 'TAPROOT_MASTER_KEY is set' };
+  if (!fs.existsSync(ctx.paths.credentialFile)) {
+    return { check: 'master_key', status: DoctorStatus.Ok, detail: 'TAPROOT_MASTER_KEY is unset; the OS keychain holds credentials when available' };
+  }
+  return {
+    check: 'master_key',
+    status: DoctorStatus.Warn,
+    detail: `${ctx.paths.credentialFile} is encrypted with a key derived from $USER that anyone on this machine can rebuild; set TAPROOT_MASTER_KEY (the next read re-encrypts the file) or store credentials in the OS keychain`,
+  };
+}
+
 function computeReadiness(checks: DoctorCheck[]): ReadinessState {
   const byName = new Map(checks.map((check) => [check.check, check]));
   if ((byName.get('kb_dir')?.status || DoctorStatus.Ok) !== DoctorStatus.Ok) return 'missing_kb';
@@ -128,11 +140,7 @@ export async function collectReadinessSnapshot(
     { check: 'state_root', status: fs.existsSync(ctx.paths.stateRoot) ? DoctorStatus.Ok : DoctorStatus.Fail, detail: ctx.paths.stateRoot },
     kbCheck(ctx),
     { check: 'plugins', status: DoctorStatus.Ok, detail: `${pluginNames.length} loaded: ${pluginNames.join(', ')}` },
-    {
-      check: 'master_key',
-      status: DoctorStatus.Ok,
-      detail: process.env.TAPROOT_MASTER_KEY ? 'TAPROOT_MASTER_KEY is set' : 'TAPROOT_MASTER_KEY is unset (optional); the credential fallback file uses a key derived from $USER',
-    },
+    masterKeyCheck(ctx),
     configCheck(ctx, Boolean(input?.createdConfig)),
     {
       check: 'datasources',

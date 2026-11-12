@@ -227,6 +227,24 @@ describe('init command', () => {
     expect(masterKeyCheck.status).toBe('ok');
   });
 
+  it('warns when the credential file uses the key derived from $USER', () => {
+    // arrange
+    const stateRoot = makeStateRoot();
+    const kbDir = makeKbDir();
+    setupKb(kbDir);
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_KB_DIR: kbDir, TAPROOT_MASTER_KEY: '', TAPROOT_NO_KEYCHAIN: '1' };
+    runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret123'], env);
+
+    // act
+    const out = runCli(['init'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+    const masterKeyCheck = JSON.parse(out.stdout).data.checks.find((check: any) => check.check === 'master_key');
+    expect(masterKeyCheck.status).toBe('warn');
+    expect(masterKeyCheck.detail).toContain('TAPROOT_MASTER_KEY');
+  });
+
   it('returns machine-readable init summary', () => {
     const stateRoot = makeStateRoot();
     const kbDir = makeKbDir();
