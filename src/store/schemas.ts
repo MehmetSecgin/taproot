@@ -6,6 +6,7 @@ export const DatasourcePolicySchema = z.object({
   allowMutate: z.boolean().default(false),
   allowedCapabilities: z.array(z.string()).default(['executeRead']),
   requireDatabase: z.boolean().optional(),
+  strictKeyspace: z.boolean().optional(),
 });
 
 export const DatasourceProfileSchema = z.object({

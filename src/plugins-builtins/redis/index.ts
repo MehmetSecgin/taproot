@@ -66,8 +66,9 @@ const SUBCOMMAND_ALLOW: Record<string, Set<string>> = {
   LATENCY: new Set(['LATEST', 'HISTORY', 'GRAPH', 'DOCTOR']),
 };
 
-// KEYS is O(N) and blocks the whole instance while it runs. Gated by
-// --allow-keys; SCAN with COUNT is the bounded alternative.
+// KEYS is O(N) and blocks the whole instance while it runs. On a datasource
+// with policy.strictKeyspace it needs --allow-keys; SCAN with COUNT is the
+// bounded alternative.
 const KEYS_COMMANDS = new Set<string>(['KEYS']);
 
 export const SCAN_COUNT_MAX = 1000;
@@ -102,6 +103,7 @@ interface GateOptions {
   allowedCapabilities: string[];
   allowFlush: boolean;
   allowKeys: boolean;
+  strictKeyspace: boolean;
 }
 
 interface AllowedCommand {
@@ -130,12 +132,12 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
     }
   }
   if (tier === 'keys') {
-    if (!opts.allowKeys) {
+    if (opts.strictKeyspace && !opts.allowKeys) {
       throw new Error(`redis ${verb} is O(N) and blocks the whole instance; use SCAN <cursor> MATCH <pattern> COUNT <n>, or re-run with --allow-keys.`);
     }
     return { verb, tier: 'read' };
   }
-  if (verb === 'SCAN') assertScanBounded(tokens);
+  if (verb === 'SCAN' && opts.strictKeyspace) assertScanBounded(tokens);
   if (tier === 'read') return { verb, tier };
   if (opts.capability !== 'executeMutate') {
     throw new Error(`redis command '${verb}' is a ${tier} operation; re-run with --allow-mutate.`);
@@ -361,6 +363,7 @@ export const redisPlugin: TapRootPlugin = {
       allowedCapabilities: (policy?.allowedCapabilities || []) as string[],
       allowFlush: Boolean(pp.allowFlush),
       allowKeys: Boolean(pp.allowKeys),
+      strictKeyspace: Boolean(policy?.strictKeyspace),
     });
     assertDatabaseSet(request.datasource);
     const { protoRoot, protoMessage } = resolveProtoParams(request);
@@ -402,7 +405,7 @@ export const redisPlugin: TapRootPlugin = {
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
       rows = lines.map((line) => [line]);
     }
-    if (verb === 'SCAN' && rows.length > SCAN_ROWS_MAX) {
+    if (verb === 'SCAN' && policy?.strictKeyspace && rows.length > SCAN_ROWS_MAX) {
       rows = rows.slice(0, SCAN_ROWS_MAX);
       warnings.push(`scan_rows_truncated_to_${SCAN_ROWS_MAX}`);
     }

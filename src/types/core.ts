@@ -39,6 +39,7 @@ export interface DatasourcePolicy {
   allowMutate: boolean;
   allowedCapabilities: Capability[];
   requireDatabase?: boolean;
+  strictKeyspace?: boolean;
 }
 
 export interface DatasourceProfile {
