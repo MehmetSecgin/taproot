@@ -15,14 +15,14 @@ import type { QueryOpts } from './query-types.js';
 export function registerQuery(program: Command, getCtx: () => AppContext): void {
   program
     .command('query')
-    .description('Run a SQL query, Redis command or gRPC call against a datasource. Example: taproot query --datasource <name> --sql "SHOW TABLES"')
+    .description('Run a SQL query, Redis command, gRPC call or read-only Kafka verb against a datasource. Example: taproot query --datasource <name> --sql "SHOW TABLES"')
     .allowExcessArguments()
     .option('--datasource <name>', 'datasource profile name; find one with taproot datasource list <pattern>')
     .option('--env <env>', 'environment (e.g. qa, stg); pair with --service when no --datasource is given')
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .option('--service <service>', 'service name; pair with --env')
-    .option('--sql <native>', 'native query text: SQL, Redis command, or gRPC Service/Method')
-    .option('--query <native>', 'same as --sql; reads better for a Redis command or a gRPC Service/Method')
+    .option('--sql <native>', 'native query text: SQL, Redis command, gRPC Service/Method, or Kafka verb')
+    .option('--query <native>', 'same as --sql; reads better for a Redis command, a gRPC Service/Method or a Kafka verb. Kafka verbs: topics [MATCH <glob>], describe <topic>, groups [MATCH <glob>], lag GROUP <id>, lag TOPIC <name>')
     .option('--param <key=value>', 'repeatable', (v, p: string[]) => (p || []).concat(v), [])
     .option('--allow-discovery', 'fall back to probing kubectl/teleport targets when no profile or KB entry resolves the env+service. Off by default for reproducibility. Needs the user\'s explicit go-ahead.', false)
     .option('--allow-mutate', 'allow mutating query. Needs the user\'s explicit go-ahead.', false)

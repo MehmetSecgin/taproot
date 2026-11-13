@@ -2,7 +2,7 @@ import { environmentPolicy } from './app.js';
 import type { AppContext } from './app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflicts.js';
 import { runDatasourceConnectors } from './connector-runner.js';
-import { accessDenied, classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
+import { classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
 import { parseKeyValuePairs } from './key-value.js';
 import { normalizeNamespace, normalizeService } from './naming.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
@@ -203,9 +203,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     report.log(`datasource ready (${datasource.name})`);
   } catch (error) {
     return failure(error, {});
-  }
-  if (datasource.env && environmentPolicy(ctx, datasource.env).denyKinds.includes(datasource.kind)) {
-    return failure(accessDenied(`environment policy for '${datasource.env}' denies datasource kind '${datasource.kind}' (environmentPolicies.${datasource.env}.denyKinds).`), {});
   }
 
   const sessionId = deps.openSession?.(datasource);

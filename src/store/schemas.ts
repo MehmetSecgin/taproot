@@ -49,7 +49,6 @@ export const EnvironmentPolicySchema = z.object({
   allowDiscoveryByDefault: z.boolean().default(false),
   preferredAccessMethods: z.array(z.string()).default([]),
   targetPreference: z.array(z.string()).default([]),
-  denyKinds: z.array(z.string()).default([]),
 });
 
 export const RuntimeConfigSchema = z.object({

@@ -1,6 +1,6 @@
 ---
 name: taproot
-description: Use whenever a task runs, names, or points at the `taproot` CLI, or needs to read a MySQL/TiDB database, Redis/Dragonfly cache, or gRPC endpoint through a datasource profile. Also use for TapRoot doctor checks, connector or auth failures (Teleport, kubectl port-forwards), and KB resolution, and instead of ad-hoc `mysql`, `redis-cli`, `grpcurl` or `tsh` commands.
+description: Use whenever a task runs, names, or points at the `taproot` CLI, or needs to read a MySQL/TiDB database, Redis/Dragonfly cache, gRPC endpoint, or Kafka topic, consumer group or lag through a datasource profile. Also use for TapRoot doctor checks, connector or auth failures (Teleport, kubectl port-forwards), and KB resolution, and instead of ad-hoc `mysql`, `redis-cli`, `grpcurl` or `tsh` commands.
 ---
 
 # TapRoot

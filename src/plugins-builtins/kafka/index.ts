@@ -1,84 +1,72 @@
-import net from 'node:net';
-import tls from 'node:tls';
-import type { ISocketFactory } from 'kafkajs';
+import type { Admin } from '@platformatic/kafka';
 import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
+import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { str } from '../../core/strings.js';
-import { parseKeyValuePairs } from '../../core/key-value.js';
 
-export interface KafkaAdmin {
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  listTopics(): Promise<string[]>;
-  fetchTopicMetadata(options: { topics: string[] }): Promise<{ topics: Array<{ name: string; partitions: Array<{ partitionId: number; leader: number; replicas: number[]; isr: number[] }> }> }>;
-  fetchTopicOffsets(topic: string): Promise<Array<{ partition: number; high: string; low: string }>>;
-  listGroups(): Promise<{ groups: Array<{ groupId: string; protocolType: string }> }>;
-  describeGroups(groupIds: string[]): Promise<{ groups: Array<{ groupId: string; state: string; protocol: string }> }>;
-  fetchOffsets(options: { groupId: string; topics?: string[] }): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: string }> }>>;
-}
+const LATEST_OFFSET = -1n;
+const EARLIEST_OFFSET = -2n;
+const TIMEOUT_CODE = 'PLT_KFK_TIMEOUT';
 
-export type KafkaAdminFactory = (ds: QueryRequest['datasource'], creds: Record<string, string>) => Promise<KafkaAdmin>;
+type CallOptions = Pick<QueryRequest, 'timeoutMs' | 'signal'>
 
-const HOST_PORT = /^[^\s:=,]+:\d{1,5}$/;
+interface Table { columns: string[]; rows: unknown[][] }
 
-export function parseBrokerMap(hint: string | undefined): Map<string, string> {
-  const raw = str(hint).trim();
-  if (!raw) return new Map();
-  const pairs = parseKeyValuePairs('brokerMap hint', raw.split(',').map((p) => p.trim()));
-  for (const [from, to] of Object.entries(pairs)) {
-    if (!HOST_PORT.test(from) || !HOST_PORT.test(to)) {
-      throw badInput(`Invalid brokerMap hint entry '${from}=${to}'. Expected <advertised host:port>=<local host:port>[,...].`);
-    }
-  }
-  return new Map(Object.entries(pairs));
-}
-
-export function brokerSocketFactory(map: Map<string, string>): ISocketFactory {
-  return ({ host, port, ssl, onConnect }) => {
-    const target = map.get(`${host}:${port}`);
-    const split = target ? target.lastIndexOf(':') : -1;
-    const toHost = target ? target.slice(0, split) : host;
-    const toPort = target ? Number(target.slice(split + 1)) : port;
-    const socket = ssl
-      ? tls.connect({ ...ssl, host: toHost, port: toPort, servername: host }, onConnect)
-      : net.connect({ host: toHost, port: toPort }, onConnect);
-    socket.setKeepAlive(true, 60000);
-    return socket;
-  };
-}
-
-async function kafkajsAdmin(ds: QueryRequest['datasource'], creds: Record<string, string>): Promise<KafkaAdmin> {
-  const brokerMap = parseBrokerMap(ds.resolverHints?.brokerMap);
-  let kafkajs: typeof import('kafkajs');
-  try {
-    kafkajs = await import('kafkajs');
-  } catch {
-    throw new Error("kafka plugin needs the optional 'kafkajs' dependency; reinstall TapRoot with optional dependencies.");
-  }
+async function openAdmin(ds: QueryRequest['datasource'], creds: Record<string, string>, timeoutMs: number | undefined): Promise<Admin> {
+  const { Admin: AdminClient } = await import('@platformatic/kafka');
   const host = str(ds.connection.host || '127.0.0.1');
   const port = Number(ds.connection.port || 9092);
+  const requestTimeout = timeoutMs && timeoutMs > 0 ? timeoutMs : RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs;
   const sasl = creds.user && creds.password
-    ? { mechanism: 'plain' as const, username: String(creds.user), password: String(creds.password) }
+    ? { mechanism: 'PLAIN' as const, username: String(creds.user), password: String(creds.password) }
     : undefined;
-  const kafka = new kafkajs.Kafka({
+  return new AdminClient({
     clientId: 'taproot',
-    brokers: [`${host}:${port}`],
-    ssl: Boolean(ds.connection.ssl),
+    bootstrapBrokers: [`${host}:${port}`],
+    connectTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
+    timeout: requestTimeout,
+    requestTimeout,
+    retries: 1,
+    ...(ds.connection.ssl ? { tls: {} } : {}),
     ...(sasl ? { sasl } : {}),
-    ...(brokerMap.size ? { socketFactory: brokerSocketFactory(brokerMap) } : {}),
-    connectionTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
-    logLevel: kafkajs.logLevel.NOTHING,
   });
-  return kafka.admin({ retry: { retries: 1 } }) as unknown as KafkaAdmin;
 }
 
-let adminFactory: KafkaAdminFactory = kafkajsAdmin;
+async function abortable<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
 
-export function setKafkaAdminFactory(factory: KafkaAdminFactory | undefined): void {
-  adminFactory = factory || kafkajsAdmin;
+function isTimeout(error: unknown): boolean {
+  const { code, errors } = error as { code?: string; errors?: unknown[] };
+  return code === TIMEOUT_CODE || Boolean(errors?.some(isTimeout));
+}
+
+async function withAdmin<T>(ds: QueryRequest['datasource'], creds: Record<string, string>, { timeoutMs, signal }: CallOptions, run: (admin: Admin) => Promise<T>): Promise<T> {
+  signal?.throwIfAborted();
+  const admin = await openAdmin(ds, creds, timeoutMs);
+  try {
+    return await abortable(run(admin), signal);
+  } catch (error) {
+    signal?.throwIfAborted();
+    if (timeoutMs && isTimeout(error)) throw queryTimeoutError(timeoutMs);
+    throw error;
+  } finally {
+    await admin.close().catch(() => undefined);
+  }
 }
 
 function globToRegExp(glob: string): RegExp {
@@ -92,93 +80,105 @@ function matchFilter(tokens: string[], verb: string): RegExp | undefined {
   throw badInput(`kafka ${verb} takes no arguments or MATCH <glob>.`);
 }
 
-interface Table { columns: string[]; rows: unknown[][] }
+function text(offset: bigint | undefined): string | null {
+  return offset === undefined ? null : String(offset);
+}
 
-async function topics(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
+async function offsetsAt(admin: Admin, partitionsByTopic: Map<string, number[]>, timestamp: bigint): Promise<Map<string, Map<number, bigint>>> {
+  const topics = [...partitionsByTopic]
+    .filter(([, partitions]) => partitions.length > 0)
+    .map(([name, partitions]) => ({ name, partitions: partitions.map((partitionIndex) => ({ partitionIndex, timestamp })) }));
+  const listed = topics.length ? await admin.listOffsets({ topics }) : [];
+  return new Map(listed.map((t) => [t.name, new Map(t.partitions.map((p) => [p.partitionIndex, p.offset]))]));
+}
+
+async function topics(admin: Admin, tokens: string[]): Promise<Table> {
   const match = matchFilter(tokens, 'topics');
   const names = (await admin.listTopics()).filter((t) => !match || match.test(t));
-  const meta = names.length ? (await admin.fetchTopicMetadata({ topics: names })).topics : [];
-  const rows = meta
-    .map((t) => [t.name, t.partitions.length, t.partitions[0]?.replicas.length ?? 0])
+  const meta = names.length ? (await admin.metadata({ topics: names })).topics : new Map();
+  const rows = [...meta]
+    .map(([name, t]) => [name, t.partitionsCount, t.partitions[0]?.replicas.length ?? 0])
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   return { columns: ['topic', 'partitions', 'replicationFactor'], rows };
 }
 
-async function describe(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
+async function describe(admin: Admin, tokens: string[]): Promise<Table> {
   if (tokens.length !== 2) throw badInput('kafka describe takes exactly one topic: describe <topic>.');
   const topic = String(tokens[1]);
-  const [meta, offsets] = await Promise.all([admin.fetchTopicMetadata({ topics: [topic] }), admin.fetchTopicOffsets(topic)]);
-  const byPartition = new Map(offsets.map((o) => [o.partition, o]));
-  const partitions = meta.topics[0]?.partitions || [];
-  const rows = [...partitions]
-    .sort((a, b) => a.partitionId - b.partitionId)
-    .map((p) => [p.partitionId, p.leader, p.replicas.join(','), p.isr.join(','), byPartition.get(p.partitionId)?.low ?? null, byPartition.get(p.partitionId)?.high ?? null]);
+  const partitions = (await admin.metadata({ topics: [topic] })).topics.get(topic)?.partitions || [];
+  const requested = new Map([[topic, partitions.map((_, index) => index)]]);
+  const [low, high] = await Promise.all([offsetsAt(admin, requested, EARLIEST_OFFSET), offsetsAt(admin, requested, LATEST_OFFSET)]);
+  const rows = partitions.map((p, index) => [index, p.leader, p.replicas.join(','), p.isr.join(','), text(low.get(topic)?.get(index)), text(high.get(topic)?.get(index))]);
   return { columns: ['partition', 'leader', 'replicas', 'isr', 'logStart', 'logEnd'], rows };
 }
 
-async function groups(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
+async function groups(admin: Admin, tokens: string[]): Promise<Table> {
   const match = matchFilter(tokens, 'groups');
-  const ids = (await admin.listGroups()).groups.map((g) => g.groupId).filter((g) => !match || match.test(g));
-  const described = ids.length ? (await admin.describeGroups(ids)).groups : [];
-  const rows = described.map((g) => [g.groupId, g.state, g.protocol]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  const ids = [...(await admin.listGroups()).keys()].filter((g) => !match || match.test(g));
+  const described = ids.length ? await admin.describeGroups({ groups: ids }) : new Map();
+  const rows = [...described.values()].map((g) => [g.id, g.state, g.protocol]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   return { columns: ['group', 'state', 'protocol'], rows };
 }
 
-interface LagRow { cells: unknown[]; committed: boolean }
+interface CommittedPartition { partitionIndex: number; committedOffset: bigint }
 
-async function groupLagRows(admin: KafkaAdmin, groupId: string, topic: string | undefined, ends: Map<string, Map<number, string>>): Promise<LagRow[]> {
-  const committed = await admin.fetchOffsets({ groupId, ...(topic ? { topics: [topic] } : {}) });
-  const rows: LagRow[] = [];
-  for (const t of committed) {
-    if (!ends.has(t.topic)) {
-      const offsets = await admin.fetchTopicOffsets(t.topic);
-      ends.set(t.topic, new Map(offsets.map((o) => [o.partition, o.high])));
-    }
-    const topicEnds = ends.get(t.topic) as Map<number, string>;
-    for (const p of [...t.partitions].sort((a, b) => a.partition - b.partition)) {
-      const logEnd = topicEnds.get(p.partition);
-      const hasCommit = Number(p.offset) >= 0;
-      const lag = hasCommit && logEnd !== undefined ? Number(logEnd) - Number(p.offset) : null;
-      rows.push({ cells: [groupId, t.topic, p.partition, hasCommit ? p.offset : null, logEnd ?? null, lag, !hasCommit], committed: hasCommit });
-    }
-  }
-  return rows;
+interface LagRow { cells: unknown[]; hasCommit: boolean }
+
+function lagRows(topic: string, partitions: CommittedPartition[], ends: Map<number, bigint> | undefined): LagRow[] {
+  return [...partitions]
+    .sort((a, b) => a.partitionIndex - b.partitionIndex)
+    .map((p) => {
+      const hasCommit = p.committedOffset >= 0n;
+      const logEnd = ends?.get(p.partitionIndex);
+      const lag = hasCommit && logEnd !== undefined ? Number(logEnd - p.committedOffset) : null;
+      return { cells: [topic, p.partitionIndex, hasCommit ? String(p.committedOffset) : null, text(logEnd), lag], hasCommit };
+    });
 }
 
-async function lag(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
+async function lagForGroup(admin: Admin, groupId: string): Promise<Table> {
+  const columns = ['topic', 'partition', 'committed', 'logEnd', 'lag'];
+  const described = await admin.describeGroups({ groups: [groupId] });
+  if (described.get(groupId)?.state === 'Dead') throw badInput(`kafka consumer group '${groupId}' does not exist; list groups with: groups.`);
+  const [group] = await admin.listConsumerGroupOffsets({ groups: [groupId] });
+  const committed = [...(group?.topics || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const ends = await offsetsAt(admin, new Map(committed.map((t) => [t.name, t.partitions.map((p) => p.partitionIndex)])), LATEST_OFFSET);
+  return { columns, rows: committed.flatMap((t) => lagRows(t.name, t.partitions, ends.get(t.name)).map((r) => r.cells)) };
+}
+
+async function lagForTopic(admin: Admin, topic: string): Promise<Table> {
+  const columns = ['group', 'topic', 'partition', 'committed', 'logEnd', 'lag'];
+  const count = (await admin.metadata({ topics: [topic] })).topics.get(topic)?.partitionsCount ?? 0;
+  const partitionIndexes = Array.from({ length: count }, (_, index) => index);
+  const ids = [...(await admin.listGroups()).keys()].sort();
+  if (!ids.length || !count) return { columns, rows: [] };
+  const [ends, offsets] = await Promise.all([
+    offsetsAt(admin, new Map([[topic, partitionIndexes]]), LATEST_OFFSET),
+    admin.listConsumerGroupOffsets({ groups: ids.map((groupId) => ({ groupId, topics: [{ name: topic, partitionIndexes }] })) }),
+  ]);
+  const rows = [...offsets]
+    .sort((a, b) => a.groupId.localeCompare(b.groupId))
+    .flatMap((g) => {
+      const groupRows = g.topics.filter((t) => t.name === topic).flatMap((t) => lagRows(t.name, t.partitions, ends.get(t.name)));
+      return groupRows.some((r) => r.hasCommit) ? groupRows.map((r) => [g.groupId, ...r.cells]) : [];
+    });
+  return { columns, rows };
+}
+
+async function lag(admin: Admin, tokens: string[]): Promise<Table> {
   const selector = tokens[1]?.toUpperCase();
   if (tokens.length !== 3 || (selector !== 'GROUP' && selector !== 'TOPIC')) {
     throw badInput('kafka lag needs exactly one selector: lag GROUP <id> or lag TOPIC <name>.');
   }
   const value = String(tokens[2]);
-  const columns = ['group', 'topic', 'partition', 'committed', 'logEnd', 'lag', 'noCommit'];
-  const ends = new Map<string, Map<number, string>>();
-  if (selector === 'GROUP') return { columns, rows: (await groupLagRows(admin, value, undefined, ends)).map((r) => r.cells) };
-  const ids = (await admin.listGroups()).groups.map((g) => g.groupId).sort();
-  const rows: unknown[][] = [];
-  for (const id of ids) {
-    const groupRows = await groupLagRows(admin, id, value, ends);
-    if (groupRows.some((r) => r.committed)) rows.push(...groupRows.map((r) => r.cells));
-  }
-  return { columns, rows };
+  return selector === 'GROUP' ? lagForGroup(admin, value) : lagForTopic(admin, value);
 }
 
-const VERBS: Record<string, (admin: KafkaAdmin, tokens: string[]) => Promise<Table>> = {
+const VERBS: Record<string, (admin: Admin, tokens: string[]) => Promise<Table>> = {
   TOPICS: topics,
   DESCRIBE: describe,
   GROUPS: groups,
   LAG: lag,
 };
-
-async function withAdmin<T>(ds: QueryRequest['datasource'], creds: Record<string, string>, run: (admin: KafkaAdmin) => Promise<T>): Promise<T> {
-  const admin = await adminFactory(ds, creds);
-  await admin.connect();
-  try {
-    return await run(admin);
-  } finally {
-    await admin.disconnect().catch(() => undefined);
-  }
-}
 
 export const kafkaPlugin: TapRootPlugin = {
   manifest: {
@@ -188,7 +188,7 @@ export const kafkaPlugin: TapRootPlugin = {
 
   async doctor(input): Promise<DoctorCheck[]> {
     try {
-      const count = await withAdmin(input.datasource, input.credentials, async (admin) => (await admin.listTopics()).length);
+      const count = await withAdmin(input.datasource, input.credentials, { signal: undefined }, async (admin) => (await admin.listTopics()).length);
       return [{ check: 'kafka metadata', status: DoctorStatus.Ok, detail: `broker answered; ${count} topic(s)` }];
     } catch (error) {
       const detail = ((error as Error).message || String(error)).slice(0, 400);
@@ -203,7 +203,7 @@ export const kafkaPlugin: TapRootPlugin = {
     const verb = str(tokens[0]).toUpperCase();
     const run = VERBS[verb];
     if (!run) throw badInput(`kafka verb '${verb || '(none)'}' not supported; use topics, describe, groups or lag.`);
-    const table = await withAdmin(request.datasource, creds, (admin) => run(admin, tokens));
+    const table = await withAdmin(request.datasource, creds, request, (admin) => run(admin, tokens));
     return {
       datasource: request.datasource.name,
       plugin: 'kafka',
