@@ -58,16 +58,16 @@ function matchFilter(tokens: string[], verb: string): RegExp | undefined {
   throw badInput(`kafka ${verb} takes no arguments or MATCH <glob>.`);
 }
 
-interface Table { columns: string[]; rows: unknown[][]; warnings: string[] }
+interface Table { columns: string[]; rows: unknown[][] }
 
 async function topics(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
   const match = matchFilter(tokens, 'topics');
-  const names = (await admin.listTopics()).filter((t) => !match || match.test(t)).sort();
+  const names = (await admin.listTopics()).filter((t) => !match || match.test(t));
   const meta = names.length ? (await admin.fetchTopicMetadata({ topics: names })).topics : [];
   const rows = meta
     .map((t) => [t.name, t.partitions.length, t.partitions[0]?.replicas.length ?? 0])
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-  return { columns: ['topic', 'partitions', 'replicationFactor'], rows, warnings: [] };
+  return { columns: ['topic', 'partitions', 'replicationFactor'], rows };
 }
 
 async function describe(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
@@ -79,20 +79,22 @@ async function describe(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
   const rows = [...partitions]
     .sort((a, b) => a.partitionId - b.partitionId)
     .map((p) => [p.partitionId, p.leader, p.replicas.join(','), p.isr.join(','), byPartition.get(p.partitionId)?.low ?? null, byPartition.get(p.partitionId)?.high ?? null]);
-  return { columns: ['partition', 'leader', 'replicas', 'isr', 'logStart', 'logEnd'], rows, warnings: [] };
+  return { columns: ['partition', 'leader', 'replicas', 'isr', 'logStart', 'logEnd'], rows };
 }
 
 async function groups(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
   const match = matchFilter(tokens, 'groups');
-  const ids = (await admin.listGroups()).groups.map((g) => g.groupId).filter((g) => !match || match.test(g)).sort();
+  const ids = (await admin.listGroups()).groups.map((g) => g.groupId).filter((g) => !match || match.test(g));
   const described = ids.length ? (await admin.describeGroups(ids)).groups : [];
   const rows = described.map((g) => [g.groupId, g.state, g.protocol]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-  return { columns: ['group', 'state', 'protocol'], rows, warnings: [] };
+  return { columns: ['group', 'state', 'protocol'], rows };
 }
 
-async function groupLagRows(admin: KafkaAdmin, groupId: string, topic: string | undefined, ends: Map<string, Map<number, string>>): Promise<unknown[][]> {
+interface LagRow { cells: unknown[]; committed: boolean }
+
+async function groupLagRows(admin: KafkaAdmin, groupId: string, topic: string | undefined, ends: Map<string, Map<number, string>>): Promise<LagRow[]> {
   const committed = await admin.fetchOffsets({ groupId, ...(topic ? { topics: [topic] } : {}) });
-  const rows: unknown[][] = [];
+  const rows: LagRow[] = [];
   for (const t of committed) {
     if (!ends.has(t.topic)) {
       const offsets = await admin.fetchTopicOffsets(t.topic);
@@ -103,7 +105,7 @@ async function groupLagRows(admin: KafkaAdmin, groupId: string, topic: string | 
       const logEnd = topicEnds.get(p.partition);
       const hasCommit = Number(p.offset) >= 0;
       const lag = hasCommit && logEnd !== undefined ? Number(logEnd) - Number(p.offset) : null;
-      rows.push([groupId, t.topic, p.partition, hasCommit ? p.offset : null, logEnd ?? null, lag, !hasCommit]);
+      rows.push({ cells: [groupId, t.topic, p.partition, hasCommit ? p.offset : null, logEnd ?? null, lag, !hasCommit], committed: hasCommit });
     }
   }
   return rows;
@@ -117,14 +119,14 @@ async function lag(admin: KafkaAdmin, tokens: string[]): Promise<Table> {
   const value = String(tokens[2]);
   const columns = ['group', 'topic', 'partition', 'committed', 'logEnd', 'lag', 'noCommit'];
   const ends = new Map<string, Map<number, string>>();
-  if (selector === 'GROUP') return { columns, rows: await groupLagRows(admin, value, undefined, ends), warnings: [] };
+  if (selector === 'GROUP') return { columns, rows: (await groupLagRows(admin, value, undefined, ends)).map((r) => r.cells) };
   const ids = (await admin.listGroups()).groups.map((g) => g.groupId).sort();
   const rows: unknown[][] = [];
   for (const id of ids) {
     const groupRows = await groupLagRows(admin, id, value, ends);
-    if (groupRows.some((r) => r[6] === false)) rows.push(...groupRows);
+    if (groupRows.some((r) => r.committed)) rows.push(...groupRows.map((r) => r.cells));
   }
-  return { columns, rows, warnings: [] };
+  return { columns, rows };
 }
 
 const VERBS: Record<string, (admin: KafkaAdmin, tokens: string[]) => Promise<Table>> = {
@@ -175,7 +177,7 @@ export const kafkaPlugin: TapRootPlugin = {
       query: { native: request.query },
       result: { columns: table.columns, rows: table.rows },
       timings: { startedAt, endedAt: nowIso(), durationMs: Date.now() - start },
-      warnings: table.warnings,
+      warnings: [],
       classification: 'success',
     };
   },

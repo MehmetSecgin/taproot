@@ -204,6 +204,9 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   } catch (error) {
     return failure(error, {});
   }
+  if (datasource.env && environmentPolicy(ctx, datasource.env).denyKinds.includes(datasource.kind)) {
+    return failure(accessDenied(`environment policy for '${datasource.env}' denies datasource kind '${datasource.kind}' (environmentPolicies.${datasource.env}.denyKinds).`), {});
+  }
 
   const sessionId = deps.openSession?.(datasource);
   let params: Record<string, string>;
@@ -230,10 +233,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
 
-  const deniedKinds = environmentPolicy(ctx, datasource.env).denyKinds || [];
-  if (datasource.env && deniedKinds.includes(datasource.kind)) {
-    return failure(accessDenied(`environment policy for '${datasource.env}' denies datasource kind '${datasource.kind}' (environmentPolicies.${datasource.env}.denyKinds).`), { schemaContext });
-  }
   const capability = request.allowMutate ? 'executeMutate' : 'executeRead';
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) {

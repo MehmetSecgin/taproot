@@ -70,6 +70,17 @@ describe('kafka plugin', () => {
     expect(kafkaPlugin.manifest.capabilities).toEqual(['doctor', 'executeRead']);
   });
 
+  it('builds only an admin client, never a consumer or producer', () => {
+    // arrange
+    const source = fs.readFileSync(path.join(process.cwd(), 'src/plugins-builtins/kafka/index.ts'), 'utf8');
+
+    // act
+    const clients = source.match(/\.(consumer|producer|admin)\(/g) || [];
+
+    // assert
+    expect(clients).toEqual(['.admin(']);
+  });
+
   it('lists topics filtered by MATCH with partition counts', async () => {
     // arrange
     useFake();
