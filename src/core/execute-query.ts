@@ -2,7 +2,7 @@ import { environmentPolicy } from './app.js';
 import type { AppContext } from './app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflicts.js';
 import { runDatasourceConnectors } from './connector-runner.js';
-import { classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
+import { accessDenied, classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
 import { parseKeyValuePairs } from './key-value.js';
 import { normalizeNamespace, normalizeService } from './naming.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
@@ -230,6 +230,10 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     else if (catalog.outcome === 'fetched') report.log(`schema catalog cached: ${catalog.tableCount} tables`);
   });
 
+  const deniedKinds = environmentPolicy(ctx, datasource.env).denyKinds || [];
+  if (datasource.env && deniedKinds.includes(datasource.kind)) {
+    return failure(accessDenied(`environment policy for '${datasource.env}' denies datasource kind '${datasource.kind}' (environmentPolicies.${datasource.env}.denyKinds).`), { schemaContext });
+  }
   const capability = request.allowMutate ? 'executeMutate' : 'executeRead';
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) {

@@ -14,7 +14,7 @@
     "taprootd": "dist/daemon-main.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts src/daemon-main.ts --format esm --dts --out-dir dist --clean --external keytar",
+    "build": "tsup src/index.ts src/daemon-main.ts --format esm --dts --out-dir dist --clean --external keytar --external kafkajs",
     "dev": "tsx src/index.ts",
     "check": "tsc --noEmit",
     "test": "npm run build && vitest run",
@@ -30,6 +30,7 @@
     "zod": "^4.6.7"
   },
   "optionalDependencies": {
+    "kafkajs": "^2.2.4",
     "keytar": "^7.9.0"
   },
   "devDependencies": {

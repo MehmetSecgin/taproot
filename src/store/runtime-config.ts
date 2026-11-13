@@ -8,6 +8,7 @@ const DEFAULT_ENVIRONMENT_POLICY: EnvironmentPolicy = {
   allowDiscoveryByDefault: false,
   preferredAccessMethods: [],
   targetPreference: [],
+  denyKinds: [],
 };
 
 function normalizeKey(value?: string): string {

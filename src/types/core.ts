@@ -5,6 +5,7 @@ export const DatasourceKind = {
   TeleportMysql: 'teleport-mysql',
   Redis: 'redis',
   Grpc: 'grpc',
+  Kafka: 'kafka',
 } as const;
 export type DatasourceKind = (typeof DatasourceKind)[keyof typeof DatasourceKind];
 export const SQL_DATASOURCE_KINDS: ReadonlySet<string> = new Set([DatasourceKind.Mysql, DatasourceKind.TeleportMysql]);
@@ -69,6 +70,7 @@ export interface EnvironmentPolicy {
   allowDiscoveryByDefault: boolean;
   preferredAccessMethods: string[];
   targetPreference: string[];
+  denyKinds: string[];
 }
 
 export interface RuntimeConfig {
