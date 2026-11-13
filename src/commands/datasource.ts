@@ -91,7 +91,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   ds.command('add')
     .description('Save a datasource profile; re-running with the same --name replaces it')
     .requiredOption('--name <name>', 'profile name, by convention <env>-<service>[-<namespace>]')
-    .requiredOption('--kind <kind>', 'mysql, teleport-mysql, redis or grpc')
+    .requiredOption('--kind <kind>', 'mysql, teleport-mysql, redis, grpc or kafka')
     .option('--credential-ref <ref>', 'defaults to --env')
     .option('--env <env>', 'environment (e.g. qa, stg)')
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')

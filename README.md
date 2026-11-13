@@ -1,10 +1,10 @@
 # TapRoot
 
-CLI for querying MySQL/TiDB, Redis and gRPC datasources. Every command prints one line of JSON. Learn commands with `taproot --help` and `taproot <command> --help`.
+CLI for querying MySQL/TiDB, Redis, gRPC and (read-only) Kafka datasources. Every command prints one line of JSON. Learn commands with `taproot --help` and `taproot <command> --help`.
 
 ## Install
 
-Requires Node.js 20 or later. Install only the clients your datasources use: `redis-cli` (redis), `tsh` (teleport-mysql), `kubectl` (port-forwarded datasources).
+Requires Node.js 22 or later. Install only the clients your datasources use: `redis-cli` (redis), `tsh` (teleport-mysql), `kubectl` (port-forwarded datasources).
 
 ```bash
 git clone https://github.com/MehmetSecgin/taproot.git
