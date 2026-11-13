@@ -64,6 +64,7 @@ export function queryRequest(overrides: Partial<QueryExecutionRequest> = {}): Qu
     rowsObject: false,
     jsonExtract: [],
     allowFlush: false,
+    allowKeys: false,
     skipProtoValidate: false,
     timeoutMs: 5_000,
     ...overrides,

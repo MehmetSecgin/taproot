@@ -15,6 +15,7 @@ export interface QueryOpts {
   proto?: string;
   protoRoot?: string;
   allowFlush?: boolean;
+  allowKeys?: boolean;
   requestJson?: string;
   skipProtoValidate?: boolean;
   timeout?: string;

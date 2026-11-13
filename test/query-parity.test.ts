@@ -44,6 +44,7 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
     rowsObject: false,
     jsonExtract: [],
     allowFlush: false,
+    allowKeys: false,
     skipProtoValidate: false,
     timeoutMs: 5_000,
     ...overrides,
