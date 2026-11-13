@@ -1,7 +1,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { kafkaPlugin, setKafkaAdminFactory, type KafkaAdmin } from '../src/plugins-builtins/kafka/index.js';
+import net from 'node:net';
+import { brokerSocketFactory, kafkaPlugin, parseBrokerMap, setKafkaAdminFactory, type KafkaAdmin } from '../src/plugins-builtins/kafka/index.js';
 import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
@@ -190,5 +191,51 @@ describe('kafka plugin', () => {
     expect(out.status).not.toBe(0);
     expect(out.stdout).toContain('ACCESS_DENIED');
     expect(out.stdout).toContain("denies datasource kind 'kafka'");
+  });
+});
+
+describe('kafka brokerMap hint', () => {
+  async function connectThrough(factory: ReturnType<typeof brokerSocketFactory>, host: string, port: number): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const socket = factory({ host, port, ssl: undefined as never, onConnect: () => { const remote = socket.remotePort as number; socket.end(); resolve(remote); } });
+      socket.on('error', reject);
+    });
+  }
+
+  async function listen(): Promise<{ server: net.Server; port: number }> {
+    const server = net.createServer((s) => s.end());
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    return { server, port: (server.address() as net.AddressInfo).port };
+  }
+
+  it('routes a mapped advertised broker to the local address', async () => {
+    const { server, port } = await listen();
+    try {
+      const factory = brokerSocketFactory(parseBrokerMap(`broker-0.cluster.example:9092=127.0.0.1:${port}`));
+      expect(await connectThrough(factory, 'broker-0.cluster.example', 9092)).toBe(port);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('connects unmapped brokers unchanged', async () => {
+    const { server, port } = await listen();
+    try {
+      const factory = brokerSocketFactory(parseBrokerMap('broker-0.cluster.example:9092=127.0.0.1:1'));
+      expect(await connectThrough(factory, '127.0.0.1', port)).toBe(port);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('parses several comma-separated entries', () => {
+    expect([...parseBrokerMap('a:1=127.0.0.1:2, b:3=127.0.0.1:4')]).toEqual([['a:1', '127.0.0.1:2'], ['b:3', '127.0.0.1:4']]);
+  });
+
+  it.each(['broker-0:9092', 'broker-0=127.0.0.1:1', 'broker-0:9092=localhost', '=127.0.0.1:1'])('refuses bad syntax %s as BAD_INPUT naming the hint', (hint) => {
+    expect(() => parseBrokerMap(hint)).toThrow(/brokerMap/);
+    let error: unknown;
+    try { parseBrokerMap(hint); } catch (e) { error = e; }
+    expect((error as { code?: string }).code).toBe('BAD_INPUT');
   });
 });

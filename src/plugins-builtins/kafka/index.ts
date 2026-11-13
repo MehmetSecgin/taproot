@@ -1,9 +1,13 @@
+import net from 'node:net';
+import tls from 'node:tls';
+import type { ISocketFactory } from 'kafkajs';
 import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
 import { badInput, classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { nowIso } from '../../core/time.js';
 import { str } from '../../core/strings.js';
+import { parseKeyValuePairs } from '../../core/key-value.js';
 
 export interface KafkaAdmin {
   connect(): Promise<void>;
@@ -18,7 +22,36 @@ export interface KafkaAdmin {
 
 export type KafkaAdminFactory = (ds: QueryRequest['datasource'], creds: Record<string, string>) => Promise<KafkaAdmin>;
 
+const HOST_PORT = /^[^\s:=,]+:\d{1,5}$/;
+
+export function parseBrokerMap(hint: string | undefined): Map<string, string> {
+  const raw = str(hint).trim();
+  if (!raw) return new Map();
+  const pairs = parseKeyValuePairs('brokerMap hint', raw.split(',').map((p) => p.trim()));
+  for (const [from, to] of Object.entries(pairs)) {
+    if (!HOST_PORT.test(from) || !HOST_PORT.test(to)) {
+      throw badInput(`Invalid brokerMap hint entry '${from}=${to}'. Expected <advertised host:port>=<local host:port>[,...].`);
+    }
+  }
+  return new Map(Object.entries(pairs));
+}
+
+export function brokerSocketFactory(map: Map<string, string>): ISocketFactory {
+  return ({ host, port, ssl, onConnect }) => {
+    const target = map.get(`${host}:${port}`);
+    const split = target ? target.lastIndexOf(':') : -1;
+    const toHost = target ? target.slice(0, split) : host;
+    const toPort = target ? Number(target.slice(split + 1)) : port;
+    const socket = ssl
+      ? tls.connect({ ...ssl, host: toHost, port: toPort, servername: host }, onConnect)
+      : net.connect({ host: toHost, port: toPort }, onConnect);
+    socket.setKeepAlive(true, 60000);
+    return socket;
+  };
+}
+
 async function kafkajsAdmin(ds: QueryRequest['datasource'], creds: Record<string, string>): Promise<KafkaAdmin> {
+  const brokerMap = parseBrokerMap(ds.resolverHints?.brokerMap);
   let kafkajs: typeof import('kafkajs');
   try {
     kafkajs = await import('kafkajs');
@@ -35,6 +68,7 @@ async function kafkajsAdmin(ds: QueryRequest['datasource'], creds: Record<string
     brokers: [`${host}:${port}`],
     ssl: Boolean(ds.connection.ssl),
     ...(sasl ? { sasl } : {}),
+    ...(brokerMap.size ? { socketFactory: brokerSocketFactory(brokerMap) } : {}),
     connectionTimeout: RUNTIME_CONSTANTS.plugin.dbConnectTimeoutMs,
     logLevel: kafkajs.logLevel.NOTHING,
   });
