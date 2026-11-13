@@ -10,11 +10,13 @@ export const TCP_TIMEOUT_MS = 3000;
 
 export type TcpStatus = 'reachable' | 'refused' | 'timeout' | 'unresolved' | 'error';
 
+export type DoctorAllStatus = TcpStatus | 'fail' | 'skipped';
+
 export interface DoctorAllRow {
   datasource: string;
   kind: string;
-  status: string;
-  detail: string;
+  status: DoctorAllStatus;
+  detail?: string;
   code?: string;
   fix?: string;
 }
@@ -56,18 +58,23 @@ function connectFix(ds: DatasourceProfile): string | undefined {
   return ds.connectors?.length ? `taproot doctor --datasource ${ds.name} --connect` : undefined;
 }
 
+function rowBase(ds: DatasourceProfile): Pick<DoctorAllRow, 'datasource' | 'kind'> {
+  return { datasource: ds.name, kind: ds.kind };
+}
+
 async function tcpRow(ds: DatasourceProfile): Promise<DoctorAllRow> {
-  const base = { datasource: ds.name, kind: ds.kind };
+  const base = rowBase(ds);
   if (!ds.connection.host || !ds.connection.port) {
     return { ...base, status: 'skipped', detail: 'no host and port on the profile; run without --tcp-only' };
   }
   const probe = await probeTcp(ds.connection.host, ds.connection.port);
-  const fix = probe.status === 'reachable' ? undefined : connectFix(ds);
+  if (probe.status === 'reachable') return { ...base, status: 'reachable' };
+  const fix = connectFix(ds);
   return { ...base, ...probe, ...(fix ? { fix } : {}) };
 }
 
 async function fullRow(ctx: AppContext, ds: DatasourceProfile): Promise<DoctorAllRow> {
-  const base = { datasource: ds.name, kind: ds.kind };
+  const base = rowBase(ds);
   const plugin = ctx.pluginRegistry.get(ds.kind);
   if (!plugin?.doctor) return { ...base, status: 'skipped', detail: `no doctor-capable plugin for kind '${ds.kind}'` };
   try {
@@ -76,7 +83,7 @@ async function fullRow(ctx: AppContext, ds: DatasourceProfile): Promise<DoctorAl
     const checks: DoctorCheck[] = await runDatasourceConnectors(input);
     checks.push(...(await plugin.doctor({ datasource: ds, credentials: creds })));
     const failed = checks.find((c) => c.status === DoctorStatus.Fail);
-    if (!failed) return { ...base, status: 'reachable', detail: `${checks.length} check(s) ok` };
+    if (!failed) return { ...base, status: 'reachable' };
     const fix = connectFix(ds);
     return { ...base, status: 'fail', detail: `${failed.check}: ${failed.detail}`, code: classifyError(failed.detail), ...(fix ? { fix } : {}) };
   } catch (error) {

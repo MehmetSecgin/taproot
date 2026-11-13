@@ -103,7 +103,6 @@ describe('doctor --all', () => {
     expect(data.rows.map((r: { datasource: string }) => r.datasource)).toEqual(['qa-cache', 'qa-db']);
     expect(data.rows[0]).toEqual(expect.objectContaining({ status: 'refused', fix: 'taproot doctor --datasource qa-cache --connect' }));
     expect(data.rows[1].fix).toBeUndefined();
-    expect(data.summary).toEqual({ reachable: 0, notReady: 2, skipped: 0, total: 2 });
   });
 
   it('runs plugin doctor per datasource without --tcp-only', () => {
@@ -117,9 +116,21 @@ describe('doctor --all', () => {
     // assert
     expect(out.status).toBe(7);
     const rows = JSON.parse(out.stdout).data.rows;
-    expect(rows[0]).toEqual(expect.objectContaining({ datasource: 'qa-up', status: 'reachable' }));
+    expect(rows[0]).toEqual({ datasource: 'qa-up', kind: 'redis', status: 'reachable' });
     expect(rows[1]).toEqual(expect.objectContaining({ datasource: 'qa-down', status: 'fail' }));
     expect(rows[1].detail).toContain('Connection refused');
+  });
+
+  it('counts a datasource it could not check as not ready', () => {
+    // arrange
+    const env = stateWith([profile('qa-remote', 'qa', 'mysql', 0, { connection: { target: 'remote-db' } })]);
+
+    // act
+    const out = runCli(['doctor', '--all', '--env', 'qa', '--tcp-only'], env);
+
+    // assert
+    expect(out.status).toBe(7);
+    expect(JSON.parse(out.stdout).data.rows[0].status).toBe('skipped');
   });
 
   it('refuses --all without --env', () => {

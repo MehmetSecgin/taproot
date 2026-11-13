@@ -71,13 +71,8 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
           kind: opts.kind,
         });
         const rows = await doctorAll(ctx, selected, Boolean(opts.tcpOnly));
-        const notReady = rows.filter((r) => r.status !== 'reachable' && r.status !== 'skipped').length;
-        printEnvelope(true, {
-          env: opts.env,
-          rows,
-          summary: { reachable: rows.filter((r) => r.status === 'reachable').length, notReady, skipped: rows.filter((r) => r.status === 'skipped').length, total: rows.length },
-        });
-        if (notReady) process.exitCode = EXIT_CODES.NOT_READY;
+        printEnvelope(true, { rows });
+        if (rows.some((r) => r.status !== 'reachable')) process.exitCode = EXIT_CODES.NOT_READY;
         return;
       }
       const logVerbose = verboseLog(ctx);
