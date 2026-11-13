@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { hasDatabase } from '../plugins-builtins/redis/index.js';
 import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
@@ -106,12 +107,13 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--teleport-ref <ref>', 'shorthand for --connector-ref teleport=<ref>')
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
-    .option('--strict-keyspace', 'redis: refuse KEYS unless --allow-keys, and require SCAN to carry COUNT (max 1000); SCAN rows capped at 200', false)
+    .option('--strict-keyspace', 'redis: refuse KEYS unless --allow-keys, and require SCAN to carry COUNT (max 200)', false)
     .option('--require-database', 'redis: refuse queries when --database is unset instead of falling back to database 0', false)
     .option('--confidence <n>', 'confidence 0..1', '0.8')
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
       const ctx = getCtx();
+      if (opts.requireDatabase && !hasDatabase(opts.database)) throw badInput('--require-database needs --database <n>; without it every query on this datasource would fail.');
       const credentialRef = opts.credentialRef || opts.env;
       if (!credentialRef) throw badInput('datasource add needs --env or --credential-ref; the credential ref defaults to --env.');
       const profile = {

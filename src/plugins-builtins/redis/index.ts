@@ -71,8 +71,7 @@ const SUBCOMMAND_ALLOW: Record<string, Set<string>> = {
 // bounded alternative.
 const KEYS_COMMANDS = new Set<string>(['KEYS']);
 
-export const SCAN_COUNT_MAX = 1000;
-export const SCAN_ROWS_MAX = 200;
+export const SCAN_COUNT_MAX = 200;
 
 type CommandTier = 'read' | 'keys' | 'mutate' | 'flush';
 
@@ -155,19 +154,25 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
 }
 
 function assertScanBounded(tokens: string[]): void {
-  const at = tokens.findIndex((t, i) => i > 0 && t.toUpperCase() === 'COUNT');
-  if (at < 0) {
+  let countArg: string | undefined;
+  for (let i = 2; i < tokens.length; i += 2) {
+    if (str(tokens[i]).toUpperCase() === 'COUNT') countArg = tokens[i + 1];
+  }
+  if (countArg === undefined) {
     throw new Error(`redis SCAN needs an explicit COUNT (at most ${SCAN_COUNT_MAX}), e.g. SCAN 0 MATCH user:* COUNT 100.`);
   }
-  const count = Number(tokens[at + 1]);
+  const count = Number(countArg);
   if (!Number.isInteger(count) || count < 1 || count > SCAN_COUNT_MAX) {
     throw new Error(`redis SCAN COUNT must be an integer from 1 to ${SCAN_COUNT_MAX}.`);
   }
 }
 
+export function hasDatabase(database: unknown): boolean {
+  return database !== undefined && database !== null && String(database) !== '';
+}
+
 function assertDatabaseSet(ds: QueryRequest['datasource']): void {
-  const db = ds.connection.database;
-  if (ds.policy?.requireDatabase && (db === undefined || db === null || String(db) === '')) {
+  if (ds.policy?.requireDatabase && !hasDatabase(ds.connection.database)) {
     throw misconfiguredDatasource(`redis datasource '${ds.name}' requires a database number but has none; set it with 'taproot datasource add ... --database <n>'.`);
   }
 }
@@ -189,9 +194,8 @@ function redisCli(
     '--no-auth-warning',
   ];
   if (decode) args.push('--no-raw');
-  const db = ds.connection.database;
-  if (db !== undefined && db !== null && String(db) !== '') {
-    args.push('-n', String(db));
+  if (hasDatabase(ds.connection.database)) {
+    args.push('-n', String(ds.connection.database));
   }
   if (creds.user) args.push('--user', String(creds.user));
   if (ds.connection.ssl) args.push('--tls');
@@ -404,10 +408,6 @@ export const redisPlugin: TapRootPlugin = {
       const lines = trimmed.split('\n');
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
       rows = lines.map((line) => [line]);
-    }
-    if (verb === 'SCAN' && policy?.strictKeyspace && rows.length > SCAN_ROWS_MAX) {
-      rows = rows.slice(0, SCAN_ROWS_MAX);
-      warnings.push(`scan_rows_truncated_to_${SCAN_ROWS_MAX}`);
     }
     return {
       datasource: request.datasource.name,

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { redisPlugin, SCAN_COUNT_MAX, SCAN_ROWS_MAX } from '../src/plugins-builtins/redis/index.js';
+import { redisPlugin, SCAN_COUNT_MAX } from '../src/plugins-builtins/redis/index.js';
 import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
 import { testDatasource } from './helpers/datasource.js';
 import { stubRedisCli } from './helpers/redis-cli-stub.js';
@@ -90,19 +90,6 @@ describe('redis commands', () => {
     await expect(run).rejects.toThrow(/COUNT must be an integer/);
   });
 
-  it('truncates SCAN rows to the cap and warns', async () => {
-    // arrange
-    const lines = Array.from({ length: SCAN_ROWS_MAX + 5 }, (_, i) => `k${i}`).join('\\n');
-    stubRedisCli(`printf '${lines}\\n'\n`);
-
-    // act
-    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 COUNT 100'), {});
-
-    // assert
-    expect(result.result.rows).toHaveLength(SCAN_ROWS_MAX);
-    expect(result.warnings).toContain(`scan_rows_truncated_to_${SCAN_ROWS_MAX}`);
-  });
-
   it('refuses a query when requireDatabase is set and the database is missing', async () => {
     // arrange
     replyWith('v\n', '"v"\n');
@@ -147,6 +134,28 @@ describe('redis commands', () => {
 
     // act
     const result = await redisPlugin.execute!(read(testDatasource('redis', 6379, {}), 'SCAN 0'), {});
+
+    // assert
+    expect(result.result.rows).toEqual([['0']]);
+  });
+
+  it('checks the last COUNT, as Redis does', async () => {
+    // arrange
+    replyWith('0\n', '1) "0"\n');
+
+    // act
+    const run = redisPlugin.execute!(read(strict(), `SCAN 0 COUNT 10 COUNT ${SCAN_COUNT_MAX + 1}`), {});
+
+    // assert
+    await expect(run).rejects.toThrow(/COUNT must be an integer/);
+  });
+
+  it('accepts a MATCH pattern that is literally COUNT', async () => {
+    // arrange
+    replyWith('0\n', '1) "0"\n');
+
+    // act
+    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 MATCH COUNT COUNT 10'), {});
 
     // assert
     expect(result.result.rows).toEqual([['0']]);

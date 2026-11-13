@@ -52,6 +52,29 @@ function addProfile(env: Record<string, string>, extra: string[] = []) {
 }
 
 describe('datasource CRUD', () => {
+  it('datasource add refuses --require-database without --database', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const out = runCli(['datasource', 'add', '--name', 'qa-cache', '--kind', 'redis', '--env', 'qa', '--host', '127.0.0.1', '--port', '6379', '--require-database'], env);
+
+    // assert
+    expect(out.status).not.toBe(0);
+    expect(`${out.stdout}${out.stderr}`).toContain('--require-database needs --database');
+  });
+
+  it('datasource add saves --require-database with --database', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const out = runCli(['datasource', 'add', '--name', 'qa-cache', '--kind', 'redis', '--env', 'qa', '--host', '127.0.0.1', '--port', '6379', '--database', '2', '--require-database'], env);
+
+    // assert
+    expect(out.status).toBe(0);
+  });
+
   it('datasource add creates profile', () => {
     const { env } = setupState();
     const out = addProfile(env);
