@@ -1,11 +1,22 @@
 {
   "name": "@mehmetsecgin/taproot",
   "version": "1.11.0",
-  "private": true,
-  "description": "Universal query orchestration CLI with plugin runtime (DB-first v1)",
+  "description": "CLI for querying MySQL/TiDB, Redis and gRPC datasources, built for AI agents",
+  "keywords": [
+    "cli",
+    "mysql",
+    "tidb",
+    "redis",
+    "grpc",
+    "ai-agents"
+  ],
   "type": "module",
   "license": "MIT",
   "author": "Mehmet Secgin <mehmetascgn@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MehmetSecgin/taproot.git"
+  },
   "engines": {
     "node": ">=20.3"
   },
@@ -13,8 +24,16 @@
     "taproot": "dist/index.js",
     "taprootd": "dist/daemon-main.js"
   },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup src/index.ts src/daemon-main.ts --format esm --dts --out-dir dist --clean --external keytar",
+    "prepublishOnly": "npm run build",
     "dev": "tsx src/index.ts",
     "check": "tsc --noEmit",
     "test": "npm run build && vitest run",

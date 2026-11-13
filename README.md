@@ -7,17 +7,13 @@ CLI for querying MySQL/TiDB, Redis and gRPC datasources. Every command prints on
 Requires Node.js 20 or later. Install only the clients your datasources use: `redis-cli` (redis), `tsh` (teleport-mysql), `kubectl` (port-forwarded datasources).
 
 ```bash
-git clone https://github.com/MehmetSecgin/taproot.git
-cd taproot
-npm ci
-npm run build
-npm link
+npm install -g @mehmetsecgin/taproot
 taproot init
 ```
 
 `taproot init` creates `~/.taproot/` and prints readiness checks. Rerun it any time.
 
-Credentials go to the OS keychain through the optional `keytar` dependency. If `keytar` did not build, they go to an encrypted file under `~/.taproot/config/` instead; npm versions that gate install scripts build it only after `npm approve-scripts keytar` and a reinstall.
+Credentials go to the OS keychain through the optional `keytar` dependency. If `keytar` did not build, they go to an encrypted file under `~/.taproot/config/` instead. npm versions that gate install scripts build it only with `npm install -g --allow-scripts=keytar @mehmetsecgin/taproot`.
 
 | Variable | Effect | Default |
 |---|---|---|
@@ -37,7 +33,7 @@ Credentials go to the OS keychain through the optional `keytar` dependency. If `
 
 ```bash
 mkdir -p ~/.claude/skills
-ln -s "$PWD/skills/taproot" ~/.claude/skills/taproot
+ln -s "$(npm root -g)/@mehmetsecgin/taproot/skills/taproot" ~/.claude/skills/taproot
 ```
 
 ## First query
