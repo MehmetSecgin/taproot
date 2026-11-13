@@ -14,7 +14,7 @@ export interface ReadinessSnapshot {
   readiness: ReadinessState;
 }
 
-const AUTH_OPTIONAL_KINDS = new Set(['redis']);
+const AUTH_OPTIONAL_KINDS = new Set(['redis', 'http']);
 
 function configCheck(ctx: AppContext, createdConfig: boolean): DoctorCheck {
   const exists = fs.existsSync(ctx.paths.runtimeConfigFile);
