@@ -5,6 +5,7 @@ export const DatasourceKind = {
   TeleportMysql: 'teleport-mysql',
   Redis: 'redis',
   Grpc: 'grpc',
+  RabbitMq: 'rabbitmq',
 } as const;
 export type DatasourceKind = (typeof DatasourceKind)[keyof typeof DatasourceKind];
 export const SQL_DATASOURCE_KINDS: ReadonlySet<string> = new Set([DatasourceKind.Mysql, DatasourceKind.TeleportMysql]);
