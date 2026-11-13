@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { DoctorStatus } from '../../types/core.js';
 import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../../types/core.js';
-import { classifyExecutorDoctorCode, spawnErrorMessage } from '../../core/error-classification.js';
+import { classifyExecutorDoctorCode, misconfiguredDatasource, spawnErrorMessage } from '../../core/error-classification.js';
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import { nowIso } from '../../core/time.js';
 import { loadProtobufRoot, resolveProtoRoot, type ProtobufRoot } from '../../core/proto-loader.js';
@@ -16,7 +16,7 @@ const READ_COMMANDS = new Set<string>([
   'SMEMBERS', 'SCARD', 'SISMEMBER', 'SMISMEMBER', 'SRANDMEMBER', 'SINTER', 'SUNION', 'SDIFF', 'SSCAN',
   'ZRANGE', 'ZREVRANGE', 'ZRANGEBYSCORE', 'ZREVRANGEBYSCORE', 'ZRANGEBYLEX', 'ZREVRANGEBYLEX',
   'ZSCORE', 'ZMSCORE', 'ZRANK', 'ZREVRANK', 'ZCARD', 'ZCOUNT', 'ZLEXCOUNT', 'ZSCAN', 'ZRANDMEMBER',
-  'KEYS', 'SCAN', 'RANDOMKEY', 'DBSIZE',
+  'SCAN', 'RANDOMKEY', 'DBSIZE',
   'XLEN', 'XRANGE', 'XREVRANGE', 'XINFO', 'XPENDING',
   'GETBIT', 'BITCOUNT', 'BITPOS',
   'PFCOUNT',
@@ -66,12 +66,20 @@ const SUBCOMMAND_ALLOW: Record<string, Set<string>> = {
   LATENCY: new Set(['LATEST', 'HISTORY', 'GRAPH', 'DOCTOR']),
 };
 
-type CommandTier = 'read' | 'mutate' | 'flush';
+// KEYS is O(N) and blocks the whole instance while it runs. Gated by
+// --allow-keys; SCAN with COUNT is the bounded alternative.
+const KEYS_COMMANDS = new Set<string>(['KEYS']);
+
+export const SCAN_COUNT_MAX = 1000;
+export const SCAN_ROWS_MAX = 200;
+
+type CommandTier = 'read' | 'keys' | 'mutate' | 'flush';
 
 function classifyCommand(verb: string): CommandTier | 'unknown' {
   const v = verb.toUpperCase();
   if (FLUSH_COMMANDS.has(v)) return 'flush';
   if (MUTATE_COMMANDS.has(v)) return 'mutate';
+  if (KEYS_COMMANDS.has(v)) return 'keys';
   if (READ_COMMANDS.has(v)) return 'read';
   return 'unknown';
 }
@@ -93,6 +101,7 @@ interface GateOptions {
   allowMutatePolicy: boolean;
   allowedCapabilities: string[];
   allowFlush: boolean;
+  allowKeys: boolean;
 }
 
 interface AllowedCommand {
@@ -120,6 +129,13 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
       throw new Error(`redis ${verb} subcommand '${sub || '(none)'}' not in allow-list.`);
     }
   }
+  if (tier === 'keys') {
+    if (!opts.allowKeys) {
+      throw new Error(`redis ${verb} is O(N) and blocks the whole instance; use SCAN <cursor> MATCH <pattern> COUNT <n>, or re-run with --allow-keys.`);
+    }
+    return { verb, tier: 'read' };
+  }
+  if (verb === 'SCAN') assertScanBounded(tokens);
   if (tier === 'read') return { verb, tier };
   if (opts.capability !== 'executeMutate') {
     throw new Error(`redis command '${verb}' is a ${tier} operation; re-run with --allow-mutate.`);
@@ -134,6 +150,24 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
     throw new Error(`redis FLUSH-tier command '${verb}' requires --allow-flush in addition to --allow-mutate.`);
   }
   return { verb, tier };
+}
+
+function assertScanBounded(tokens: string[]): void {
+  const at = tokens.findIndex((t, i) => i > 0 && t.toUpperCase() === 'COUNT');
+  if (at < 0) {
+    throw new Error(`redis SCAN needs an explicit COUNT (at most ${SCAN_COUNT_MAX}), e.g. SCAN 0 MATCH user:* COUNT 100.`);
+  }
+  const count = Number(tokens[at + 1]);
+  if (!Number.isInteger(count) || count < 1 || count > SCAN_COUNT_MAX) {
+    throw new Error(`redis SCAN COUNT must be an integer from 1 to ${SCAN_COUNT_MAX}.`);
+  }
+}
+
+function assertDatabaseSet(ds: QueryRequest['datasource']): void {
+  const db = ds.connection.database;
+  if (ds.policy?.requireDatabase && (db === undefined || db === null || String(db) === '')) {
+    throw misconfiguredDatasource(`redis datasource '${ds.name}' requires a database number but has none; set it with 'taproot datasource add ... --database <n>'.`);
+  }
 }
 
 interface RedisCliInvocation {
@@ -326,7 +360,9 @@ export const redisPlugin: TapRootPlugin = {
       allowMutatePolicy: Boolean(policy?.allowMutate),
       allowedCapabilities: (policy?.allowedCapabilities || []) as string[],
       allowFlush: Boolean(pp.allowFlush),
+      allowKeys: Boolean(pp.allowKeys),
     });
+    assertDatabaseSet(request.datasource);
     const { protoRoot, protoMessage } = resolveProtoParams(request);
     const decode = Boolean(protoMessage) && tier === 'read' && !READS_REPLYING_WITH_NAMES.has(verb);
     if (Boolean(protoMessage) && !protoRoot) {
@@ -365,6 +401,10 @@ export const redisPlugin: TapRootPlugin = {
       const lines = trimmed.split('\n');
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
       rows = lines.map((line) => [line]);
+    }
+    if (verb === 'SCAN' && rows.length > SCAN_ROWS_MAX) {
+      rows = rows.slice(0, SCAN_ROWS_MAX);
+      warnings.push(`scan_rows_truncated_to_${SCAN_ROWS_MAX}`);
     }
     return {
       datasource: request.datasource.name,

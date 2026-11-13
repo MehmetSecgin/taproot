@@ -106,6 +106,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--teleport-ref <ref>', 'shorthand for --connector-ref teleport=<ref>')
     .option('--allow-read', 'allow read', true)
     .option('--allow-mutate', 'allow mutate', false)
+    .option('--require-database', 'redis: refuse queries when --database is unset instead of falling back to database 0', false)
     .option('--confidence <n>', 'confidence 0..1', '0.8')
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
@@ -134,6 +135,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           allowedCapabilities: opts.allowMutate
             ? (['executeRead', 'executeMutate'] satisfies Capability[])
             : (['executeRead'] satisfies Capability[]),
+          ...(opts.requireDatabase ? { requireDatabase: true } : {}),
         },
         resolverHints: {
           ...connectorCredentialRefHints(opts.connectorRef || []),

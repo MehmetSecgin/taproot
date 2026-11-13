@@ -38,6 +38,7 @@ export interface DatasourcePolicy {
   allowRead: boolean;
   allowMutate: boolean;
   allowedCapabilities: Capability[];
+  requireDatabase?: boolean;
 }
 
 export interface DatasourceProfile {
@@ -87,6 +88,7 @@ export interface PluginParams {
   requestJson?: string;
   skipProtoValidate?: boolean;
   allowFlush?: boolean;
+  allowKeys?: boolean;
   params?: Record<string, string>;
 }
 

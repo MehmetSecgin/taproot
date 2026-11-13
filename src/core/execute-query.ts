@@ -36,6 +36,7 @@ export interface QueryExecutionRequest {
   proto?: string;
   protoRoot?: string;
   allowFlush: boolean;
+  allowKeys: boolean;
   requestJson?: string;
   skipProtoValidate: boolean;
   timeoutMs: number;
@@ -108,6 +109,7 @@ function buildPluginParams(request: QueryExecutionRequest, params: Record<string
   if (request.proto) pluginParams.protoMessage = String(request.proto);
   if (request.protoRoot) pluginParams.protoRoot = String(request.protoRoot);
   if (request.allowFlush) pluginParams.allowFlush = true;
+  if (request.allowKeys) pluginParams.allowKeys = true;
   if (request.requestJson) pluginParams.requestJson = String(request.requestJson);
   if (request.skipProtoValidate) pluginParams.skipProtoValidate = true;
   if (kind === DatasourceKind.Grpc && Object.keys(params).length) pluginParams.params = params;
