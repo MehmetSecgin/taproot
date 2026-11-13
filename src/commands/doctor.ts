@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import type { AppContext } from '../core/app.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { runDatasourceConnectors } from '../core/connector-runner.js';
-import { classifyError } from '../core/error-classification.js';
+import { badInput, classifyError } from '../core/error-classification.js';
+import { doctorAll, selectDatasources } from '../core/doctor-all.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
@@ -54,9 +55,31 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .option('--service <service>', 'service name; pair with --env')
     .option('--connect', 'run connector connect steps during doctor', false)
+    .option('--all', 'check every datasource of --env (filter with --namespace, --kind); never runs connect steps', false)
+    .option('--kind <kind>', 'with --all: only datasources of this kind (e.g. redis)')
+    .option('--tcp-only', 'with --all: only open a TCP connection to host:port; no credentials, no query', false)
     .action(async (opts) => {
       const ctx = getCtx();
       ensureStarterRuntime(ctx);
+      if (opts.all) {
+        if (!opts.env) throw badInput('doctor --all needs --env <env>.');
+        if (opts.datasource || opts.service) throw badInput('doctor --all checks a whole environment; drop --datasource and --service.');
+        if (opts.connect) throw badInput('doctor --all never runs connect steps; run doctor --datasource <name> --connect for one datasource.');
+        const selected = selectDatasources(ctx.datasourceStore.list(), {
+          env: opts.env,
+          namespace: normalizeNamespace(opts.namespace) || undefined,
+          kind: opts.kind,
+        });
+        const rows = await doctorAll(ctx, selected, Boolean(opts.tcpOnly));
+        const notReady = rows.filter((r) => r.status !== 'reachable' && r.status !== 'skipped').length;
+        printEnvelope(true, {
+          env: opts.env,
+          rows,
+          summary: { reachable: rows.filter((r) => r.status === 'reachable').length, notReady, skipped: rows.filter((r) => r.status === 'skipped').length, total: rows.length },
+        });
+        if (notReady) process.exitCode = EXIT_CODES.NOT_READY;
+        return;
+      }
       const logVerbose = verboseLog(ctx);
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
       const warnings: string[] = [];

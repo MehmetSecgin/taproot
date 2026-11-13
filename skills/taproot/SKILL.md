@@ -15,6 +15,7 @@ Learn commands from `taproot --help` and `taproot <command> --help`. Every error
 - **One fix per error, then stop.** Change the cause before retrying, and never resend a failing query unchanged. If the fix the error names does not work, report `error.code` and `error.message` and stop.
 - **Auth is the user's job.** On `ACCESS_DENIED` or `AUTH_EXPIRED`, tell the user to run `tsh login` or `taproot creds set`. Never start an interactive login yourself. On `MISSING_TOOL`, tell the user what to install; do not install it.
 - **On `CONNECTIVITY`, run `taproot doctor --datasource <name> --connect` once**, then report what it says.
+- **Before an investigation that spans many datasources, run `taproot doctor --all --env <env> --tcp-only`** to see what is reachable; each row's `fix` names the command to run.
 - **Never probe with `SELECT 1`.** Run the real query; a dead connector fails it with `CONNECTIVITY` anyway.
 - **Never guess table or column names.** Use the names the user, code or migrations give, or look them up with `SHOW TABLES` and `SHOW CREATE TABLE`.
 - **Keep partition and indexed columns bare** in `WHERE` and `JOIN`. Wrapping them in `DATE()`, `TO_DAYS()` or `CAST()` scans every partition.
