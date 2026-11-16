@@ -160,4 +160,58 @@ describe('redis commands', () => {
     // assert
     expect(result.result.rows).toEqual([['0']]);
   });
+
+  it('runs a read command that is in policy.redisCommands', async () => {
+    // arrange
+    replyWith('v\n', '"v"\n');
+    const datasource = pinned(['GET', 'TTL']);
+
+    // act
+    const result = await redisPlugin.execute!(read(datasource, 'GET user:1'), {});
+
+    // assert
+    expect(result.result.rows).toEqual([['v']]);
+  });
+
+  it('refuses a read command that is not in policy.redisCommands', async () => {
+    // arrange
+    replyWith('v\n', '"v"\n');
+    const datasource = pinned(['GET', 'TTL']);
+
+    // act
+    const run = redisPlugin.execute!(read(datasource, 'HGETALL user:1'), {});
+
+    // assert
+    await expect(run).rejects.toThrow(/not in policy\.redisCommands/);
+  });
+
+  it('refuses KEYS when policy.redisCommands omits it, even with --allow-keys', async () => {
+    // arrange
+    replyWith('user:1\n', '1) "user:1"\n');
+    const datasource = pinned(['GET', 'SCAN']);
+
+    // act
+    const run = redisPlugin.execute!(read(datasource, 'KEYS *', { allowKeys: true }), {});
+
+    // assert
+    await expect(run).rejects.toThrow(/not in policy\.redisCommands/);
+  });
+
+  it('refuses a mutate command even when policy.redisCommands lists it', async () => {
+    // arrange
+    replyWith('OK\n', 'OK\n');
+    const datasource = pinned(['GET', 'SET']);
+
+    // act
+    const run = redisPlugin.execute!(read(datasource, 'SET user:1 v'), {});
+
+    // assert
+    await expect(run).rejects.toThrow(/--allow-mutate|executeRead/);
+  });
 });
+
+function pinned(redisCommands: string[]): DatasourceProfile {
+  const datasource = testDatasource('redis', 6379, {});
+  datasource.policy.redisCommands = redisCommands;
+  return datasource;
+}

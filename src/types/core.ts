@@ -40,6 +40,7 @@ export interface DatasourcePolicy {
   allowedCapabilities: Capability[];
   requireDatabase?: boolean;
   strictKeyspace?: boolean;
+  redisCommands?: string[];
 }
 
 export interface DatasourceProfile {
