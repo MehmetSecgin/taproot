@@ -66,3 +66,17 @@ taproot kb validate
 Prints `{"valid": true, "findings": []}` on success. On any problem it exits non-zero and names each problem with its path, for example `orders: services[0] (orders).connections[0].access_method: 'ssh' is not a known access method (native, qa-portforward, tsh)`.
 
 Validation covers the rules above. It does not check that a host, database or user exists.
+
+## Sync to datasource profiles
+
+```bash
+taproot datasource sync --from-kb --env qa [--dry-run]
+```
+
+Creates one datasource profile per active service and namespace in the environment, named `<env>-[<namespace>-]<service>`. The newest `verified_at_utc` row wins for each service and namespace.
+
+- `tsh` rows become `teleport-mysql` profiles with the row's `target` and `db_user` (as `dbUser`).
+- `qa-portforward` rows become `mysql` profiles on `127.0.0.1` at the port TapRoot assigns for that env, namespace and service.
+- `native` rows become `mysql` profiles from `host`, `port` and `database`.
+
+Profiles are read-only and use the env name as the credential ref. Sync never overwrites an existing profile. A row it cannot turn into a profile is reported under `skipped` with the reason, for example a `native` row with no `host`. `--dry-run` reports what would be created and saves nothing.

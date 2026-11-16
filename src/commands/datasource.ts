@@ -10,6 +10,7 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../
 import { nowIso } from '../core/time.js';
 import { printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
+import { kbConnectionRows, kbProfileDraft } from '../core/kb-sync.js';
 import { DoctorStatus } from '../types/core.js';
 import type { Capability, DatasourceProfile } from '../types/core.js';
 import { str } from '../core/strings.js';
@@ -236,5 +237,53 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
 
       const payload = { total: candidates.length, imported, failed, dryRun: Boolean(opts.dryRun) };
       printEnvelope(payload.failed.length === 0, payload);
+    });
+
+  ds.command('sync')
+    .description('Create datasource profiles for one environment from the KB; existing profiles are never overwritten')
+    .option('--from-kb', 'source: the KB services.json', false)
+    .option('--env <env>', 'environment to sync (e.g. qa, stg)')
+    .option('--dry-run', 'report the profiles without saving', false)
+    .action((opts) => {
+      const ctx = getCtx();
+      if (!opts.fromKb) throw badInput('Specify --from-kb; it is the only source.');
+      const env = str(opts.env).trim();
+      if (!env) throw badInput('datasource sync needs --env <env>.');
+      const created: string[] = [];
+      const skipped: Array<{ name: string; reason: string }> = [];
+      for (const row of kbConnectionRows(ctx.kbStore, env)) {
+        const name = defaultDatasourceName(env, row.service, row.namespace);
+        if (ctx.datasourceStore.get(name)) {
+          skipped.push({ name, reason: 'exists; not overwritten' });
+          continue;
+        }
+        const draft = kbProfileDraft(env, row);
+        if (!draft.ok) {
+          skipped.push({ name, reason: draft.reason });
+          continue;
+        }
+        const validated = parseDatasourceProfile({
+          name,
+          kind: draft.kind,
+          env,
+          namespace: row.namespace,
+          service: row.service,
+          tags: [],
+          connection: draft.connection,
+          credentialRef: env,
+          connectors: [],
+          policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+          resolverHints: draft.resolverHints,
+          updatedAt: nowIso(),
+          confidence: 0.8,
+        });
+        if (!validated.ok) {
+          skipped.push({ name, reason: validated.error });
+          continue;
+        }
+        if (!opts.dryRun) ctx.datasourceStore.save(validated.profile);
+        created.push(name);
+      }
+      printEnvelope(true, { env, created, skipped, dryRun: Boolean(opts.dryRun) });
     });
 }
