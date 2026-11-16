@@ -231,6 +231,10 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   });
 
   const capability = request.allowMutate ? 'executeMutate' : 'executeRead';
+  const deniedEnv = request.env || datasource.env;
+  if (environmentPolicy(ctx, deniedEnv).denyKinds.includes(datasource.kind)) {
+    return failure(new Error(`datasource kind '${datasource.kind}' is denied in environment '${deniedEnv}' by environmentPolicies.denyKinds.`), { schemaContext });
+  }
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) {
     return failure(new Error(`No execute-capable plugin for datasource kind '${datasource.kind}'.`), { schemaContext });
