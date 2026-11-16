@@ -5,11 +5,20 @@ import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
 import { normalizeRelations } from '../core/relations.js';
+import { validateServicesDocument } from '../core/kb-validate.js';
 import { str } from '../core/strings.js';
 
 export function registerKb(program: Command, getCtx: () => AppContext): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
   kb.hook('preAction', () => getCtx().kbStore.requirePresent());
+
+  kb.command('validate')
+    .description('Check services.json against the KB format in docs/kb-schema.md; exits non-zero on any problem')
+    .action(() => {
+      const findings = validateServicesDocument(getCtx().kbStore.services());
+      if (findings.length) throw badInput(`services.json has ${findings.length} problem(s): ${findings.join('; ')}`);
+      printEnvelope(true, { valid: true, findings: [] });
+    });
 
   kb.command('resolve')
     .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')
