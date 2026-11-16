@@ -4,7 +4,7 @@ CLI for querying MySQL/TiDB, Redis, gRPC and (read-only) Kafka datasources. Ever
 
 ## Install
 
-Requires Node.js 22 or later. Install only the clients your datasources use: `redis-cli` (redis), `tsh` (teleport-mysql), `kubectl` (port-forwarded datasources).
+Requires Node.js 22.22.0 or later on the 22 line, or 24.6.0 or later (the range `@platformatic/kafka` declares). Install only the clients your datasources use: `redis-cli` (redis), `tsh` (teleport-mysql), `kubectl` (port-forwarded datasources).
 
 ```bash
 git clone https://github.com/MehmetSecgin/taproot.git

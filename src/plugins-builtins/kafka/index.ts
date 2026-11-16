@@ -124,14 +124,14 @@ interface CommittedPartition { partitionIndex: number; committedOffset: bigint }
 
 interface LagRow { cells: unknown[]; hasCommit: boolean }
 
-function lagRows(topic: string, partitions: CommittedPartition[], ends: Map<number, bigint> | undefined): LagRow[] {
+function lagRows(partitions: CommittedPartition[], ends: Map<number, bigint> | undefined): LagRow[] {
   return [...partitions]
     .sort((a, b) => a.partitionIndex - b.partitionIndex)
     .map((p) => {
       const hasCommit = p.committedOffset >= 0n;
       const logEnd = ends?.get(p.partitionIndex);
       const lag = hasCommit && logEnd !== undefined ? Number(logEnd - p.committedOffset) : null;
-      return { cells: [topic, p.partitionIndex, hasCommit ? String(p.committedOffset) : null, text(logEnd), lag], hasCommit };
+      return { cells: [p.partitionIndex, hasCommit ? String(p.committedOffset) : null, text(logEnd), lag], hasCommit };
     });
 }
 
@@ -142,11 +142,11 @@ async function lagForGroup(admin: Admin, groupId: string): Promise<Table> {
   const [group] = await admin.listConsumerGroupOffsets({ groups: [groupId] });
   const committed = [...(group?.topics || [])].sort((a, b) => a.name.localeCompare(b.name));
   const ends = await offsetsAt(admin, new Map(committed.map((t) => [t.name, t.partitions.map((p) => p.partitionIndex)])), LATEST_OFFSET);
-  return { columns, rows: committed.flatMap((t) => lagRows(t.name, t.partitions, ends.get(t.name)).map((r) => r.cells)) };
+  return { columns, rows: committed.flatMap((t) => lagRows(t.partitions, ends.get(t.name)).map((r) => [t.name, ...r.cells])) };
 }
 
 async function lagForTopic(admin: Admin, topic: string): Promise<Table> {
-  const columns = ['group', 'topic', 'partition', 'committed', 'logEnd', 'lag'];
+  const columns = ['group', 'partition', 'committed', 'logEnd', 'lag'];
   const count = (await admin.metadata({ topics: [topic] })).topics.get(topic)?.partitionsCount ?? 0;
   const partitionIndexes = Array.from({ length: count }, (_, index) => index);
   const ids = [...(await admin.listGroups()).keys()].sort();
@@ -158,7 +158,7 @@ async function lagForTopic(admin: Admin, topic: string): Promise<Table> {
   const rows = [...offsets]
     .sort((a, b) => a.groupId.localeCompare(b.groupId))
     .flatMap((g) => {
-      const groupRows = g.topics.filter((t) => t.name === topic).flatMap((t) => lagRows(t.name, t.partitions, ends.get(t.name)));
+      const groupRows = g.topics.filter((t) => t.name === topic).flatMap((t) => lagRows(t.partitions, ends.get(t.name)));
       return groupRows.some((r) => r.hasCommit) ? groupRows.map((r) => [g.groupId, ...r.cells]) : [];
     });
   return { columns, rows };

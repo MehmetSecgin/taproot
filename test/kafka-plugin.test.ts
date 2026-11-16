@@ -231,8 +231,8 @@ describe('kafka plugin', () => {
     const result = await kafkaPlugin.execute!(read('lag TOPIC billing.paid'), {});
 
     // assert
-    expect(result.result.columns).toEqual(['group', 'topic', 'partition', 'committed', 'logEnd', 'lag']);
-    expect(result.result.rows).toEqual([['billing-reader', 'billing.paid', 0, '3', '3', 0]]);
+    expect(result.result.columns).toEqual(['group', 'partition', 'committed', 'logEnd', 'lag']);
+    expect(result.result.rows).toEqual([['billing-reader', 0, '3', '3', 0]]);
     expect(admin.listConsumerGroupOffsets).toHaveBeenCalledTimes(1);
   });
 
