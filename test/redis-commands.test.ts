@@ -3,9 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { redisPlugin, SCAN_COUNT_MAX } from '../src/plugins-builtins/redis/index.js';
+import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
 import { testDatasource } from './helpers/datasource.js';
 import { stubRedisCli } from './helpers/redis-cli-stub.js';
+
+const REDIS_MAX_ROWS = RUNTIME_CONSTANTS.redis.maxRows;
 
 function replyWith(rawReply: string, quotedReply: string): void {
   stubRedisCli(
@@ -159,5 +162,29 @@ describe('redis commands', () => {
 
     // assert
     expect(result.result.rows).toEqual([['0']]);
+  });
+
+  it('caps returned rows at the row limit and warns truncated', async () => {
+    // arrange
+    stubRedisCli(`seq 1 ${REDIS_MAX_ROWS + 1}\n`);
+
+    // act
+    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 COUNT 10', { allowKeys: true }), {});
+
+    // assert
+    expect(result.result.rows).toHaveLength(REDIS_MAX_ROWS);
+    expect(result.warnings).toContain('truncated');
+  });
+
+  it('returns every row and no warning at the row limit', async () => {
+    // arrange
+    stubRedisCli(`seq 1 ${REDIS_MAX_ROWS}\n`);
+
+    // act
+    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 COUNT 10'), {});
+
+    // assert
+    expect(result.result.rows).toHaveLength(REDIS_MAX_ROWS);
+    expect(result.warnings).not.toContain('truncated');
   });
 });

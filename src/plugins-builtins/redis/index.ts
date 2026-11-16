@@ -409,6 +409,10 @@ export const redisPlugin: TapRootPlugin = {
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
       rows = lines.map((line) => [line]);
     }
+    if (rows.length > RUNTIME_CONSTANTS.redis.maxRows) {
+      rows = rows.slice(0, RUNTIME_CONSTANTS.redis.maxRows);
+      warnings.push('truncated');
+    }
     return {
       datasource: request.datasource.name,
       plugin: 'redis',
