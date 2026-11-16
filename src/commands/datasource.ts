@@ -10,6 +10,7 @@ import { defaultDatasourceName, normalizeNamespace, normalizeService } from '../
 import { nowIso } from '../core/time.js';
 import { printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
+import { deniedKindCheck } from '../core/env-policy.js';
 import { DoctorStatus } from '../types/core.js';
 import type { Capability, DatasourceProfile } from '../types/core.js';
 import { str } from '../core/strings.js';
@@ -160,6 +161,8 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           throw new Error(`PROBE_UNSUPPORTED: plugin '${saved.kind}' does not implement doctor(); cannot probe.`);
         }
         try {
+          const denied = deniedKindCheck(ctx, saved);
+          if (denied) throw probeFailed(saved.name, denied.detail);
           const connectorChecks = await runDatasourceConnectors({
             datasource: saved,
             credentialStore: ctx.credentialStore,
