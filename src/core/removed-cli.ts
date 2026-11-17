@@ -7,7 +7,7 @@ const REMOVED_OPTIONS: Record<string, string> = {
   '--no-color': ALWAYS_JSON,
   '--no-animations': ALWAYS_JSON,
   '--datetime-format': ALWAYS_JSON,
-  '--full': 'query output is never truncated; drop it',
+  '--full': 'there is no opt-out for output caps (redis rows, grpc streams); drop it',
   '--reason': DROP,
   '--intent': 'pass the query text with --sql',
   '--timeout-ms': 'use --timeout <ms>',

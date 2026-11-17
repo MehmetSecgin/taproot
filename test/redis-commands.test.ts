@@ -169,11 +169,23 @@ describe('redis commands', () => {
     stubRedisCli(`seq 1 ${REDIS_MAX_ROWS + 1}\n`);
 
     // act
-    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 COUNT 10', { allowKeys: true }), {});
+    const result = await redisPlugin.execute!(read(strict(), 'KEYS *', { allowKeys: true }), {});
 
     // assert
     expect(result.result.rows).toHaveLength(REDIS_MAX_ROWS);
-    expect(result.warnings).toContain('truncated');
+    expect(result.warnings.some((w) => w.startsWith('truncated') && w.includes('TAPROOT_REDIS_MAX_ROWS'))).toBe(true);
+  });
+
+  it('never caps SCAN pages, so a cursor walk does not skip keys', async () => {
+    // arrange
+    stubRedisCli(`seq 1 ${REDIS_MAX_ROWS + 1}\n`);
+
+    // act
+    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 COUNT 10'), {});
+
+    // assert
+    expect(result.result.rows).toHaveLength(REDIS_MAX_ROWS + 1);
+    expect(result.warnings.some((w) => w.startsWith('truncated'))).toBe(false);
   });
 
   it('returns every row and no warning at the row limit', async () => {

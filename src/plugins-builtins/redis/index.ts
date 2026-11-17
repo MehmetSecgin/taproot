@@ -73,6 +73,8 @@ const KEYS_COMMANDS = new Set<string>(['KEYS']);
 
 export const SCAN_COUNT_MAX = 200;
 
+const CURSOR_VERBS = new Set<string>(['SCAN', 'SSCAN', 'HSCAN', 'ZSCAN']);
+
 type CommandTier = 'read' | 'keys' | 'mutate' | 'flush';
 
 function classifyCommand(verb: string): CommandTier | 'unknown' {
@@ -386,12 +388,15 @@ export const redisPlugin: TapRootPlugin = {
     }
     const warnings: string[] = [];
     const columns = ['value'];
+    const maxRows = CURSOR_VERBS.has(verb) ? Number.POSITIVE_INFINITY : RUNTIME_CONSTANTS.redis.maxRows;
     let rows: unknown[][] = [];
+    let total = 0;
     if (decode) {
       const root = (await loadProtobufRoot(protoRoot as string)).protobufRoot;
       const entries = splitReplies(r.stdout);
+      total = entries.length;
       let undecodable = 0;
-      rows = entries.map((entry) => {
+      rows = entries.slice(0, maxRows).map((entry) => {
         if (entry.kind === 'text') return [entry.text];
         const bytes = entry.bytes as Buffer;
         try {
@@ -407,11 +412,11 @@ export const redisPlugin: TapRootPlugin = {
       const trimmed = r.stdout.replace(/\r/g, '');
       const lines = trimmed.split('\n');
       while (lines.length && lines[lines.length - 1] === '') lines.pop();
-      rows = lines.map((line) => [line]);
+      total = lines.length;
+      rows = lines.slice(0, maxRows).map((line) => [line]);
     }
-    if (rows.length > RUNTIME_CONSTANTS.redis.maxRows) {
-      rows = rows.slice(0, RUNTIME_CONSTANTS.redis.maxRows);
-      warnings.push('truncated');
+    if (total > maxRows) {
+      warnings.push(`truncated: kept ${maxRows} of ${total} rows. Narrow the pattern or raise TAPROOT_REDIS_MAX_ROWS.`);
     }
     return {
       datasource: request.datasource.name,
