@@ -14,6 +14,7 @@ import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate 
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
 import { ensureDatasourceCatalog } from './schema-refresh.js';
 import type { QuerySlot } from './schema-refresh.js';
+import { deniedKindCheck } from './env-policy.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
 import { str } from './strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
@@ -205,6 +206,8 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return failure(error, {});
   }
 
+  const denied = deniedKindCheck(ctx, datasource);
+  if (denied) return failure(new Error(denied.detail), {});
   const sessionId = deps.openSession?.(datasource);
   let params: Record<string, string>;
   let jsonExtractSpecs: JsonExtractSpec[];
@@ -231,10 +234,6 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   });
 
   const capability = request.allowMutate ? 'executeMutate' : 'executeRead';
-  const deniedEnv = request.env || datasource.env;
-  if (environmentPolicy(ctx, deniedEnv).denyKinds.includes(datasource.kind)) {
-    return failure(new Error(`datasource kind '${datasource.kind}' is denied in environment '${deniedEnv}' by environmentPolicies.denyKinds.`), { schemaContext });
-  }
   const plugin = ctx.pluginRegistry.get(datasource.kind);
   if (!plugin?.execute) {
     return failure(new Error(`No execute-capable plugin for datasource kind '${datasource.kind}'.`), { schemaContext });
