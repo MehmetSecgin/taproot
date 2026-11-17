@@ -119,7 +119,7 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
     throw new Error(`redis command '${verb}' not in allow-list; reject by default.`);
   }
   if (opts.redisCommands && !opts.redisCommands.includes(verb)) {
-    throw new Error(`redis command '${verb}' is not in policy.redisCommands for this datasource.`);
+    throw new Error(`redis command '${verb}' is not in policy.redisCommands for this datasource; allowed: ${opts.redisCommands.join(', ')}.`);
   }
   // SORT with STORE clause is a mutate even though SORT itself can be read-only.
   if (verb === 'SORT' && !tokens.slice(1).some((t) => t.toUpperCase() === 'STORE')) {
