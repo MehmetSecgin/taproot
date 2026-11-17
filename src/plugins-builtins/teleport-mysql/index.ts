@@ -155,7 +155,8 @@ async function stopProxy(proxy: ProxyRuntime): Promise<void> {
 export async function closeTeleportMysqlSessionProxies(sessionId: string): Promise<void> {
   const keys = proxyKeyBySession.get(sessionId);
   if (!keys || !keys.size) return;
-  for (const key of Array.from(keys)) {
+  const keysAtStart = [...keys];
+  for (const key of keysAtStart) {
     const starting = proxiesByKey.get(key);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
@@ -165,7 +166,8 @@ export async function closeTeleportMysqlSessionProxies(sessionId: string): Promi
 }
 
 export async function closeAllTeleportMysqlProxies(): Promise<void> {
-  for (const sessionId of Array.from(proxyKeyBySession.keys())) await closeTeleportMysqlSessionProxies(sessionId);
+  const sessionIdsAtStart = [...proxyKeyBySession.keys()];
+  for (const sessionId of sessionIdsAtStart) await closeTeleportMysqlSessionProxies(sessionId);
 }
 
 async function ensureProxy(sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
