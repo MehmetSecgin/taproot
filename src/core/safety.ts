@@ -130,7 +130,7 @@ function sortedDateLiteralsForColumn(sql: string, key: string): number[] {
       if (operand) out.push(...dateLiteralsMs(operand));
     }
   }
-  return out.sort((a, b) => a - b);
+  return out.toSorted((a, b) => a - b);
 }
 
 function hasBoundedPredicate(sql: string, key: string): boolean {

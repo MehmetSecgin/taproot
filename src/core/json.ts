@@ -37,7 +37,7 @@ export function readJsonFile<T>(file: string, fallback: T): T {
   try {
     value = deepFreeze(JSON.parse(text) as T);
   } catch (err) {
-    throw new Error(`${file} is not valid JSON (${(err as Error).message}). Fix or remove it; TapRoot does not overwrite it while it is unreadable.`);
+    throw new Error(`${file} is not valid JSON (${(err as Error).message}). Fix or remove it; TapRoot does not overwrite it while it is unreadable.`, { cause: err });
   }
   parsedFiles.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, value });
   return value;

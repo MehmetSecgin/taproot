@@ -49,6 +49,10 @@ function parseLine(line: string): RpcRequest {
   return parsed;
 }
 
+function cleanUpAndExit(): void {
+  void runRegisteredCleanup().finally(() => process.exit(0));
+}
+
 export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
   const runDir = defaultRunDir(opts.stateRoot);
   const socketPath = opts.socketPath || path.join(runDir, 'taprootd.sock');
@@ -168,7 +172,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
         void closeMysqlSessionPools(sessionId);
       }
     }
-    if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) onSignal();
+    if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) cleanUpAndExit();
   }, RUNTIME_CONSTANTS.sweeper.tickMs);
 
   let released = false;
@@ -190,11 +194,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   };
   const unregisterStop = registerCleanup(`daemon-stop:${socketPath}`, stop);
 
-  const onSignal = () => {
-    void runRegisteredCleanup().finally(() => process.exit(0));
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', cleanUpAndExit);
+  process.on('SIGTERM', cleanUpAndExit);
 
   return {
     socketPath,

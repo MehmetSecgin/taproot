@@ -42,7 +42,7 @@ function targetScore(target: string, service: string, env: string, policy: Envir
 
 export function sortTargets(targets: string[], service: string, env: string, policy: EnvironmentPolicy): string[] {
   return [...new Set(targets.filter(Boolean))]
-    .sort((a, b) => targetScore(b, service, env, policy) - targetScore(a, service, env, policy) || a.localeCompare(b));
+    .toSorted((a, b) => targetScore(b, service, env, policy) - targetScore(a, service, env, policy) || a.localeCompare(b));
 }
 
 export function discoverKubernetesTargets(namespace: string, service: string, env: string, policy: EnvironmentPolicy): string[] {

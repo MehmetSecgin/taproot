@@ -60,7 +60,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const { profiles, warnings } = ctx.datasourceStore.load();
       const rows = profiles
         .filter((d) => d.name.toLowerCase().includes(needle))
-        .sort((a, b) =>
+        .toSorted((a, b) =>
           str(a.env).localeCompare(str(b.env))
           || str(a.namespace).localeCompare(str(b.namespace))
           || str(a.service).localeCompare(str(b.service))
