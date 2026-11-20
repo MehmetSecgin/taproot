@@ -72,7 +72,7 @@ interface BootstrapContext {
 
 function buildKubectlPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
   const effectiveNamespace = String(c.namespace || 'default');
-  const context = String(process.env.TAPROOT_QA_CONTEXT || c.kb.k8s_context || c.env || effectiveNamespace);
+  const context = String(c.kb.k8s_context || c.env || effectiveNamespace);
   const localPort = kubectlPortforwardLocalPort(c.env, c.namespace, c.service);
   const logFile = `/tmp/taproot-pf-${c.env}-${c.service}.log`;
   const forwardArgs = `--context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:`;
