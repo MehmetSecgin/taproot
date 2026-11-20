@@ -14,7 +14,6 @@ function profile(name: string, env: string, service: string, namespace?: string)
     credentialRef: 'x',
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: '2026-01-01T00:00:00.000Z',
-    confidence: 1,
   } as DatasourceProfile;
 }
 

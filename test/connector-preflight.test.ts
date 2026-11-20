@@ -15,7 +15,6 @@ function datasource(name: string, connectors: string[] = ['fake']): DatasourcePr
     connectors,
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: new Date().toISOString(),
-    confidence: 1,
   };
 }
 

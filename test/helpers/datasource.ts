@@ -9,6 +9,5 @@ export function testDatasource(kind: 'grpc' | 'redis', port: number, resolverHin
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     resolverHints,
     updatedAt: new Date().toISOString(),
-    confidence: 0.9,
   };
 }

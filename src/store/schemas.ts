@@ -28,7 +28,6 @@ export const DatasourceProfileSchema = z.object({
   policy: DatasourcePolicySchema,
   resolverHints: z.record(z.string(), z.string()).optional(),
   updatedAt: z.string(),
-  confidence: z.number().min(0).max(1),
 });
 
 function firstZodError(error: ZodError): string {

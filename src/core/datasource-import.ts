@@ -23,7 +23,6 @@ export function normalizeImportedProfile(raw: unknown, defaults: { credentialRef
   base.policy = base.policy && typeof base.policy === 'object'
     ? base.policy
     : { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] };
-  base.confidence = typeof base.confidence === 'number' ? base.confidence : 0.8;
   base.updatedAt = typeof base.updatedAt === 'string' && base.updatedAt ? base.updatedAt : nowIso();
   if (!base.credentialRef && defaults.credentialRef) base.credentialRef = defaults.credentialRef;
   return base;

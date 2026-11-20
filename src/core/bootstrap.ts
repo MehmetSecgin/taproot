@@ -29,7 +29,6 @@ interface KbBootstrapCandidate {
 interface KbBootstrapOptions {
   targetOverride?: string;
   tags?: string[];
-  confidence?: number;
 }
 
 function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapResult, 'credentialRefs'> {
@@ -66,7 +65,6 @@ interface BootstrapContext {
   target: string;
   credentialRef: string;
   tags: string[];
-  confidence: number;
   namespace?: string;
 }
 
@@ -97,7 +95,6 @@ function buildKubectlPortforwardCandidate(c: BootstrapContext): KbBootstrapCandi
         'kubectl-portforwardCredentialRef': kpfRef,
       },
       updatedAt: nowIso(),
-      confidence: c.confidence,
     },
     credentialDefaults: [
       { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
@@ -125,7 +122,6 @@ function buildNativeCandidate(c: BootstrapContext): KbBootstrapCandidate | undef
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       resolverHints: {},
       updatedAt: nowIso(),
-      confidence: c.confidence,
     },
     credentialDefaults: [{ ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } }],
   };
@@ -151,7 +147,6 @@ function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
         ...(c.dbUser ? { dbUser: c.dbUser } : {}),
       },
       updatedAt: nowIso(),
-      confidence: c.confidence,
     },
     credentialDefaults: [
       { ref: c.credentialRef, defaults: { dbUser: c.dbUser } },
@@ -191,7 +186,6 @@ function buildKbBootstrapCandidate(
     target: str(options?.targetOverride || kb.target),
     credentialRef: env,
     tags: options?.tags || ['auto-bootstrap', 'kb-derived'],
-    confidence: options?.confidence ?? 0.9,
     namespace: str(kb.namespace).trim() || undefined,
   };
   return build(c);

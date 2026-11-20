@@ -61,7 +61,6 @@ export interface DatasourceProfile {
   policy: DatasourcePolicy;
   resolverHints?: Record<string, string>;
   updatedAt: string;
-  confidence: number;
 }
 
 export interface EnvironmentPolicy {

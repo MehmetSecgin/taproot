@@ -291,14 +291,6 @@ describe('datasource CRUD', () => {
     expect(parsed.resolverHints['kubectl-portforwardCredentialRef']).toBe('kpf:qa:svc');
   });
 
-  it('datasource add with confidence', () => {
-    const { env } = setupState();
-    addProfile(env, ['--confidence', '0.5']);
-    const out = runCli(['datasource', 'show', 'qa-svc'], env);
-    expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.confidence).toBe(0.5);
-  });
-
   it('datasource add refuses to overwrite a datasources file that does not parse', () => {
     // arrange
     const { env, stateRoot } = setupState();

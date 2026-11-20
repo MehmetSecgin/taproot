@@ -35,7 +35,6 @@ async function setupDaemon(datasourceCount: number, plugin: TapRootPlugin) {
       credentialRef: 'qa:fake',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: new Date().toISOString(),
-      confidence: 1,
     });
   }
   const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));

@@ -81,7 +81,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).not.toThrow();
@@ -99,7 +98,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).toThrow(/allow-mutate/);
@@ -121,7 +119,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).toThrow(/^BAD_INPUT: send one SQL statement per query/);
@@ -139,7 +136,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).toThrow(/allow-mutate/);
@@ -157,7 +153,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).not.toThrow();
@@ -175,7 +170,6 @@ describe('safety', () => {
           credentialRef: 'r',
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: '',
-          confidence: 1,
         },
       }),
     ).toThrow(/policy disallows mutate/);

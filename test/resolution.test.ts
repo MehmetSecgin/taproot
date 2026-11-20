@@ -6,7 +6,7 @@ import { datasourceKindsForQuery } from '../src/core/resolve-datasource.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 
 describe('datasource resolution', () => {
-  it('prefers highest confidence then latest updatedAt', () => {
+  it('refuses to pick between two profiles that match env and service', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const file = path.join(dir, 'datasources.json');
     const store = new DatasourceStore(file);
@@ -21,7 +21,6 @@ describe('datasource resolution', () => {
       credentialRef: 'x',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-01T00:00:00.000Z',
-      confidence: 0.7,
     });
     store.save({
       name: 'b',
@@ -33,11 +32,11 @@ describe('datasource resolution', () => {
       credentialRef: 'y',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-02T00:00:00.000Z',
-      confidence: 0.9,
     });
 
-    const resolved = store.resolveByEnvService('prod', 'svc');
-    expect(resolved?.name).toBe('b');
+    expect(() => store.resolveByEnvService('prod', 'svc')).toThrow(
+      'AMBIGUOUS_DATASOURCE: 2 datasources match env=prod service=svc: a, b. Narrow with --namespace, or use --datasource <name> on query and doctor.',
+    );
   });
 
   it('resolves exact env+namespace+service when namespace is provided', () => {
@@ -56,7 +55,6 @@ describe('datasource resolution', () => {
       credentialRef: 'qa',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-01T00:00:00.000Z',
-      confidence: 0.7,
     });
     store.save({
       name: 'qa-test-svc',
@@ -69,14 +67,13 @@ describe('datasource resolution', () => {
       credentialRef: 'qa',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-02T00:00:00.000Z',
-      confidence: 0.9,
     });
 
     expect(store.resolveByEnvService('qa', 'svc', 'develop')?.name).toBe('qa-develop-svc');
     expect(store.resolveByEnvService('qa', 'svc', 'test')?.name).toBe('qa-test-svc');
   });
 
-  it('prefers a datasource of the requested kind over a higher-confidence one of another kind', () => {
+  it('picks the datasource of the requested kind and refuses to guess without one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const store = new DatasourceStore(path.join(dir, 'datasources.json'));
     const base = {
@@ -88,12 +85,13 @@ describe('datasource resolution', () => {
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-01T00:00:00.000Z',
     };
-    store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc', confidence: 0.9 } as never);
-    store.save({ ...base, name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 } as never);
+    store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' } as never);
+    store.save({ ...base, name: 'qa-svc-sql', kind: 'mysql' } as never);
 
-    expect(store.resolveByEnvService('qa', 'svc')?.name).toBe('qa-svc-grpc');
     expect(store.resolveByEnvService('qa', 'svc', undefined, ['mysql'])?.name).toBe('qa-svc-sql');
-    expect(store.resolveByEnvService('qa', 'svc', undefined, ['redis'])?.name).toBe('qa-svc-grpc');
+    expect(store.resolveByEnvService('qa', 'svc', undefined, ['grpc'])?.name).toBe('qa-svc-grpc');
+    expect(() => store.resolveByEnvService('qa', 'svc')).toThrow('AMBIGUOUS_DATASOURCE');
+    expect(() => store.resolveByEnvService('qa', 'svc', undefined, ['redis'])).toThrow('AMBIGUOUS_DATASOURCE');
   });
 });
 

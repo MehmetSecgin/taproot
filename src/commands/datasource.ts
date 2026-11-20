@@ -16,11 +16,11 @@ import { str } from '../core/strings.js';
 import { parseDatasourceProfile } from '../store/schemas.js';
 
 const LIST_COLUMNS = ['name', 'kind', 'env', 'namespace', 'service', 'host', 'target', 'database'];
-const DETAILED_LIST_COLUMNS = [...LIST_COLUMNS, 'confidence', 'updatedAt'];
+const DETAILED_LIST_COLUMNS = [...LIST_COLUMNS, 'updatedAt'];
 
 function listCells(d: DatasourceProfile, detailed: boolean): unknown[] {
   const cells = [d.name, d.kind, d.env, d.namespace, d.service, d.connection.host, d.connection.target, d.connection.database];
-  return detailed ? [...cells, d.confidence, d.updatedAt] : cells;
+  return detailed ? [...cells, d.updatedAt] : cells;
 }
 
 function isEmptyCell(cell: unknown): boolean {
@@ -52,7 +52,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
   ds.command('list')
     .description('List datasource profiles; optional [pattern] keeps names containing it')
     .argument('[pattern]', 'case-insensitive substring of the datasource name')
-    .option('--detailed', 'include confidence and updatedAt', false)
+    .option('--detailed', 'include updatedAt', false)
     .action((pattern: string | undefined, opts) => {
       const ctx = getCtx();
       const detailed = Boolean(opts.detailed);
@@ -109,7 +109,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--allow-mutate', 'allow mutate', false)
     .option('--strict-keyspace', 'redis: refuse KEYS unless --allow-keys, and require SCAN to carry COUNT (max 200)', false)
     .option('--require-database', 'redis: refuse queries when --database is unset instead of falling back to database 0', false)
-    .option('--confidence <n>', 'confidence 0..1', '0.8')
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
       const ctx = getCtx();
@@ -147,7 +146,6 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
           ...(opts.teleportRef ? { teleportCredentialRef: opts.teleportRef } : {}),
         },
         updatedAt: nowIso(),
-        confidence: Number(opts.confidence),
       };
       const validated = parseDatasourceProfile(profile);
       if (!validated.ok) throw badInput(`Invalid datasource ${opts.name}: ${validated.error}`);
@@ -205,9 +203,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
       const kb = ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined);
       if (!kb) throw new Error(`No datasource profile found for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       const name = defaultDatasourceName(opts.env, service, str(kb.namespace || namespace).trim() || undefined);
-      const profile = await saveKbBootstrapCandidate(ctx, opts.env, service, name, kb, {
-        confidence: 0.85,
-      });
+      const profile = await saveKbBootstrapCandidate(ctx, opts.env, service, name, kb);
       if (!profile) throw new Error(`KB connection could not be converted into a datasource profile for env=${opts.env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`);
       printEnvelope(true, { source: 'kb', profile });
     });

@@ -69,7 +69,6 @@ function datasource(kind = 'mysql', name = 'qa-orders') {
     connectors: [],
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: new Date().toISOString(),
-    confidence: 1,
   } as any;
 }
 

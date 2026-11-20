@@ -22,7 +22,6 @@ describe('doctor executor codes', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );
@@ -58,7 +57,6 @@ describe('doctor executor codes', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );
@@ -97,7 +95,6 @@ describe('doctor executor codes', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );
