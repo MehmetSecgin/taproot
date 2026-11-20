@@ -1,10 +1,8 @@
 import fs from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
+import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -15,16 +13,17 @@ function connection(target: string) {
     engine: 'mysql',
     database: target,
     db_user: 'reader',
-    access_method: 'qa-portforward',
+    access_method: 'kubectl-portforward',
+    k8s_context: 'cluster-ctx',
     target,
     status: 'active',
     verified_at_utc: '2026-03-01T00:00:00Z',
   };
 }
 
-function setupState(extraEnv: Record<string, string> = {}) {
+function setupState() {
   const { stateRoot } = tempStateRoot();
-  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-qa-portforward-kb-'));
+  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kubectl-portforward-kb-'));
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
     JSON.stringify([
@@ -40,9 +39,6 @@ function setupState(extraEnv: Record<string, string> = {}) {
       TAPROOT_NO_KEYCHAIN: '1',
       TAPROOT_FORCE_DIRECT: '1',
       TAPROOT_KB_DIR: kbDir,
-      TAPROOT_QA_CONTEXT: 'qa-ctx',
-      TAPROOT_QA_LOCAL_PORT: '',
-      ...extraEnv,
     },
   };
 }
@@ -50,14 +46,6 @@ function setupState(extraEnv: Record<string, string> = {}) {
 function savedPort(stateRoot: string, service: string): number {
   const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
   return datasources.find((d: { service: string }) => d.service === service).connection.port;
-}
-
-async function freePort(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as net.AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
 }
 
 const listeners: Array<ReturnType<typeof spawn>> = [];
@@ -79,33 +67,7 @@ function portforwardStatus(service: string, env: Record<string, string>): string
   return checks.find((c) => c.check === 'kubectl-portforward status')!.status;
 }
 
-describe('TAPROOT_QA_LOCAL_PORT', () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  it('overrides the derived port', () => {
-    // arrange
-    vi.stubEnv('TAPROOT_QA_LOCAL_PORT', '4406');
-
-    // act
-    const port = qaPortforwardLocalPort('qa', 'develop', 'profile');
-
-    // assert
-    expect(port).toBe(4406);
-  });
-
-  it.each(['abc', '0', '70000', '12.5'])('rejects %j as BAD_INPUT', (value) => {
-    // arrange
-    vi.stubEnv('TAPROOT_QA_LOCAL_PORT', value);
-
-    // act
-    const port = () => qaPortforwardLocalPort('qa', 'develop', 'profile');
-
-    // assert
-    expect(port).toThrow(`BAD_INPUT: TAPROOT_QA_LOCAL_PORT must be a port from 1 to 65535, got '${value}'.`);
-  });
-});
-
-describe('qa-portforward profiles', () => {
+describe('kubectl-portforward profiles', () => {
   it('give two services in one env different local ports', () => {
     // arrange
     const { stateRoot, env } = setupState();
@@ -118,13 +80,15 @@ describe('qa-portforward profiles', () => {
     expect(savedPort(stateRoot, 'profile')).not.toBe(savedPort(stateRoot, 'address'));
   });
 
-  it('do not accept another service forward listening on a shared port as up', async () => {
+  it('count a listener as up only when it forwards their own target', async () => {
     // arrange
-    const port = await freePort();
-    const { env } = setupState({ TAPROOT_QA_LOCAL_PORT: String(port) });
+    const { stateRoot, env } = setupState();
     expect(runCli(['init', 'datasource', '--env', 'qa', '--service', 'profile'], env).status).toBe(0);
     expect(runCli(['init', 'datasource', '--env', 'qa', '--service', 'address'], env).status).toBe(0);
-    await fakeForward(port, `--context qa-ctx -n develop port-forward svc/profile-db ${port}:4000`);
+    const profilePort = savedPort(stateRoot, 'profile');
+    const addressPort = savedPort(stateRoot, 'address');
+    await fakeForward(profilePort, `--context cluster-ctx -n develop port-forward svc/profile-db ${profilePort}:4000`);
+    await fakeForward(addressPort, `--context cluster-ctx -n develop port-forward svc/profile-db ${addressPort}:4000`);
 
     // act
     const profileStatus = portforwardStatus('profile', env);

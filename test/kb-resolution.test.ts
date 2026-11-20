@@ -49,7 +49,7 @@ function setupKbState() {
             engine: 'mysql',
             database: 'orders',
             db_user: 'orders_reader',
-            access_method: 'qa-portforward',
+            access_method: 'kubectl-portforward',
             target: 'orders-mysql',
             status: 'active',
             verified_at_utc: '2026-03-10T00:00:00Z',
@@ -102,7 +102,7 @@ describe('kb resolution', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'qa-portforward' });
+    expect(JSON.parse(out.stdout).data).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'kubectl-portforward' });
   });
 
   it('kb resolve prefers latest verified_at', () => {
@@ -225,8 +225,8 @@ describe('kb resolution', () => {
         {
           service: 'orders',
           connections: [
-            { env: 'qa', namespace: 'develop', engine: 'mysql', database: 'orders_dev', access_method: 'qa-portforward', status: 'active', verified_at_utc: '2026-03-01T00:00:00Z' },
-            { env: 'qa', namespace: 'test', engine: 'mysql', database: 'orders_test', access_method: 'qa-portforward', status: 'active', verified_at_utc: '2026-03-02T00:00:00Z' },
+            { env: 'qa', namespace: 'develop', engine: 'mysql', database: 'orders_dev', access_method: 'kubectl-portforward', status: 'active', verified_at_utc: '2026-03-01T00:00:00Z' },
+            { env: 'qa', namespace: 'test', engine: 'mysql', database: 'orders_test', access_method: 'kubectl-portforward', status: 'active', verified_at_utc: '2026-03-02T00:00:00Z' },
           ],
         },
       ]),
@@ -235,5 +235,28 @@ describe('kb resolution', () => {
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
     expect(out.status).toBe(0);
     expect(JSON.parse(out.stdout).data).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
+  });
+
+  it('init datasource names an unknown KB access_method and the known ones', () => {
+    // arrange
+    const { stateRoot } = tempStateRoot();
+    const kbDir = path.join(stateRoot, 'kb');
+    fs.mkdirSync(kbDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(kbDir, 'services.json'),
+      JSON.stringify([
+        { service: 'orders', connections: [{ env: 'qa', engine: 'mysql', database: 'orders', access_method: 'qa-portforward', status: 'active' }] },
+      ]),
+    );
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir };
+
+    // act
+    const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], env);
+
+    // assert
+    expect(JSON.parse(out.stdout).error).toEqual({
+      code: 'BAD_INPUT',
+      message: "BAD_INPUT: Unknown access method 'qa-portforward' in the KB entry for env=qa service=orders. Known: kubectl-portforward, native, tsh.",
+    });
   });
 });

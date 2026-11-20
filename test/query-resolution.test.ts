@@ -192,7 +192,7 @@ describe('query resolution', () => {
   it('allow-discovery without a KB row writes a port-forward profile for a Kubernetes target', () => {
     const { env, stateRoot } = setupState({
       datasources: [],
-      runtimeConfig: { environmentPolicies: { qa: { preferredAccessMethods: ['tsh', 'qa-portforward'] } } },
+      runtimeConfig: { environmentPolicies: { qa: { preferredAccessMethods: ['tsh', 'kubectl-portforward'] } } },
     });
     const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-fake-kubectl-'));
     fs.writeFileSync(path.join(binDir, 'kubectl'), '#!/bin/sh\necho service/orders-mysql\n', { mode: 0o755 });
@@ -204,6 +204,41 @@ describe('query resolution', () => {
     const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
     expect(datasources).toHaveLength(1);
     expect(datasources[0]).toMatchObject({ kind: 'mysql', connectors: ['kubectl-portforward'] });
+  });
+
+  it('allow-discovery writes a port-forward profile for a KB row without an access_method', () => {
+    // arrange
+    const { env, stateRoot } = setupState({
+      datasources: [],
+      kbServices: [{ service: 'orders', connections: [{ env: 'qa', engine: 'mysql', database: 'orders', status: 'active' }] }],
+      runtimeConfig: { environmentPolicies: { qa: { preferredAccessMethods: ['kubectl-portforward'] } } },
+    });
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-fake-kubectl-'));
+    fs.writeFileSync(path.join(binDir, 'kubectl'), '#!/bin/sh\necho service/orders-mysql\n', { mode: 0o755 });
+
+    // act
+    runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1', '--allow-discovery'], { ...env, PATH: binDir });
+
+    // assert
+    const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
+    expect(datasources[0]).toMatchObject({ connection: { database: 'orders' }, connectors: ['kubectl-portforward'] });
+  });
+
+  it('allow-discovery names an unknown preferredAccessMethods entry and the known ones', () => {
+    // arrange
+    const { env } = setupState({
+      datasources: [],
+      runtimeConfig: { environmentPolicies: { qa: { preferredAccessMethods: ['qa-portforward'] } } },
+    });
+
+    // act
+    const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1', '--allow-discovery'], env);
+
+    // assert
+    expect(JSON.parse(out.stdout).error).toMatchObject({
+      code: 'BAD_INPUT',
+      message: "BAD_INPUT: Unknown access method 'qa-portforward' in environmentPolicies.qa.preferredAccessMethods. Known: kubectl-portforward, native, tsh.",
+    });
   });
 
   it('rejects the removed --reason and --allow-schema-introspection flags', () => {

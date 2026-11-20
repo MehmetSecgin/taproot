@@ -1,11 +1,12 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './naming.js';
 import { criticalDatasourceKbConflicts } from './conflicts.js';
-import { qaPortforwardLocalPort } from './qa-portforward.js';
+import { kubectlPortforwardLocalPort } from './kubectl-portforward.js';
 import { nowIso } from './time.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { str } from './strings.js';
+import { badInput } from './error-classification.js';
 
 export interface BootstrapResult {
   profile: DatasourceProfile;
@@ -69,15 +70,10 @@ interface BootstrapContext {
   namespace?: string;
 }
 
-interface BootstrapStrategy {
-  accessMethod: string;
-  build(c: BootstrapContext): KbBootstrapCandidate | undefined;
-}
-
-function buildQaPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
+function buildKubectlPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
   const effectiveNamespace = String(c.namespace || 'default');
-  const context = String(process.env.TAPROOT_QA_CONTEXT || c.kb.k8s_context || c.env || effectiveNamespace);
-  const localPort = qaPortforwardLocalPort(c.env, c.namespace, c.service);
+  const context = String(c.kb.k8s_context || c.env || effectiveNamespace);
+  const localPort = kubectlPortforwardLocalPort(c.env, c.namespace, c.service);
   const logFile = `/tmp/taproot-pf-${c.env}-${c.service}.log`;
   const forwardArgs = `--context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:`;
   const listenerPid = `$(lsof -tiTCP:${localPort} -sTCP:LISTEN | head -n 1)`;
@@ -164,11 +160,16 @@ function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
   };
 }
 
-const BOOTSTRAP_STRATEGIES: BootstrapStrategy[] = [
-  { accessMethod: AccessMethod.QaPortforward, build: buildQaPortforwardCandidate },
-  { accessMethod: AccessMethod.Native, build: buildNativeCandidate },
-  { accessMethod: AccessMethod.Tsh, build: buildTshCandidate },
-];
+const CANDIDATE_BUILDERS: Record<AccessMethod, (c: BootstrapContext) => KbBootstrapCandidate | undefined> = {
+  [AccessMethod.KubectlPortforward]: buildKubectlPortforwardCandidate,
+  [AccessMethod.Native]: buildNativeCandidate,
+  [AccessMethod.Tsh]: buildTshCandidate,
+};
+
+export function requireAccessMethod(value: string, where: string): AccessMethod {
+  if (Object.hasOwn(CANDIDATE_BUILDERS, value)) return value as AccessMethod;
+  throw badInput(`Unknown access method '${value}' in ${where}. Known: ${Object.keys(CANDIDATE_BUILDERS).join(', ')}.`);
+}
 
 function buildKbBootstrapCandidate(
   env: string,
@@ -178,8 +179,8 @@ function buildKbBootstrapCandidate(
   options?: KbBootstrapOptions,
 ): KbBootstrapCandidate | undefined {
   const accessMethod = str(kb.access_method).toLowerCase();
-  const strategy = BOOTSTRAP_STRATEGIES.find((s) => s.accessMethod === accessMethod);
-  if (!strategy) return undefined;
+  if (!accessMethod) return undefined;
+  const build = CANDIDATE_BUILDERS[requireAccessMethod(accessMethod, `the KB entry for env=${env} service=${service}`)];
   const c: BootstrapContext = {
     env,
     service,
@@ -193,7 +194,7 @@ function buildKbBootstrapCandidate(
     confidence: options?.confidence ?? 0.9,
     namespace: str(kb.namespace).trim() || undefined,
   };
-  return strategy.build(c);
+  return build(c);
 }
 
 export async function saveKbBootstrapCandidate(

@@ -12,7 +12,7 @@ describe('datasource kb conflicts', () => {
       },
     };
     const kb = {
-      access_method: 'qa-portforward',
+      access_method: 'kubectl-portforward',
       engine: 'mysql',
       host: '127.0.0.1',
       port: 5500,

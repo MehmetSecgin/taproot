@@ -1,5 +1,5 @@
 import { AccessMethod, DatasourceKind, type DatasourceProfile } from '../types/core.js';
-import { qaPortforwardLocalPort } from './qa-portforward.js';
+import { kubectlPortforwardLocalPort } from './kubectl-portforward.js';
 import { str } from './strings.js';
 
 export function expectedKindFromKb(kb: Record<string, unknown>): DatasourceKind {
@@ -25,17 +25,17 @@ export function datasourceKbConflicts(datasource: DatasourceProfile, kb: Record<
     const kbVal = String(p.kb ?? '').trim();
     if (dsVal && kbVal && dsVal !== kbVal) conflicts.push(`${p.key}=${dsVal} (kb:${kbVal})`);
   }
-  const portforwardPort = qaPortforwardPortConflict(datasource, kb);
+  const portforwardPort = kubectlPortforwardPortConflict(datasource, kb);
   if (portforwardPort) conflicts.push(portforwardPort);
   return conflicts;
 }
 
-function qaPortforwardPortConflict(datasource: DatasourceProfile, kb: Record<string, unknown>): string | undefined {
-  if (str(kb.access_method).toLowerCase() !== AccessMethod.QaPortforward) return undefined;
+function kubectlPortforwardPortConflict(datasource: DatasourceProfile, kb: Record<string, unknown>): string | undefined {
+  if (str(kb.access_method).toLowerCase() !== AccessMethod.KubectlPortforward) return undefined;
   if (!datasource.env || !datasource.service) return undefined;
-  const expected = qaPortforwardLocalPort(datasource.env, datasource.namespace, datasource.service);
+  const expected = kubectlPortforwardLocalPort(datasource.env, datasource.namespace, datasource.service);
   const actual = datasource.connection?.port;
-  return actual === expected ? undefined : `local port=${actual} (qa-portforward:${expected})`;
+  return actual === expected ? undefined : `local port=${actual} (kubectl-portforward:${expected})`;
 }
 
 export function criticalDatasourceKbConflicts(datasource: DatasourceProfile, kb: Record<string, unknown>): string[] {
@@ -55,7 +55,7 @@ export function criticalDatasourceKbConflicts(datasource: DatasourceProfile, kb:
     }
   }
 
-  if (accessMethod === AccessMethod.QaPortforward) {
+  if (accessMethod === AccessMethod.KubectlPortforward) {
     const host = str(datasource.connection.host).trim();
     if (host && host !== '127.0.0.1' && host !== 'localhost') critical.push(...conflicts.filter((c) => c.startsWith('host=')));
     if (datasource.kind === DatasourceKind.TeleportMysql) critical.push(...conflicts.filter((c) => c.startsWith('kind=')));

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
+import { kubectlPortforwardLocalPort } from '../src/core/kubectl-portforward.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -23,7 +23,7 @@ function setupKb(kbDir: string, service = 'orders', env = 'qa') {
             engine: 'mysql',
             database: 'orders',
             db_user: 'reader',
-            access_method: 'qa-portforward',
+            access_method: 'kubectl-portforward',
             namespace: 'develop',
             target: 'orders-db',
             status: 'active',
@@ -352,17 +352,17 @@ describe('init command', () => {
   });
 
   it('skips existing datasource profile', () => {
-    const parsed = initDatasourceOverSavedOrdersProfile(qaPortforwardLocalPort('qa', 'develop', 'orders'));
+    const parsed = initDatasourceOverSavedOrdersProfile(kubectlPortforwardLocalPort('qa', 'develop', 'orders'));
     expect(parsed.source).toBe('store-existing');
     expect(parsed).not.toHaveProperty('skipped');
     expect(parsed).not.toHaveProperty('connectors');
     expect(parsed).not.toHaveProperty('warnings');
   });
 
-  it('rewrites a profile saved with the legacy shared qa-portforward port', () => {
+  it('rewrites a profile saved with the legacy shared kubectl-portforward port', () => {
     const parsed = initDatasourceOverSavedOrdersProfile(4406);
     expect(parsed.source).toBe('kb-repaired');
-    expect(parsed.profile.connection.port).toBe(qaPortforwardLocalPort('qa', 'develop', 'orders'));
+    expect(parsed.profile.connection.port).toBe(kubectlPortforwardLocalPort('qa', 'develop', 'orders'));
   });
 
   it('creates namespace-aware datasource profile from KB when namespace is targeted explicitly', () => {
@@ -378,7 +378,7 @@ describe('init command', () => {
             engine: 'mysql',
             database: 'orders_dev',
             db_user: 'reader',
-            access_method: 'qa-portforward',
+            access_method: 'kubectl-portforward',
             target: 'orders-develop-db',
             status: 'active',
             verified_at_utc: '2026-03-01T00:00:00Z',
@@ -389,7 +389,7 @@ describe('init command', () => {
             engine: 'mysql',
             database: 'orders_test',
             db_user: 'reader',
-            access_method: 'qa-portforward',
+            access_method: 'kubectl-portforward',
             target: 'orders-test-db',
             status: 'active',
             verified_at_utc: '2026-03-02T00:00:00Z',
