@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { qaPortforwardLocalPort } from '../src/core/qa-portforward.js';
+import { kubectlPortforwardLocalPort } from '../src/core/kubectl-portforward.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -15,7 +15,7 @@ function connection(target: string) {
     engine: 'mysql',
     database: target,
     db_user: 'reader',
-    access_method: 'qa-portforward',
+    access_method: 'kubectl-portforward',
     target,
     status: 'active',
     verified_at_utc: '2026-03-01T00:00:00Z',
@@ -24,7 +24,7 @@ function connection(target: string) {
 
 function setupState(extraEnv: Record<string, string> = {}) {
   const { stateRoot } = tempStateRoot();
-  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-qa-portforward-kb-'));
+  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kubectl-portforward-kb-'));
   fs.writeFileSync(
     path.join(kbDir, 'services.json'),
     JSON.stringify([
@@ -87,7 +87,7 @@ describe('TAPROOT_QA_LOCAL_PORT', () => {
     vi.stubEnv('TAPROOT_QA_LOCAL_PORT', '4406');
 
     // act
-    const port = qaPortforwardLocalPort('qa', 'develop', 'profile');
+    const port = kubectlPortforwardLocalPort('qa', 'develop', 'profile');
 
     // assert
     expect(port).toBe(4406);
@@ -98,14 +98,14 @@ describe('TAPROOT_QA_LOCAL_PORT', () => {
     vi.stubEnv('TAPROOT_QA_LOCAL_PORT', value);
 
     // act
-    const port = () => qaPortforwardLocalPort('qa', 'develop', 'profile');
+    const port = () => kubectlPortforwardLocalPort('qa', 'develop', 'profile');
 
     // assert
     expect(port).toThrow(`BAD_INPUT: TAPROOT_QA_LOCAL_PORT must be a port from 1 to 65535, got '${value}'.`);
   });
 });
 
-describe('qa-portforward profiles', () => {
+describe('kubectl-portforward profiles', () => {
   it('give two services in one env different local ports', () => {
     // arrange
     const { stateRoot, env } = setupState();

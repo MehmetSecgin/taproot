@@ -28,8 +28,8 @@ Credentials go to the OS keychain through the optional `keytar` dependency. If `
 | `TAPROOT_CATALOG_TIMEOUT_MS` | Timeout of one schema catalog fetch | `20000` |
 | `TAPROOT_MAX_RANGE_DAYS` | Widest date range before a range warning | `90` |
 | `TAPROOT_ALLOW_PARTITION_SCAN` | `1` allows partition scans on every query | unset |
-| `TAPROOT_QA_CONTEXT` | kubectl context for `qa-portforward` | the env name |
-| `TAPROOT_QA_LOCAL_PORT` | Local port for every `qa-portforward` profile | one port in 20000-29999 per env, namespace and service |
+| `TAPROOT_QA_CONTEXT` | kubectl context for `kubectl-portforward` | the env name |
+| `TAPROOT_QA_LOCAL_PORT` | Local port for every `kubectl-portforward` profile | one port in 20000-29999 per env, namespace and service |
 
 ## Agent skill
 
@@ -85,7 +85,7 @@ With a KB, `taproot init datasource --env <env> --service <service>` creates the
 ]
 ```
 
-`access_method` is `native`, `tsh` or `qa-portforward`. Queries use an existing datasource profile over the KB; `init datasource` rewrites a profile that conflicts with it.
+`access_method` is `native`, `tsh` or `kubectl-portforward`. Queries use an existing datasource profile over the KB; `init datasource` rewrites a profile that conflicts with it.
 
 ## License
 

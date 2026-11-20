@@ -15,7 +15,7 @@ function localPortOverride(): number | undefined {
   return port;
 }
 
-export function qaPortforwardLocalPort(env: string, namespace: string | undefined, service: string): number {
+export function kubectlPortforwardLocalPort(env: string, namespace: string | undefined, service: string): number {
   const override = localPortOverride();
   if (override) return override;
   const digest = createHash('sha256').update(`${env}/${namespace || 'default'}/${service}`).digest();

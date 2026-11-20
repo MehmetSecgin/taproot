@@ -11,7 +11,7 @@ export const SQL_DATASOURCE_KINDS: ReadonlySet<string> = new Set([DatasourceKind
 
 export const AccessMethod = {
   Native: 'native',
-  QaPortforward: 'qa-portforward',
+  KubectlPortforward: 'kubectl-portforward',
   Tsh: 'tsh',
 } as const;
 export type AccessMethod = (typeof AccessMethod)[keyof typeof AccessMethod];

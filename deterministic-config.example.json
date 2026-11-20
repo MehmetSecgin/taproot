@@ -24,7 +24,7 @@
     "sandbox": {
       "deterministicRequired": false,
       "allowDiscoveryByDefault": true,
-      "preferredAccessMethods": ["qa-portforward", "tsh"],
+      "preferredAccessMethods": ["kubectl-portforward", "tsh"],
       "targetPreference": ["tidb", "mysql"]
     }
   },

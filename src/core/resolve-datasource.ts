@@ -1,6 +1,6 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './naming.js';
-import { saveKbBootstrapCandidate } from './bootstrap.js';
+import { requireAccessMethod, saveKbBootstrapCandidate } from './bootstrap.js';
 import { levenshtein, suggestNames } from './grpc-introspect.js';
 import { discoverKubernetesTargets } from './discovery.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
@@ -99,14 +99,14 @@ export interface ResolveWithFallbacksInput {
   policy: EnvironmentPolicy;
 }
 
-function preferredAccessMethods(policy: EnvironmentPolicy, kbAccessMethod?: string): string[] {
-  const out = [...policy.preferredAccessMethods];
+function preferredAccessMethods(env: string, policy: EnvironmentPolicy, kbAccessMethod?: string): string[] {
+  const out: string[] = policy.preferredAccessMethods.map((method) => requireAccessMethod(str(method).trim().toLowerCase(), `environmentPolicies.${env}.preferredAccessMethods`));
   if (kbAccessMethod && !out.includes(kbAccessMethod)) out.push(kbAccessMethod);
-  return out.filter(Boolean);
+  return out;
 }
 
 function discoverTargets(input: { env: string; service: string; accessMethods: string[]; namespace?: string; policy: EnvironmentPolicy }): string[] {
-  if (!input.accessMethods.some((method) => str(method).trim().toLowerCase() === AccessMethod.QaPortforward)) return [];
+  if (!input.accessMethods.includes(AccessMethod.KubectlPortforward)) return [];
   return discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, input.policy);
 }
 
@@ -138,14 +138,14 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
     const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
     const kbAccessMethod = str(kb?.access_method).trim().toLowerCase();
     const targetNamespace = String(kb?.namespace || namespace || 'default');
-    const accessMethods = preferredAccessMethods(policy, kbAccessMethod);
+    const accessMethods = preferredAccessMethods(env, policy, kbAccessMethod);
     const targets = discoverTargets({ env, service, accessMethods, namespace: targetNamespace, policy });
     if (targets.length) {
       const target = targets[0];
       const database = str(kb?.database || service.replace(/-/g, '_'));
       const dbUser = str(kb?.db_user);
       const syntheticKb = {
-        access_method: AccessMethod.QaPortforward,
+        access_method: AccessMethod.KubectlPortforward,
         database,
         db_user: dbUser,
         target,
