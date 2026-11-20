@@ -4,10 +4,12 @@ import { parseDatasourceProfile } from './schemas.js';
 import { str } from '../core/strings.js';
 import { ambiguousDatasource } from '../core/error-classification.js';
 
-function tooManyMatches(candidates: DatasourceProfile[], env: string, service: string, namespace?: string): Error {
+function ambiguousMatchError(candidates: DatasourceProfile[], env: string, service: string, namespace?: string): Error {
   const names = candidates.map((d) => d.name);
   const target = `env=${env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`;
-  return ambiguousDatasource(`${names.length} datasources match ${target}: ${names.join(', ')}. Narrow with --namespace, or use --datasource <name> on query and doctor.`, { candidates: names });
+  const pickByName = 'use --datasource <name> on query and doctor';
+  const fix = namespace ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
+  return ambiguousDatasource(`${names.length} datasources match ${target}: ${names.join(', ')}. ${fix}`);
 }
 
 function rowName(row: unknown): string {
@@ -67,7 +69,7 @@ export class DatasourceStore {
       });
       const ofKind = filtered.filter((d) => preferKinds.includes(d.kind));
       const candidates = ofKind.length ? ofKind : filtered;
-      if (candidates.length > 1) throw tooManyMatches(candidates, envValue, service, nsValue);
+      if (candidates.length > 1) throw ambiguousMatchError(candidates, envValue, service, nsValue);
       return candidates[0];
     };
 

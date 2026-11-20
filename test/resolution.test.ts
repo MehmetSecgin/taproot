@@ -73,6 +73,28 @@ describe('datasource resolution', () => {
     expect(store.resolveByEnvService('qa', 'svc', 'test')?.name).toBe('qa-test-svc');
   });
 
+  it('only offers --datasource when the namespace is already given', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
+    const store = new DatasourceStore(path.join(dir, 'datasources.json'));
+    const base = {
+      kind: 'grpc',
+      env: 'qa',
+      namespace: 'develop',
+      service: 'svc',
+      tags: [],
+      connection: {},
+      credentialRef: 'qa',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: '2026-03-01T00:00:00.000Z',
+    };
+    store.save({ ...base, name: 'qa-svc-grpc' } as never);
+    store.save({ ...base, name: 'qa-svc-legacy-grpc' } as never);
+
+    expect(() => store.resolveByEnvService('qa', 'svc', 'develop', ['grpc'])).toThrow(
+      'AMBIGUOUS_DATASOURCE: 2 datasources match env=qa namespace=develop service=svc: qa-svc-grpc, qa-svc-legacy-grpc. Pick one: use --datasource <name> on query and doctor.',
+    );
+  });
+
   it('picks the datasource of the requested kind and refuses to guess without one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const store = new DatasourceStore(path.join(dir, 'datasources.json'));
