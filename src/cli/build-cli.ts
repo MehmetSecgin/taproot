@@ -29,7 +29,7 @@ export function buildCli<E extends Executor>(input: {
     .description(input.description)
     .option('-V, --version', 'Print the version')
     .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
-    .option('--lines', 'Print one JSON value per line: a query prints {ok, columns, warnings}, then one line per row; a list prints {ok}, then one line per item; with --pluck, one line per array item. A failure prints the full error envelope.', false);
+    .option('--lines', 'Print one JSON value per line: a query prints {ok, columns, truncated, warnings}, then one line per row; a list prints {ok}, then one line per item; with --pluck, one line per array item. A failure prints the full error envelope.', false);
   input.executor.addOptions(program);
   program
     .configureHelp({ formatHelp: helpJson })

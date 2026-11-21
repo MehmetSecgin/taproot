@@ -36,6 +36,7 @@ async function queryDaemon(listenFor: (stateRoot: string) => DaemonListen, plugi
     listen: listenFor(stateRoot),
     methods: [queryMethod()],
     checkDatasource: undefined,
+    checkDatasourceTtlMs: undefined,
     log: () => undefined,
   });
   running.push(daemon);

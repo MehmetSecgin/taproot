@@ -48,6 +48,7 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
     allowKeys: false,
     skipProtoValidate: false,
     timeoutMs: 5_000,
+    maxRows: undefined,
     ...overrides,
   };
 }

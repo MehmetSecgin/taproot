@@ -22,8 +22,9 @@ async function main() {
   await startDaemon({
     ctx: buildContext({ kbDir: undefined, verbose: false, plugins: builtinPlugins(), useKeychain: true }),
     listen: { kind: 'unix', socketPath },
-    methods: [statusMethod(), stopMethod(), queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS }), schemaMethod()],
+    methods: [statusMethod(), stopMethod(), queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS, filter: undefined }), schemaMethod()],
     checkDatasource: undefined,
+    checkDatasourceTtlMs: undefined,
     log: (event) => process.stdout.write(`${JSON.stringify(event)}\n`),
   });
   process.stdout.write(`${JSON.stringify({ started: true, socketPath })}\n`);

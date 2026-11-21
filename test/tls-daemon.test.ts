@@ -40,7 +40,9 @@ interface TlsDaemonInput {
   profile?: Partial<DatasourceProfile>;
   query?: QueryMethodOptions;
   checkDatasource?: DatasourceCheck;
+  checkDatasourceTtlMs?: number;
   listColumns?: DatasourceColumn[];
+  listFilter?: (profile: DatasourceProfile) => boolean;
   reloadMs?: number;
   log?: DaemonLog;
 }
@@ -50,8 +52,9 @@ async function tlsDaemon(input: TlsDaemonInput = {}): Promise<HostPort> {
   const daemon = await startDaemon({
     ctx: buildContext({ kbDir: undefined, verbose: false, plugins: [input.plugin ?? fakePlugin()], useKeychain: false }),
     listen: { kind: 'tls', host: '127.0.0.1', port: 0, tls: input.files ?? pki.daemon, reloadMs: input.reloadMs ?? 60_000 },
-    methods: [queryMethod(input.query), datasourceListMethod({ columns: input.listColumns ?? DATASOURCE_COLUMNS }), schemaMethod()],
+    methods: [queryMethod(input.query), datasourceListMethod({ columns: input.listColumns ?? DATASOURCE_COLUMNS, filter: input.listFilter }), schemaMethod()],
     checkDatasource: input.checkDatasource,
+    checkDatasourceTtlMs: input.checkDatasourceTtlMs,
     log: input.log ?? (() => undefined),
   });
   running.push(daemon.stop);
@@ -305,6 +308,20 @@ describe('query request shaper', () => {
     expect(res.error?.message).toContain('Mutating query detected');
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it('caps the rows at the maxRows the shaper sets, whatever the client sent', async () => {
+    // arrange
+    const server = await tlsDaemon({
+      plugin: fakePlugin({ rows: [[1], [2], [3]] }),
+      query: { shapeRequest: (request) => ({ ...request, maxRows: 2 }) },
+    });
+
+    // act
+    const res = await callAs(pki.client, server, 'query.execute', { datasource: 'qa-fake', query: 'SELECT ok FROM t', maxRows: 1000 });
+
+    // assert
+    expect(res.data).toMatchObject({ rows: [[1], [2]], truncated: true });
+  });
 });
 
 describe('datasource check', () => {
@@ -386,6 +403,23 @@ describe('datasource check', () => {
     expect(checkDatasource.mock.calls[0][0].signal.aborted).toBe(true);
   });
 
+  it('checks a passed datasource again once its time limit runs out', async () => {
+    // arrange
+    const checkDatasource = vi.fn<DatasourceCheck>().mockResolvedValue(undefined);
+    const server = await tlsDaemon({ checkDatasource, checkDatasourceTtlMs: 500 });
+    await readOk(server);
+    await readOk(server);
+    const checksWithinLimit = checkDatasource.mock.calls.length;
+
+    // act
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await readOk(server);
+
+    // assert
+    expect(checksWithinLimit).toBe(1);
+    expect(checkDatasource).toHaveBeenCalledTimes(2);
+  });
+
   it('checks a datasource again when its stored credentials change', async () => {
     // arrange
     const checkDatasource = vi.fn<DatasourceCheck>().mockResolvedValue(undefined);
@@ -420,6 +454,17 @@ describe('catalog methods', () => {
       columns: ['name', 'kind', 'env', 'service', 'host', 'database'],
       rows: [['qa-fake', 'fake', 'qa', 'fake', '127.0.0.1', 'fake']],
     });
+  });
+
+  it('lists only the profiles its filter keeps', async () => {
+    // arrange
+    const server = await tlsDaemon({ listFilter: (profile) => profile.kind === 'mysql' });
+
+    // act
+    const res = await callAs(pki.client, server, 'datasource.list', {});
+
+    // assert
+    expect(res.data).toEqual({ columns: [], rows: [] });
   });
 
   it('lists only the columns the daemon serves', async () => {

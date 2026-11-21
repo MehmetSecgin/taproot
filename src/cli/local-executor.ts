@@ -61,7 +61,7 @@ export function localExecutor(input: { plugins: TapRootPlugin[] }): LocalExecuto
     },
 
     async listDatasources(request) {
-      return listDatasources(context(), request, DATASOURCE_COLUMNS);
+      return listDatasources(context(), request, DATASOURCE_COLUMNS, undefined);
     },
 
     async readSchema(request) {

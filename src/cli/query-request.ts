@@ -40,6 +40,7 @@ export function queryExecutionRequest(
     requestJson: opts.requestJson,
     skipProtoValidate: Boolean(opts.skipProtoValidate),
     timeoutMs,
+    maxRows: undefined,
     tz: opts.tz,
   };
 }

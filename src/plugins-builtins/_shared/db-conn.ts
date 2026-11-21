@@ -110,22 +110,76 @@ export async function leaseMysqlConnection(config: ConnectionOptions, timeZone: 
   return { conn, release };
 }
 
+interface FieldPacket {
+  name: string;
+}
+
+interface StreamingQuery {
+  on(event: 'fields', listener: (fields: FieldPacket[] | undefined) => void): StreamingQuery;
+  on(event: 'result', listener: (row: unknown) => void): StreamingQuery;
+  on(event: 'error', listener: (error: Error) => void): StreamingQuery;
+  on(event: 'end', listener: () => void): StreamingQuery;
+}
+
+interface StreamingConnection {
+  query(options: { sql: string; rowsAsArray: boolean; timeout: number | undefined }): StreamingQuery;
+  stream: { destroy(): void };
+}
+
+function wireOf(conn: Connection): StreamingConnection {
+  return (conn as unknown as { connection: StreamingConnection }).connection;
+}
+
+function hangUp(conn: Connection): void {
+  conn.destroy();
+  wireOf(conn).stream.destroy();
+}
+
+function readRows(conn: Connection, sql: string, timeoutMs: number | undefined, maxRows: number | undefined): Promise<QueryResult['result']> {
+  const wire = wireOf(conn);
+  return new Promise((resolve, reject) => {
+    let columns: string[] = [];
+    const rows: unknown[][] = [];
+    let settled = false;
+    const settle = (result: QueryResult['result']) => {
+      settled = true;
+      resolve(result);
+    };
+    wire.query({ sql, rowsAsArray: true, timeout: timeoutMs })
+      .on('fields', (fields) => {
+        if (Array.isArray(fields)) columns = fields.map((field) => field.name);
+      })
+      .on('result', (row) => {
+        if (settled || !Array.isArray(row)) return;
+        if (rows.length === maxRows) {
+          hangUp(conn);
+          settle({ columns, rows, truncated: true });
+          return;
+        }
+        rows.push(row);
+      })
+      .on('error', (error) => {
+        if (!settled) reject(error);
+      })
+      .on('end', () => {
+        if (!settled) settle({ columns, rows });
+      });
+  });
+}
+
 async function queryRows(
   conn: Connection,
   sql: string,
   timeoutMs: number | undefined,
+  maxRows: number | undefined,
   signal: AbortSignal | undefined,
 ): Promise<QueryResult['result']> {
-  const destroy = () => conn.destroy();
-  signal?.addEventListener('abort', destroy, { once: true });
+  const abort = () => hangUp(conn);
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    const [rows, fields] = await conn.query({ sql, rowsAsArray: true, timeout: timeoutMs });
-    return {
-      columns: Array.isArray(fields) ? fields.map((field) => field.name) : [],
-      rows: Array.isArray(rows) ? (rows as unknown[][]) : [],
-    };
+    return await readRows(conn, sql, timeoutMs, maxRows);
   } finally {
-    signal?.removeEventListener('abort', destroy);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -144,7 +198,7 @@ export async function executeMysqlQuery(
     timeoutMs: request.timeoutMs,
   });
   try {
-    const result = await queryRows(conn, request.query, request.timeoutMs, request.signal);
+    const result = await queryRows(conn, request.query, request.timeoutMs, request.maxRows, request.signal);
     return {
       datasource: request.datasource.name,
       plugin,
@@ -158,7 +212,7 @@ export async function executeMysqlQuery(
   } catch (error) {
     const message = str((error as Error).message);
     if (request.timeoutMs && /timeout/i.test(message)) {
-      conn.destroy();
+      hangUp(conn);
       throw queryTimeoutError(request.timeoutMs);
     }
     const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);

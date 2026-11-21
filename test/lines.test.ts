@@ -16,6 +16,17 @@ describe('toLines', () => {
     expect(toLines(envelope)[0]).toEqual({ ok: true, columns: ['id'], warnings: ['partition_scan_bypassed'] });
   });
 
+  it('marks the header when the rows were cut', () => {
+    // arrange
+    const envelope = { ok: true, data: { columns: ['id'], rows: [[1]], truncated: true } };
+
+    // act
+    const header = toLines(envelope)[0];
+
+    // assert
+    expect(header).toEqual({ ok: true, columns: ['id'], truncated: true });
+  });
+
   it('prints only the header for an empty result', () => {
     expect(toLines({ ok: true, data: { columns: ['id'], rows: [] } })).toEqual([{ ok: true, columns: ['id'] }]);
   });

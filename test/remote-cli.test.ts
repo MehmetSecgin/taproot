@@ -26,10 +26,11 @@ beforeAll(async () => {
   daemon = await startDaemon({
     ctx: buildContext({ kbDir: undefined, verbose: false, plugins: [plugin], useKeychain: false }),
     listen: { kind: 'tls', host: '127.0.0.1', port: 0, tls: pki.daemon, reloadMs: 60_000 },
-    methods: [queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS }), schemaMethod()],
+    methods: [queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS, filter: undefined }), schemaMethod()],
     checkDatasource: async ({ datasource }) => {
       if (datasource.name === 'qa-closed') throw new Error("'qa-closed' is not served here.");
     },
+    checkDatasourceTtlMs: undefined,
     log: () => undefined,
   });
   cliEnv = {

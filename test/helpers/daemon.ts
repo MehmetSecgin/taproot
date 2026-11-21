@@ -12,8 +12,9 @@ export function startLocalDaemon(input: { stateRoot: string; socketPath: string;
   return startDaemon({
     ctx: buildContext({ kbDir: undefined, verbose: false, plugins: [...builtinPlugins(), ...input.plugins], useKeychain: true }),
     listen: { kind: 'unix', socketPath: input.socketPath },
-    methods: [statusMethod(), stopMethod(), queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS }), schemaMethod()],
+    methods: [statusMethod(), stopMethod(), queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS, filter: undefined }), schemaMethod()],
     checkDatasource: undefined,
+    checkDatasourceTtlMs: undefined,
     log: () => undefined,
   });
 }

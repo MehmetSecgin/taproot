@@ -43,12 +43,17 @@ function withoutEmptyColumns(columns: string[], rows: unknown[][]): { columns: s
   };
 }
 
-export function listDatasources(ctx: AppContext, request: DatasourceListRequest, columns: readonly DatasourceColumn[]): Record<string, unknown> {
+export function listDatasources(
+  ctx: AppContext,
+  request: DatasourceListRequest,
+  columns: readonly DatasourceColumn[],
+  filter: ((profile: DatasourceProfile) => boolean) | undefined,
+): Record<string, unknown> {
   const shown = columns.filter((column) => request.detailed || !DETAILED_ONLY_COLUMNS.has(column));
   const needle = request.pattern.toLowerCase();
   const { profiles, warnings } = ctx.datasourceStore.load();
   const rows = profiles
-    .filter((d) => d.name.toLowerCase().includes(needle))
+    .filter((d) => d.name.toLowerCase().includes(needle) && (filter?.(d) ?? true))
     .toSorted((a, b) =>
       str(a.env).localeCompare(str(b.env))
       || str(a.namespace).localeCompare(str(b.namespace))
