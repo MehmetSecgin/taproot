@@ -374,6 +374,18 @@ describe('datasource check', () => {
     expect(checkDatasource).toHaveBeenCalledTimes(2);
   });
 
+  it('aborts the signal of a check that outlasts the query timeout', async () => {
+    // arrange
+    const checkDatasource = vi.fn<DatasourceCheck>().mockReturnValue(new Promise(() => undefined));
+    const server = await tlsDaemon({ checkDatasource });
+
+    // act
+    await callAs(pki.client, server, 'query.execute', { datasource: 'qa-fake', query: 'SELECT 1 AS ok', timeoutMs: 50 });
+
+    // assert
+    expect(checkDatasource.mock.calls[0][0].signal.aborted).toBe(true);
+  });
+
   it('checks a datasource again when its stored credentials change', async () => {
     // arrange
     const checkDatasource = vi.fn<DatasourceCheck>().mockResolvedValue(undefined);

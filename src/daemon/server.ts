@@ -120,11 +120,10 @@ export async function startDaemon(input: {
   let inFlight = 0;
   let lastActivityAt = startedAt;
 
-  let released = false;
-  const releaseSocket = (): void => {
-    if (released || listen.kind !== 'unix') return;
-    released = true;
-    fs.rmSync(listen.socketPath, { force: true });
+  let closed: Promise<void> | undefined;
+  const stopListening = (): Promise<void> => {
+    closed ??= new Promise<void>((resolve) => server.close(() => resolve()));
+    return closed;
   };
 
   const onConnection = (socket: net.Socket): void => {
@@ -139,7 +138,7 @@ export async function startDaemon(input: {
         const handler = req.method === RpcMethod.DaemonStop || req.clientVersion === TAPROOT_VERSION ? handlers.get(req.method) : onOtherVersion;
         const { response, postWrite } = await answerRpc(req, handler, deps, clientGone.signal);
         if (!response.ok) log(failureEvent(req, response, socket));
-        if (postWrite === 'stopSocket') releaseSocket();
+        if (postWrite === 'stopSocket') void stopListening();
         writeRpcResponse(socket, response);
         inFlight -= 1;
         lastActivityAt = Date.now();
@@ -174,9 +173,8 @@ export async function startDaemon(input: {
     process.off('SIGINT', cleanUpAndExit);
     process.off('SIGTERM', cleanUpAndExit);
     for (const timer of timers) clearInterval(timer);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await stopListening();
     await closePlugins(ctx);
-    releaseSocket();
   };
   const unregisterStop = registerCleanup(`daemon-stop:${JSON.stringify(endpoint)}`, stop);
 

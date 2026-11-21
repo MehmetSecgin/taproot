@@ -127,4 +127,24 @@ describe('daemon lifecycle', () => {
     await expect(second).rejects.toThrow('taprootd already running');
     expect((await rpcCall({ socketPath, method: 'query.execute', params: READ })).ok).toBe(true);
   });
+
+  it('leaves the socket to a successor that binds while it still closes its plugins', async () => {
+    // arrange
+    let finishClosing = (): void => undefined;
+    const close = vi.fn(() => new Promise<void>((resolve) => {
+      finishClosing = resolve;
+    }));
+    const old = await queryDaemon(onUnixSocket, { ...fakePlugin(), close });
+    const socketPath = socketPathOf(old);
+
+    // act
+    const stopping = old.stop();
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    await queryDaemon(() => ({ kind: 'unix', socketPath }));
+    finishClosing();
+    await stopping;
+
+    // assert
+    expect((await rpcCall({ socketPath, method: 'query.execute', params: READ })).ok).toBe(true);
+  });
 });
