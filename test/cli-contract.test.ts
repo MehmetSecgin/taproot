@@ -16,7 +16,7 @@ describe('cli contract', () => {
     const out = runCli(['--help']);
     expect(out.status).toBe(0);
     const names = JSON.parse(out.stdout).data.commands.map((c: { name: string }) => c.name.split(' ')[0]);
-    expect(names.filter((n: string) => n !== 'help').sort()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query']);
+    expect(names.filter((n: string) => n !== 'help').toSorted()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query']);
   });
 
   it('prints the version as JSON', async () => {

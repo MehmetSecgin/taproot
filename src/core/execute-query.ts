@@ -118,7 +118,7 @@ function buildPluginParams(request: QueryExecutionRequest, params: Record<string
 
 function mergeSchemaContext(base: SchemaContext, pluginSchema: SchemaContext | undefined): SchemaContext {
   if (!pluginSchema) return base;
-  return { ...base, ...pluginSchema, tables: { ...(base.tables || {}), ...(pluginSchema.tables || {}) } };
+  return { ...base, ...pluginSchema, tables: { ...base.tables, ...pluginSchema.tables } };
 }
 
 function failure(error: unknown, meta: QueryOutcomeMeta): QueryOutcome {
@@ -352,7 +352,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return {
       ...outcome,
       message: `${outcome.message}. Did you mean: ${didYouMean.join(', ')}?`,
-      details: { ...((outcome.details as Record<string, unknown>) || {}), didYouMean },
+      details: { ...(outcome.details as Record<string, unknown>), didYouMean },
     };
   }
 }

@@ -8,7 +8,7 @@ import type { SessionCheckpoint, SessionRecord } from './types.js';
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+  const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) => a.localeCompare(b));
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
@@ -33,7 +33,7 @@ export function buildFingerprint(input: {
     service: input.service || '',
     kind: input.kind || '',
     connection: input.connection || {},
-    connectors: [...(input.connectors || [])].sort(),
+    connectors: (input.connectors || []).toSorted(),
   };
   return sha256(stableStringify(payload));
 }
@@ -82,7 +82,7 @@ export class SessionRegistry {
   }
 
   list(): SessionRecord[] {
-    return [...this.sessionsById.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...this.sessionsById.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   get(sessionId: string): SessionRecord | undefined {
@@ -165,10 +165,10 @@ export class SessionRegistry {
     let expired = 0;
     let staleLeases = 0;
     const expiredSessionIds: string[] = [];
-    for (const session of [...this.sessionsById.values()]) {
+    for (const session of this.sessionsById.values()) {
       const leases = this.leaseHeartbeats.get(session.sessionId);
       if (leases) {
-        for (const [leaseId, heartbeatAt] of [...leases.entries()]) {
+        for (const [leaseId, heartbeatAt] of leases.entries()) {
           if (now - heartbeatAt > RUNTIME_CONSTANTS.session.leaseStaleThresholdMs) {
             leases.delete(leaseId);
             staleLeases += 1;

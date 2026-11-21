@@ -94,7 +94,7 @@ function scanTables(statements: readonly unknown[]): { tables: Set<string>; alia
 export function collectReferencedTables(sql: string): string[] {
   const statements = parseExecutedStatements(sql);
   if (!statements) return [];
-  return [...scanTables(statements).tables].sort((a, b) => a.localeCompare(b));
+  return [...scanTables(statements).tables].toSorted((a, b) => a.localeCompare(b));
 }
 
 function collectColumnRefs(expr: unknown, aliasToTable: Map<string, string>, out: PredicateColumnRefs): void {

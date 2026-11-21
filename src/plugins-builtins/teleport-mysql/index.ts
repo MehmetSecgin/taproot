@@ -155,7 +155,8 @@ async function stopProxy(proxy: ProxyRuntime): Promise<void> {
 export async function closeTeleportMysqlSessionProxies(sessionId: string): Promise<void> {
   const keys = proxyKeyBySession.get(sessionId);
   if (!keys || !keys.size) return;
-  for (const key of [...keys]) {
+  const keysAtStart = [...keys];
+  for (const key of keysAtStart) {
     const starting = proxiesByKey.get(key);
     proxiesByKey.delete(key);
     removeSessionProxy(sessionId, key);
@@ -165,7 +166,8 @@ export async function closeTeleportMysqlSessionProxies(sessionId: string): Promi
 }
 
 export async function closeAllTeleportMysqlProxies(): Promise<void> {
-  for (const sessionId of [...proxyKeyBySession.keys()]) await closeTeleportMysqlSessionProxies(sessionId);
+  const sessionIdsAtStart = [...proxyKeyBySession.keys()];
+  for (const sessionId of sessionIdsAtStart) await closeTeleportMysqlSessionProxies(sessionId);
 }
 
 async function ensureProxy(sessionId: string, target: string, user: string, database: string): Promise<ProxyRuntime> {
@@ -239,7 +241,7 @@ async function startProxy(
     return runtime;
   } catch (error) {
     await stopProxy(runtime);
-    if (spawnError.startsWith('MISSING_TOOL:')) throw new Error(spawnError);
+    if (spawnError.startsWith('MISSING_TOOL:')) throw new Error(spawnError, { cause: error });
     if (spawnError) throw connectivity(`teleport proxy path unavailable; ${spawnError}`);
     const exit = exitState.value;
     if (exit) {
@@ -290,8 +292,8 @@ export const teleportMysqlPlugin: TapRootPlugin = {
       await conn.end();
       return [{ check: 'teleport-mysql query', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
     } catch (error) {
-      const detail = (error as Error).message;
-      return [{ check: 'teleport-mysql query', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
+      const queryFailure = (error as Error).message;
+      return [{ check: 'teleport-mysql query', status: DoctorStatus.Fail, detail: queryFailure, code: classifyExecutorDoctorCode(queryFailure) }];
     } finally {
       await closeTeleportMysqlSessionProxies(sessionId);
     }

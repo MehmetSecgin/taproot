@@ -162,7 +162,7 @@ export class CredentialStore {
       if (out.has(ref)) continue;
       out.set(ref, { ref, keys: Object.keys(value || {}), source: 'fallback' });
     }
-    return Array.from(out.values()).sort((a, b) => a.ref.localeCompare(b.ref));
+    return Array.from(out.values()).toSorted((a, b) => a.ref.localeCompare(b.ref));
   }
 
   async remove(ref: string): Promise<void> {
