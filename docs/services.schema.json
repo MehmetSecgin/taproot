@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taproot.invalid/schemas/services.schema.json",
+  "title": "TapRoot KB services.json",
+  "description": "One row per service. See docs/kb-schema.md.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["service"],
+    "properties": {
+      "service": { "type": "string", "minLength": 1 },
+      "connections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["env"],
+          "properties": {
+            "env": { "type": "string", "minLength": 1 },
+            "namespace": { "type": "string" },
+            "status": { "type": "string" },
+            "engine": { "type": "string" },
+            "database": { "type": "string" },
+            "db_user": { "type": "string" },
+            "host": { "type": "string" },
+            "port": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1, "maximum": 65535 },
+                { "type": "string", "pattern": "^[0-9]+$" }
+              ]
+            },
+            "target": { "type": "string" },
+            "access_method": { "enum": ["native", "qa-portforward", "tsh"] },
+            "verified_at_utc": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?(Z|[+-]\\d{2}:\\d{2})$"
+            }
+          }
+        }
+      }
+    }
+  }
+}
