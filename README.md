@@ -17,7 +17,7 @@ taproot init
 
 `taproot init` creates `~/.taproot/` and prints readiness checks. Rerun it any time.
 
-Credentials go to the OS keychain through the optional `keytar` dependency. If `keytar` did not build, they go to an encrypted file under `~/.taproot/config/` instead; npm versions that gate install scripts build it only after `npm approve-scripts keytar` and a reinstall.
+Credentials go to the OS keychain through the optional `keytar` dependency. If `keytar` did not build, they go to an encrypted file under `~/.taproot/config/` instead.
 
 | Variable | Effect | Default |
 |---|---|---|
@@ -84,6 +84,51 @@ With a KB, `taproot init datasource --env <env> --service <service>` creates the
 ```
 
 `access_method` is `native`, `tsh` or `kubectl-portforward`. `kubectl-portforward` uses the connection's `k8s_context` as the kubectl context, or the env name when it is unset, and gives each env, namespace and service its own local port in 20000-29999. Queries use an existing datasource profile over the KB; `init datasource` rewrites a profile that conflicts with it.
+
+## Build your own daemon or CLI
+
+`taproot` and `taprootd` are assembled from the package's public entry points: `/core`, `/daemon`, `/cli` and one `/plugins/<kind>` per plugin. Install a tag with `npm install github:MehmetSecgin/taproot#<tag>`; the `prepare` script builds it. npm versions that gate dependency install scripts need the installing project's `package.json` to allow them:
+
+```json
+"allowScripts": { "github:MehmetSecgin/taproot#<tag>": true, "keytar": true, "protobufjs": false }
+```
+
+TapRoot is keyed by the same spec as in `dependencies`. `keytar` builds the OS keychain module, which `useKeychain: false` does without. The `protobufjs` script only prints a version warning.
+
+A daemon that serves MySQL datasources over mutual TLS 1.3, rereading its certificates every 30 seconds:
+
+```js
+import { buildContext } from '@mehmetsecgin/taproot/core';
+import { datasourceListMethod, queryMethod, schemaMethod, startDaemon } from '@mehmetsecgin/taproot/daemon';
+import { mysqlPlugin } from '@mehmetsecgin/taproot/plugins/mysql';
+
+await startDaemon({
+  ctx: buildContext({ plugins: [mysqlPlugin], useKeychain: false }),
+  listen: { kind: 'tls', host: '0.0.0.0', port: 7443, tls: { caFile: 'ca.crt', certFile: 'daemon.crt', keyFile: 'daemon.key' }, reloadMs: 30_000 },
+  methods: [datasourceListMethod({ columns: ['name', 'kind', 'env', 'service'] }), schemaMethod(), queryMethod()],
+  checkDatasource: async ({ datasource }) => {
+    if (datasource.env === 'prod') throw new Error(`'${datasource.name}' is not served here.`);
+  },
+  log: (event) => console.log(JSON.stringify(event)),
+});
+```
+
+`useKeychain: false` reads credentials only from the encrypted file under `TAPROOT_STATE_ROOT`. `checkDatasource` vets each datasource before a query or schema read first uses it, again when its profile or credentials change, and again after it failed. A refusal reaches the client as `DATASOURCE_REFUSED` unless the error already names a class, such as a `TaprootError` or a connection failure. `datasourceListMethod` returns only the columns it is given; `DATASOURCE_COLUMNS` holds them all. `queryMethod({ shapeRequest })` decides which request fields a client may set.
+
+A CLI for that daemon:
+
+```js
+import { buildCli, datasourceListCommand, queryCommand, remoteExecutor, schemaCommand } from '@mehmetsecgin/taproot/cli';
+
+await buildCli({
+  name: 'orders-cli',
+  description: 'Read the orders databases.',
+  commands: [datasourceListCommand, schemaCommand, queryCommand],
+  executor: remoteExecutor({ host: 'daemon.example.com', port: 7443, tls: { caFile: 'ca.crt', certFile: 'client.crt', keyFile: 'client.key' } }),
+}).run(process.argv);
+```
+
+`scripts/make-mtls-certs.sh <dir> IP:127.0.0.1` writes a CA plus daemon and client certificates for trying it out.
 
 ## License
 

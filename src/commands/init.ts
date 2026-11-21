@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
+import type { LocalExecutor } from '../cli/types.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { reconcileDatasource } from '../core/bootstrap.js';
 import { printEnvelope } from '../core/output.js';
@@ -9,11 +9,11 @@ import { ensureStarterRuntime } from '../core/runtime-init.js';
 import { str } from '../core/strings.js';
 import { DoctorStatus } from '../types/core.js';
 
-export function registerInit(program: Command, getCtx: () => AppContext): void {
+export function initCommand(program: Command, executor: LocalExecutor): void {
   const init = program.command('init').description('Initialize local TapRoot runtime state for first use');
 
   init.action(async () => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const createdConfig = ensureStarterRuntime(ctx);
     const kbDirToSave = str(program.opts().kbDir).trim() || (ctx.runtimeConfigStore.get().kbDir ? '' : str(process.env.TAPROOT_KB_DIR).trim());
     if (kbDirToSave) ctx.runtimeConfigStore.saveKbDir(path.resolve(kbDirToSave));
@@ -35,7 +35,7 @@ export function registerInit(program: Command, getCtx: () => AppContext): void {
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .requiredOption('--service <service>', 'service name')
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       ctx.kbStore.requirePresent();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const namespace = normalizeNamespace(opts.namespace);

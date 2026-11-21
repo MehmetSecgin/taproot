@@ -1,194 +1,164 @@
 import fs from 'node:fs';
-import net from 'node:net';
-import os from 'node:os';
+import net, { type AddressInfo } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
-import { buildContext } from '../core/app.js';
-import { classifyError } from '../core/error-classification.js';
+import tls from 'node:tls';
+import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
-import type { RpcRequest, RpcResponse } from './types.js';
-import type { PluginRegistry } from '../plugins/load-builtins.js';
-import { QueryLimiter } from './query-limiter.js';
-import { SessionRegistry } from './session-registry.js';
-import { closeAllTeleportMysqlProxies, closeTeleportMysqlSessionProxies } from '../plugins-builtins/teleport-mysql/index.js';
-import { closeAllMysqlPools, closeMysqlSessionPools } from '../plugins-builtins/_shared/db-conn.js';
-import { rpcCall } from './client.js';
-import { handleVersionMismatch } from './handlers/daemon-status.js';
-import { HANDLERS, type HandlerDeps } from './handlers/index.js';
-import { RpcMethod } from './types.js';
 import { TAPROOT_VERSION } from '../core/version.js';
+import { rpcCall } from './client.js';
+import { datasourceGate, type DatasourceCheck } from './datasource-check.js';
+import { refuseOtherVersion, stopForOtherVersion } from './handlers/daemon-status.js';
+import type { DaemonEndpoint, DaemonMethod, HandlerDeps } from './handlers/types.js';
+import { QueryLimiter } from './query-limiter.js';
+import { answerRpc, readRpcRequests, writeRpcResponse } from './rpc-connection.js';
+import { SessionRegistry } from './session-registry.js';
+import { mutualTlsServerOptions, readTlsMaterial, tlsFingerprint, type MutualTlsFiles } from './transport.js';
+import { RpcMethod } from './types.js';
 
-export interface DaemonOptions {
-  stateRoot?: string;
-  socketPath?: string;
-  configurePlugins?: (registry: PluginRegistry) => void;
+export type DaemonListen =
+  | { kind: 'unix'; socketPath: string }
+  | { kind: 'tls'; host: string; port: number; tls: MutualTlsFiles; reloadMs: number };
+
+export type DaemonLog = (event: Record<string, unknown>) => void;
+
+export interface DaemonInstance {
+  address: string | AddressInfo;
+  stop: () => Promise<void>;
 }
 
-function defaultRunDir(stateRoot?: string): string {
-  return path.join(stateRoot || process.env.TAPROOT_STATE_ROOT || path.join(os.homedir(), '.taproot'), 'run');
+async function claimSocket(socketPath: string): Promise<void> {
+  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+  if (!fs.existsSync(socketPath)) return;
+  const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then((res) => res.ok, () => false);
+  if (alive) throw new Error(`taprootd already running on ${socketPath}`);
+  fs.rmSync(socketPath, { force: true });
 }
 
-function responseBase(req: RpcRequest): RpcResponse {
-  return {
-    protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
-    requestId: req.requestId,
-    ok: false,
-    meta: {},
-  };
+function endpointOf(address: string | AddressInfo): DaemonEndpoint {
+  return typeof address === 'string' ? { socketPath: address } : { host: address.address, port: address.port };
 }
 
-function parseLine(line: string): RpcRequest {
-  const parsed = JSON.parse(line) as RpcRequest;
-  if (parsed.protocolVersion !== RUNTIME_CONSTANTS.protocolVersion) {
-    throw new Error(`Unsupported protocolVersion=${parsed.protocolVersion}`);
-  }
-  if (!parsed.requestId || !parsed.method || typeof parsed.params !== 'object') {
-    throw new Error('Invalid RPC request envelope');
-  }
-  return parsed;
+function reloadTlsOnChange(server: tls.Server, files: MutualTlsFiles, servedFingerprint: string, intervalMs: number, log: DaemonLog): NodeJS.Timeout {
+  let served = servedFingerprint;
+  return setInterval(() => {
+    try {
+      const material = readTlsMaterial(files);
+      const fingerprint = tlsFingerprint(material);
+      if (fingerprint === served) return;
+      server.setSecureContext(mutualTlsServerOptions(material));
+      served = fingerprint;
+      log({ tlsReload: 'applied' });
+    } catch (error) {
+      log({ tlsReload: 'failed', message: (error as Error).message });
+    }
+  }, intervalMs);
 }
 
-export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPath: string; stop: () => Promise<void> }> {
-  const runDir = defaultRunDir(opts.stateRoot);
-  const socketPath = opts.socketPath || path.join(runDir, 'taprootd.sock');
-  fs.mkdirSync(runDir, { recursive: true });
+function serverFor(listen: DaemonListen, onConnection: (socket: net.Socket) => void): { server: net.Server; watchCertificates: ((log: DaemonLog) => NodeJS.Timeout) | undefined } {
+  if (listen.kind === 'unix') return { server: net.createServer(onConnection), watchCertificates: undefined };
+  const material = readTlsMaterial(listen.tls);
+  const server = tls.createServer(mutualTlsServerOptions(material), onConnection);
+  return { server, watchCertificates: (log) => reloadTlsOnChange(server, listen.tls, tlsFingerprint(material), listen.reloadMs, log) };
+}
 
-  if (fs.existsSync(socketPath)) {
-    const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then((res) => res.ok, () => false);
-    if (alive) throw new Error(`taprootd already running on ${socketPath}`);
-    fs.rmSync(socketPath, { force: true });
-  }
+function listenOn(server: net.Server, listen: DaemonListen): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    const listening = () => {
+      server.off('error', reject);
+      resolve();
+    };
+    if (listen.kind === 'unix') server.listen(listen.socketPath, listening);
+    else server.listen(listen.port, listen.host, listening);
+  });
+}
 
-  const sessions = new SessionRegistry(runDir);
-  const queryLimiter = new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries);
-  const ctx = buildContext({});
-  opts.configurePlugins?.(ctx.pluginRegistry);
+async function closePlugins(ctx: AppContext): Promise<void> {
+  for (const plugin of ctx.pluginRegistry.values()) await plugin.close?.();
+}
+
+export async function startDaemon(input: {
+  ctx: AppContext;
+  listen: DaemonListen;
+  methods: DaemonMethod[];
+  checkDatasource: DatasourceCheck | undefined;
+  log: DaemonLog;
+}): Promise<DaemonInstance> {
+  const { ctx, listen, log } = input;
+  if (listen.kind === 'unix') await claimSocket(listen.socketPath);
+  const handlers = new Map(input.methods.map((method) => [method.name, method.handle]));
+  const onOtherVersion = listen.kind === 'unix' ? stopForOtherVersion : refuseOtherVersion;
   const startedAt = Date.now();
-
-  const deps: HandlerDeps = { ctx, sessions, queryLimiter, socketPath, startedAt };
+  const deps: HandlerDeps = {
+    ctx,
+    sessions: new SessionRegistry(path.join(ctx.paths.stateRoot, 'run')),
+    queryLimiter: new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries),
+    admitDatasource: datasourceGate(ctx, input.checkDatasource),
+    endpoint: () => endpointOf(server.address() as string | AddressInfo),
+    startedAt,
+  };
   let inFlight = 0;
   let lastActivityAt = startedAt;
 
-  const server = net.createServer((socket) => {
-    let buffer = '';
-    let chain = Promise.resolve();
-    const clientGone = new AbortController();
-    socket.setEncoding('utf8');
-    socket.on('close', () => clientGone.abort(new Error('client disconnected before the response')));
-
-    const write = (res: RpcResponse): void => {
-      socket.write(`${JSON.stringify(res)}\n`);
-    };
-
-    socket.on('data', (chunk) => {
-      buffer += chunk;
-      let idx = buffer.indexOf('\n');
-      while (idx >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) {
-          idx = buffer.indexOf('\n');
-          continue;
-        }
-
-        let req: RpcRequest;
-        try {
-          req = parseLine(line);
-        } catch (error) {
-          const res: RpcResponse = {
-            protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
-            requestId: 'unknown',
-            ok: false,
-            error: { code: 'BAD_REQUEST', message: (error as Error).message },
-            meta: {},
-          };
-          write(res);
-          idx = buffer.indexOf('\n');
-          continue;
-        }
-
-        chain = chain.then(async () => {
-          inFlight += 1;
-          const begin = Date.now();
-          const base = responseBase(req);
-          let postWrite: 'stopSocket' | undefined;
-          try {
-            const handler =
-              req.method === RpcMethod.DaemonStop || req.clientVersion === TAPROOT_VERSION ? HANDLERS.get(req.method) : handleVersionMismatch;
-            if (!handler) {
-              base.ok = false;
-              base.error = { code: 'UNKNOWN_METHOD', message: `Unknown RPC method: ${req.method}` };
-            } else {
-              const result = await handler({ req, base, deps, clientGone: clientGone.signal });
-              postWrite = result?.postWrite;
-            }
-          } catch (error) {
-            const message = (error as Error).message;
-            const code = classifyError(message);
-            base.ok = false;
-            base.error = {
-              code,
-              message,
-              details: (error as Error & { details?: Record<string, unknown> }).details,
-            };
-          }
-
-          base.meta = { ...base.meta, timings: { durationMs: Date.now() - begin } };
-          if (postWrite === 'stopSocket') releaseSocket();
-          write(base);
-          inFlight -= 1;
-          lastActivityAt = Date.now();
-
-          if (postWrite === 'stopSocket') {
-            socket.end();
-            void runRegisteredCleanup();
-          }
-        });
-        idx = buffer.indexOf('\n');
-      }
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(socketPath, () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-
-  fs.chmodSync(socketPath, 0o600);
-
-  const interval = setInterval(() => {
-    const sweep = sessions.onTick();
-    if (sweep.expiredSessionIds.length) {
-      for (const sessionId of sweep.expiredSessionIds) {
-        void closeTeleportMysqlSessionProxies(sessionId);
-        void closeMysqlSessionPools(sessionId);
-      }
-    }
-    if (inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs) onSignal();
-  }, RUNTIME_CONSTANTS.sweeper.tickMs);
-
   let released = false;
   const releaseSocket = (): void => {
-    if (released) return;
+    if (released || listen.kind !== 'unix') return;
     released = true;
-    fs.rmSync(socketPath, { force: true });
+    fs.rmSync(listen.socketPath, { force: true });
   };
+
+  const onConnection = (socket: net.Socket): void => {
+    let chain = Promise.resolve();
+    const clientGone = new AbortController();
+    socket.on('error', () => socket.destroy());
+    socket.on('close', () => clientGone.abort(new Error('client disconnected before the response')));
+    readRpcRequests(socket, (req) => {
+      chain = chain.then(async () => {
+        inFlight += 1;
+        const handler = req.method === RpcMethod.DaemonStop || req.clientVersion === TAPROOT_VERSION ? handlers.get(req.method) : onOtherVersion;
+        const { response, postWrite } = await answerRpc(req, handler, deps, clientGone.signal);
+        if (postWrite === 'stopSocket') releaseSocket();
+        writeRpcResponse(socket, response);
+        inFlight -= 1;
+        lastActivityAt = Date.now();
+        if (postWrite === 'stopSocket') {
+          socket.end();
+          void runRegisteredCleanup();
+        }
+      });
+    });
+  };
+
+  const { server, watchCertificates } = serverFor(listen, onConnection);
+  await listenOn(server, listen);
+  if (listen.kind === 'unix') fs.chmodSync(listen.socketPath, 0o600);
+  const address = server.address() as string | AddressInfo;
+
+  const timers = [
+    setInterval(() => {
+      for (const sessionId of deps.sessions.onTick().expiredSessionIds) {
+        for (const plugin of ctx.pluginRegistry.values()) void plugin.closeSession?.(sessionId);
+      }
+      const idle = inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs;
+      if (listen.kind === 'unix' && idle) onSignal();
+    }, RUNTIME_CONSTANTS.sweeper.tickMs),
+  ];
+  if (watchCertificates) timers.push(watchCertificates(log));
 
   let stopped = false;
   const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
-    clearInterval(interval);
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    for (const timer of timers) clearInterval(timer);
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await closeAllTeleportMysqlProxies();
-    await closeAllMysqlPools();
+    await closePlugins(ctx);
     releaseSocket();
   };
-  const unregisterStop = registerCleanup(`daemon-stop:${socketPath}`, stop);
+  const unregisterStop = registerCleanup(`daemon-stop:${JSON.stringify(endpointOf(address))}`, stop);
 
   const onSignal = () => {
     void runRegisteredCleanup().finally(() => process.exit(0));
@@ -197,7 +167,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<{ socketPat
   process.on('SIGTERM', onSignal);
 
   return {
-    socketPath,
+    address,
     stop: async () => {
       unregisterStop();
       await stop();

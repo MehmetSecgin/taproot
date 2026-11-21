@@ -1,13 +1,17 @@
 import type { AppContext } from '../../core/app.js';
+import type { DatasourceGate } from '../datasource-check.js';
 import type { SessionRegistry } from '../session-registry.js';
 import type { QueryLimiter } from '../query-limiter.js';
 import type { RpcRequest, RpcResponse } from '../types.js';
+
+export type DaemonEndpoint = { socketPath: string } | { host: string; port: number };
 
 export interface HandlerDeps {
   ctx: AppContext;
   sessions: SessionRegistry;
   queryLimiter: QueryLimiter;
-  socketPath: string;
+  admitDatasource: DatasourceGate;
+  endpoint: () => DaemonEndpoint;
   startedAt: number;
 }
 
@@ -21,3 +25,8 @@ export type Handler = (input: {
   deps: HandlerDeps;
   clientGone: AbortSignal;
 }) => Promise<HandlerResult | void>;
+
+export interface DaemonMethod {
+  name: string;
+  handle: Handler;
+}

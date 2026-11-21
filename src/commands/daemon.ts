@@ -3,7 +3,7 @@ import { printJson } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
 
-export function registerDaemon(program: Command): void {
+export function daemonCommand(program: Command): void {
   const d = program.command('daemon').description('The background daemon that keeps tunnels and connection pools open; the first query starts it');
 
   d.command('status').description('Show the running daemon: version, pid, sessions and query limits').action(async () => {

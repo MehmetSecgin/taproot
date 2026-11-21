@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { startLocalDaemon } from './helpers/daemon.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
 describe('daemon single instance', () => {
@@ -10,10 +10,10 @@ describe('daemon single instance', () => {
     // arrange
     const { stateRoot } = tempStateRoot();
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-    const first = await startDaemon({ stateRoot, socketPath });
+    const first = await startLocalDaemon({ stateRoot, socketPath, plugins: [] });
     try {
       // act
-      const second = startDaemon({ stateRoot, socketPath });
+      const second = startLocalDaemon({ stateRoot, socketPath, plugins: [] });
 
       // assert
       await expect(second).rejects.toThrow('taprootd already running');
@@ -32,7 +32,7 @@ describe('daemon single instance', () => {
     fs.writeFileSync(socketPath, '');
 
     // act
-    const daemon = await startDaemon({ stateRoot, socketPath });
+    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [] });
     try {
       // assert
       const status = await rpcCall({ socketPath, method: 'daemon.status' });

@@ -1,140 +1,44 @@
 #!/usr/bin/env node
-import { Command, type Help } from 'commander';
-import { buildContext } from './core/app.js';
-import { printEnvelope, printJson, setLines, setPluck } from './core/output.js';
-import { registerDoctor } from './commands/doctor.js';
-import { registerQuery } from './commands/query.js';
-import { registerDatasource } from './commands/datasource.js';
-import { registerKb } from './commands/kb.js';
-import { registerCreds } from './commands/creds.js';
-import { registerDaemon } from './commands/daemon.js';
-import { registerInit } from './commands/init.js';
-import { registerGrpc } from './commands/grpc.js';
-import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
-import { classifyError } from './core/error-classification.js';
+import {
+  buildCli,
+  credsCommand,
+  daemonCommand,
+  datasourceAdminCommand,
+  datasourceListCommand,
+  doctorCommand,
+  grpcCommand,
+  initCommand,
+  kbCommand,
+  localExecutor,
+  queryCommand,
+  schemaCommand,
+} from './api/cli.js';
 import { removedCliHint } from './core/removed-cli.js';
-import { unknownOptionHint } from './core/option-hints.js';
-import { TAPROOT_VERSION } from './core/version.js';
-import { str } from './core/strings.js';
+import { builtinPlugins } from './plugins/load-builtins.js';
 
-if (process.argv[2] === '-V' || process.argv[2] === '--version') {
-  printJson({ version: TAPROOT_VERSION });
-  process.exit(EXIT_CODES.OK);
+function credsTopologyHint(message: string, argv: string[]): string | undefined {
+  const lower = message.toLowerCase();
+  const misuse = /unknown option/.test(lower) && /(--host|--port|--database|--target)/.test(lower) && argv.includes('creds') && argv.includes('set');
+  return misuse
+    ? `${message}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
+    : undefined;
 }
 
-function helpJson(cmd: Command, helper: Help): string {
-  const data = {
-    usage: helper.commandUsage(cmd),
-    description: helper.commandDescription(cmd) || undefined,
-    arguments: helper.visibleArguments(cmd).map((a) => ({ name: helper.argumentTerm(a), description: helper.argumentDescription(a) || undefined })),
-    options: helper.visibleOptions(cmd).map((o) => ({ flags: helper.optionTerm(o), description: helper.optionDescription(o) || undefined })),
-    commands: helper.visibleCommands(cmd).map((c) => ({ name: helper.subcommandTerm(c), description: helper.subcommandDescription(c) || undefined })),
-  };
-  return `${JSON.stringify({ ok: true, data })}\n`;
-}
-
-const program = new Command();
-
-program
-  .name('taproot')
-  .description('Query MySQL/TiDB, Redis and gRPC datasources through one CLI. Every command prints one line of JSON.')
-  .option('-V, --version', 'Print the version')
-  .option('--pluck <path>', 'Print only the subtree at this dot-path (e.g. data.rows, meta.schemaContext). A failure prints the full error envelope.')
-  .option('--lines', 'Print one JSON value per line: a query prints {ok, columns, warnings}, then one line per row; a list prints {ok}, then one line per item; with --pluck, one line per array item. A failure prints the full error envelope.', false)
-  .option('--kb-dir <path>', 'Path to the KB directory (containing services.json). Overrides TAPROOT_KB_DIR and the directory saved by `taproot init --kb-dir`.')
-  .option('--verbose', 'Diagnostics on stderr as JSON lines', false)
-  .configureHelp({ formatHelp: helpJson })
-  .configureOutput({
-    writeErr: (text) => process.stdout.write(text),
-    outputError: () => {
-      // All command errors are emitted once via emitError() in the parseAsync catch block.
-    },
-  });
-
-function applyOutputOptions(): void {
-  const opts = program.opts();
-  setPluck(opts.pluck ? String(opts.pluck) : undefined);
-  setLines(Boolean(opts.lines));
-}
-
-program.hook('preAction', applyOutputOptions);
-
-program.exitOverride((error) => {
-  throw error;
-});
-
-function context() {
-  const opts = program.opts();
-  return buildContext({
-    kbDir: opts.kbDir ? String(opts.kbDir) : undefined,
-    verbose: Boolean(opts.verbose),
-  });
-}
-
-registerDoctor(program, context);
-registerQuery(program, context);
-registerDatasource(program, context);
-registerKb(program, context);
-registerCreds(program, context);
-registerDaemon(program);
-registerInit(program, context);
-registerGrpc(program, context);
-
-function hasCredsTopologyMisuseHint(input: string): boolean {
-  const m = input.toLowerCase();
-  if (!/unknown option/.test(m)) return false;
-  if (!/(--host|--port|--database|--target)/.test(m)) return false;
-  return process.argv.includes('creds') && process.argv.includes('set');
-}
-
-function optionOwners(cmd: Command, path: string[] = [], owners: Record<string, string[]> = {}): Record<string, string[]> {
-  for (const option of cmd.options) if (option.long) (owners[option.long] ||= []).push(path.join(' '));
-  for (const sub of cmd.commands) optionOwners(sub, [...path, sub.name()], owners);
-  return owners;
-}
-
-function withUnknownOptionHint(message: string): string {
-  const hint = unknownOptionHint(message, optionOwners(program), process.argv.slice(2));
-  return hint ? `${message}. ${hint}` : message;
-}
-
-function emitError(error: unknown, code: string): void {
-  const message = (error as Error)?.message || String(error || 'Unknown error');
-  const classifiedCode = code === 'UNHANDLED' || code === 'UNCAUGHT_EXCEPTION' || code === 'UNHANDLED_REJECTION'
-    ? classifyError(message)
-    : code;
-  applyOutputOptions();
-  const details = (error as Error & { details?: Record<string, unknown> })?.details;
-  const meta = (error as Error & { meta?: Record<string, unknown> })?.meta;
-  printEnvelope(false, undefined, { code: classifiedCode, message, details }, meta);
-}
-
-process.on('unhandledRejection', (reason) => {
-  emitError(reason, 'UNHANDLED_REJECTION');
-  process.exit(classifyExitCode(reason));
-});
-
-process.on('uncaughtException', (error) => {
-  emitError(error, 'UNCAUGHT_EXCEPTION');
-  process.exit(classifyExitCode(error));
-});
-
-program.parseAsync(process.argv).catch((error) => {
-  const commanderCode = str((error as { code?: string })?.code);
-  if (commanderCode === 'commander.helpDisplayed' || commanderCode === 'commander.help') {
-    process.exit(EXIT_CODES.OK);
-    return;
-  }
-  if (commanderCode.startsWith('commander.')) {
-    const raw = (error as Error)?.message || '';
-    const message = hasCredsTopologyMisuseHint(raw)
-      ? `${raw}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
-      : removedCliHint(raw) ?? withUnknownOptionHint(raw);
-    applyOutputOptions();
-    printEnvelope(false, undefined, { code: 'CLI_ERROR', message });
-    process.exit(classifyExitCode(error));
-    return;
-  }
-  emitError(error, 'UNHANDLED');
-  process.exit(classifyExitCode(error));
-});
+void buildCli({
+  name: 'taproot',
+  description: 'Query MySQL/TiDB, Redis and gRPC datasources through one CLI. Every command prints one line of JSON.',
+  commands: [
+    doctorCommand,
+    queryCommand,
+    datasourceListCommand,
+    datasourceAdminCommand,
+    schemaCommand,
+    kbCommand,
+    credsCommand,
+    daemonCommand,
+    initCommand,
+    grpcCommand,
+  ],
+  executor: localExecutor({ plugins: builtinPlugins() }),
+  hint: (message, argv) => credsTopologyHint(message, argv) ?? removedCliHint(message),
+}).run(process.argv);

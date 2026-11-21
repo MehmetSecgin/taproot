@@ -1,18 +1,54 @@
-import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
-import { environmentPolicy } from '../core/app.js';
+import type { Command } from 'commander';
+import type { Executor } from '../cli/types.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
-import { deriveQueryTarget } from '../core/execute-query.js';
-import type { QueryExecutionRequest } from '../core/execute-query.js';
-import { parseTimeoutMs } from '../core/query-timeout.js';
-import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { runDaemonQuery } from './query-daemon.js';
-import { runDirectQuery, verboseLog } from './query-direct.js';
-import { queryRoute } from './query-route.js';
+import type { QueryExecutionRequest, QueryTarget } from '../core/execute-query.js';
+import { presentQueryReply } from './query-present.js';
 import type { QueryOpts } from './query-types.js';
 
-export function registerQuery(program: Command, getCtx: () => AppContext): void {
+function queryText(opts: QueryOpts): string {
+  if (opts.sql && opts.query) {
+    throw badInput('pass the query text once, with --sql or --query, not both.');
+  }
+  const text = opts.sql || opts.query || '';
+  if (opts.explain && !text) {
+    throw badInput('--explain requires --sql.');
+  }
+  return text;
+}
+
+export function queryExecutionRequest(
+  opts: QueryOpts,
+  target: Pick<QueryTarget, 'env' | 'namespace' | 'service'>,
+  allowDiscovery: boolean,
+  timeoutMs: number,
+): QueryExecutionRequest {
+  return {
+    datasource: opts.datasource,
+    optsEnv: opts.env,
+    env: target.env,
+    namespace: target.namespace,
+    service: target.service,
+    query: queryText(opts),
+    params: opts.param || [],
+    allowDiscovery,
+    allowMutate: Boolean(opts.allowMutate),
+    allowPartitionScan: Boolean(opts.allowPartitionScan),
+    explain: Boolean(opts.explain),
+    rowsObject: Boolean(opts.rowsObject),
+    jsonExtract: opts.jsonExtract || [],
+    proto: opts.proto,
+    protoRoot: opts.protoRoot,
+    allowFlush: Boolean(opts.allowFlush),
+    allowKeys: Boolean(opts.allowKeys),
+    requestJson: opts.requestJson,
+    skipProtoValidate: Boolean(opts.skipProtoValidate),
+    timeoutMs,
+    tz: opts.tz,
+  };
+}
+
+export function queryCommand(program: Command, executor: Executor): void {
   program
     .command('query')
     .description('Run a SQL query, Redis command or gRPC call against a datasource. Example: taproot query --datasource <name> --sql "SHOW TABLES"')
@@ -55,47 +91,6 @@ export function registerQuery(program: Command, getCtx: () => AppContext): void 
           `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --sql "<query>" and the datasource with --datasource <name>, e.g. taproot query --datasource demo-db --sql "SELECT 1".`,
         );
       }
-      const ctx = getCtx();
-      ensureStarterRuntime(ctx);
-      const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
-      const timeoutMs = parseTimeoutMs(opts.timeout, timeoutDefault);
-      const target = deriveQueryTarget(ctx, opts);
-      const env = target.env;
-      const policy = environmentPolicy(ctx, env);
-      const allowDiscovery = Boolean(opts.allowDiscovery) || policy.allowDiscoveryByDefault;
-      if (opts.sql && opts.query) {
-        throw badInput('pass the query text once, with --sql or --query, not both.');
-      }
-      const text = opts.sql || opts.query || '';
-      if (opts.explain && !text) {
-        throw badInput('--explain requires --sql.');
-      }
-      const request: QueryExecutionRequest = {
-        datasource: opts.datasource,
-        optsEnv: opts.env,
-        env,
-        namespace: target.namespace,
-        service: target.service,
-        query: text,
-        params: opts.param || [],
-        allowDiscovery,
-        allowMutate: Boolean(opts.allowMutate),
-        allowPartitionScan: Boolean(opts.allowPartitionScan),
-        explain: Boolean(opts.explain),
-        rowsObject: Boolean(opts.rowsObject),
-        jsonExtract: opts.jsonExtract || [],
-        proto: opts.proto,
-        protoRoot: opts.protoRoot,
-        allowFlush: Boolean(opts.allowFlush),
-        allowKeys: Boolean(opts.allowKeys),
-        requestJson: opts.requestJson,
-        skipProtoValidate: Boolean(opts.skipProtoValidate),
-        timeoutMs,
-        tz: opts.tz,
-      };
-      const route = queryRoute(request);
-      verboseLog(ctx)(route === 'direct' ? 'running direct query mode' : 'attempting daemon query path');
-      if (route === 'daemon' && (await runDaemonQuery(request, ctx)) === 'handled') return;
-      await runDirectQuery(request, ctx);
+      presentQueryReply(await executor.query(opts));
     });
 }

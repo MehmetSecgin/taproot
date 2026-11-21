@@ -4,6 +4,8 @@ export const RpcMethod = {
   DaemonStatus: 'daemon.status',
   DaemonStop: 'daemon.stop',
   QueryExecute: 'query.execute',
+  DatasourceList: 'datasource.list',
+  SchemaRead: 'schema.read',
 } as const;
 export type RpcMethod = (typeof RpcMethod)[keyof typeof RpcMethod];
 

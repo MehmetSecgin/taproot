@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
+import type { LocalExecutor } from '../cli/types.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
 import { runDatasourceConnectors } from '../core/connector-runner.js';
 import { classifyError } from '../core/error-classification.js';
@@ -45,7 +45,7 @@ function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
   ];
 }
 
-export function registerDoctor(program: Command, getCtx: () => AppContext): void {
+export function doctorCommand(program: Command, executor: LocalExecutor): void {
   program
     .command('doctor')
     .description('Check one datasource: connectors, credentials and connection. Not needed before a routine query.')
@@ -55,7 +55,7 @@ export function registerDoctor(program: Command, getCtx: () => AppContext): void
     .option('--service <service>', 'service name; pair with --env')
     .option('--connect', 'run connector connect steps during doctor', false)
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       ensureStarterRuntime(ctx);
       const logVerbose = verboseLog(ctx);
       let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;

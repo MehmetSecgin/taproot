@@ -2,7 +2,6 @@ import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './naming.js';
 import { requireAccessMethod, saveKbBootstrapCandidate } from './bootstrap.js';
 import { levenshtein, suggestNames } from './grpc-introspect.js';
-import { discoverKubernetesTargets } from './discovery.js';
 import { AccessMethod, DatasourceKind } from '../types/core.js';
 import type { DatasourceProfile, EnvironmentPolicy } from '../types/core.js';
 import { str } from './strings.js';
@@ -95,9 +94,11 @@ export interface ResolveWithFallbacksInput {
   namespace?: string;
   service: string;
   query?: string;
-  allowDiscovery: boolean;
+  discover: TargetDiscovery | undefined;
   policy: EnvironmentPolicy;
 }
+
+export type TargetDiscovery = (namespace: string, service: string, env: string, policy: EnvironmentPolicy) => string[];
 
 function preferredAccessMethods(env: string, policy: EnvironmentPolicy, kbAccessMethod?: string): string[] {
   const out: string[] = policy.preferredAccessMethods.map((method) => requireAccessMethod(str(method).trim().toLowerCase(), `environmentPolicies.${env}.preferredAccessMethods`));
@@ -105,13 +106,13 @@ function preferredAccessMethods(env: string, policy: EnvironmentPolicy, kbAccess
   return out;
 }
 
-function discoverTargets(input: { env: string; service: string; accessMethods: string[]; namespace?: string; policy: EnvironmentPolicy }): string[] {
+function discoverTargets(discover: TargetDiscovery, input: { env: string; service: string; accessMethods: string[]; namespace?: string; policy: EnvironmentPolicy }): string[] {
   if (!input.accessMethods.includes(AccessMethod.KubectlPortforward)) return [];
-  return discoverKubernetesTargets(String(input.namespace || 'default'), input.service, input.env, input.policy);
+  return discover(String(input.namespace || 'default'), input.service, input.env, input.policy);
 }
 
 export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacksInput): Promise<DatasourceResolution> {
-  const { ctx, rawDs, optsEnv, env, namespace, service, allowDiscovery, policy } = input;
+  const { ctx, rawDs, optsEnv, env, namespace, service, discover, policy } = input;
   const verboseLogs: string[] = [];
   const preferKinds = datasourceKindsForQuery(str(input.query));
 
@@ -134,12 +135,12 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
       verboseLogs.push(`auto-bootstrapped datasource from KB (${datasource.name})`);
     }
   }
-  if (!datasource && env && service && allowDiscovery) {
+  if (!datasource && env && service && discover) {
     const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
     const kbAccessMethod = str(kb?.access_method).trim().toLowerCase();
     const targetNamespace = String(kb?.namespace || namespace || 'default');
     const accessMethods = preferredAccessMethods(env, policy, kbAccessMethod);
-    const targets = discoverTargets({ env, service, accessMethods, namespace: targetNamespace, policy });
+    const targets = discoverTargets(discover, { env, service, accessMethods, namespace: targetNamespace, policy });
     if (targets.length) {
       const target = targets[0];
       const database = str(kb?.database || service.replace(/-/g, '_'));

@@ -83,7 +83,7 @@ describe('credential fallback key', () => {
     vi.stubEnv('TAPROOT_NO_KEYCHAIN', '1');
     vi.stubEnv('TAPROOT_MASTER_KEY', 'test-key');
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-creds-')), 'credentials.enc.json');
-    const store = new CredentialStore(file);
+    const store = new CredentialStore(file, true);
     const pbkdf2 = vi.spyOn(crypto, 'pbkdf2Sync');
 
     // act

@@ -1,10 +1,11 @@
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildContext } from '../src/core/app.js';
 import { executeQuery, silentQueryReport } from '../src/core/execute-query.js';
 import type { QueryExecutionRequest } from '../src/core/execute-query.js';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { queryDatasourceResolver } from '../src/core/resolve-query-datasource.js';
+import { startLocalDaemon } from './helpers/daemon.js';
+import { contextWith } from './helpers/query-state.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 import type { QueryResult, TapRootPlugin } from '../src/types/core.js';
@@ -52,20 +53,11 @@ function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecu
 }
 
 async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => TapRootPlugin = () => fakePlugin()) {
-  const addPlugin = (registry: Map<string, TapRootPlugin>) => {
-    const plugin = makePlugin();
-    registry.set(plugin.manifest.name, plugin);
-  };
-  const ctx = buildContext({});
-  addPlugin(ctx.pluginRegistry);
-  const direct = await executeQuery(request, { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined });
+  const ctx = contextWith(makePlugin());
+  const direct = await executeQuery(request, { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: queryDatasourceResolver(undefined) });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-parity.sock');
-  const daemon = await startDaemon({
-    stateRoot,
-    socketPath,
-    configurePlugins: addPlugin,
-  });
+  const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [makePlugin()] });
   try {
     const rpc = await rpcCall({ socketPath, method: 'query.execute', params: { ...request }, timeoutMs: 10_000 });
     return { direct, rpc };
@@ -93,7 +85,7 @@ beforeEach(async () => {
     updatedAt: new Date().toISOString(),
     confidence: 1,
   });
-  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));
+  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
   await creds.set('qa:fake', { user: 'x', password: 'x' });
 });
 

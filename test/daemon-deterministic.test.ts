@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { startLocalDaemon } from './helpers/daemon.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { tempStateRoot } from './helpers/state-root.js';
@@ -37,7 +37,7 @@ describe('daemon deterministic resolution', () => {
     process.env.TAPROOT_STATE_ROOT = stateRoot;
     process.env.TAPROOT_MASTER_KEY = 'test-master-key';
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-    const daemon = await startDaemon({ stateRoot, socketPath });
+    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [] });
     try {
       const res = await rpcCall({
         socketPath,
@@ -68,7 +68,7 @@ describe('daemon deterministic resolution', () => {
     process.env.TAPROOT_STATE_ROOT = stateRoot;
     process.env.TAPROOT_MASTER_KEY = 'test-master-key';
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-    const daemon = await startDaemon({ stateRoot, socketPath });
+    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [] });
     try {
       const res = await rpcCall({
         socketPath,
@@ -110,14 +110,10 @@ describe('daemon deterministic resolution', () => {
         },
       ]),
     );
-    const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));
+    const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
     await creds.set('qa:slow', { user: 'reader', password: 'secret' });
     const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-    const daemon = await startDaemon({
-      stateRoot,
-      socketPath,
-      configurePlugins: (registry) => registry.set('fake', fakePlugin({ holdMs: 100 })),
-    });
+    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [fakePlugin({ holdMs: 100 })] });
     try {
       const res = await rpcCall({
         socketPath,

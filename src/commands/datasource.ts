@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import { hasDatabase } from '../plugins-builtins/redis/index.js';
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
+import { commandGroup, type LocalExecutor } from '../cli/types.js';
+import { DATASOURCE_GROUP_DESCRIPTION } from './datasource-list.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { runDatasourceConnectors } from '../core/connector-runner.js';
 import { badInput } from '../core/error-classification.js';
@@ -11,29 +12,9 @@ import { nowIso } from '../core/time.js';
 import { printEnvelope } from '../core/output.js';
 import { extractImportArray, validateImportedProfile } from '../core/datasource-import.js';
 import { DoctorStatus } from '../types/core.js';
-import type { Capability, DatasourceProfile } from '../types/core.js';
+import type { Capability } from '../types/core.js';
 import { str } from '../core/strings.js';
 import { parseDatasourceProfile } from '../store/schemas.js';
-
-const LIST_COLUMNS = ['name', 'kind', 'env', 'namespace', 'service', 'host', 'target', 'database'];
-const DETAILED_LIST_COLUMNS = [...LIST_COLUMNS, 'confidence', 'updatedAt'];
-
-function listCells(d: DatasourceProfile, detailed: boolean): unknown[] {
-  const cells = [d.name, d.kind, d.env, d.namespace, d.service, d.connection.host, d.connection.target, d.connection.database];
-  return detailed ? [...cells, d.confidence, d.updatedAt] : cells;
-}
-
-function isEmptyCell(cell: unknown): boolean {
-  return cell === undefined || cell === null || cell === '';
-}
-
-function withoutEmptyColumns(columns: string[], rows: unknown[][]): { columns: string[]; rows: unknown[][] } {
-  const kept = columns.map((_, index) => index).filter((index) => rows.some((row) => !isEmptyCell(row[index])));
-  return {
-    columns: kept.map((index) => columns[index]),
-    rows: rows.map((row) => kept.map((index) => (isEmptyCell(row[index]) ? null : row[index]))),
-  };
-}
 
 function probeFailed(name: string, detail: string): Error {
   const rerun = `taproot doctor --datasource ${name} --connect`;
@@ -46,43 +27,21 @@ function connectorCredentialRefHints(values: string[]): Record<string, string> {
   return Object.fromEntries(refs.map(([connector, ref]) => [`${connector}CredentialRef`, ref.trim()]));
 }
 
-export function registerDatasource(program: Command, getCtx: () => AppContext): void {
-  const ds = program.command('datasource').description('Datasource profile operations');
-
-  ds.command('list')
-    .description('List datasource profiles; optional [pattern] keeps names containing it')
-    .argument('[pattern]', 'case-insensitive substring of the datasource name')
-    .option('--detailed', 'include confidence and updatedAt', false)
-    .action((pattern: string | undefined, opts) => {
-      const ctx = getCtx();
-      const detailed = Boolean(opts.detailed);
-      const needle = (pattern || '').toLowerCase();
-      const { profiles, warnings } = ctx.datasourceStore.load();
-      const rows = profiles
-        .filter((d) => d.name.toLowerCase().includes(needle))
-        .sort((a, b) =>
-          str(a.env).localeCompare(str(b.env))
-          || str(a.namespace).localeCompare(str(b.namespace))
-          || str(a.service).localeCompare(str(b.service))
-          || a.name.localeCompare(b.name),
-        )
-        .map((d) => listCells(d, detailed));
-      const table = withoutEmptyColumns(detailed ? DETAILED_LIST_COLUMNS : LIST_COLUMNS, rows);
-      printEnvelope(true, { ...table, ...(warnings.length ? { warnings } : {}) });
-    });
+export function datasourceAdminCommand(program: Command, executor: LocalExecutor): void {
+  const ds = commandGroup(program, 'datasource', DATASOURCE_GROUP_DESCRIPTION);
 
   ds.command('show')
     .description('Print one datasource profile')
     .argument('<name>')
     .action((name: string) => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const item = ctx.datasourceStore.get(name);
     if (!item) throw new Error(`Datasource not found: ${name}`);
     printEnvelope(true, item);
   });
 
   ds.command('remove').description('Delete a datasource profile').argument('<name>').action((name: string) => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const ok = ctx.datasourceStore.remove(name);
     if (!ok) throw new Error(`Datasource not found: ${name}`);
     printEnvelope(true, { removed: true, name });
@@ -112,7 +71,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--confidence <n>', 'confidence 0..1', '0.8')
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       if (opts.requireDatabase && !hasDatabase(opts.database)) throw badInput('--require-database needs --database <n>; without it every query on this datasource would fail.');
       const credentialRef = opts.credentialRef || opts.env;
       if (!credentialRef) throw badInput('datasource add needs --env or --credential-ref; the credential ref defaults to --env.');
@@ -194,7 +153,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .requiredOption('--service <service>', 'service name')
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const namespace = normalizeNamespace(opts.namespace);
       const fromStore = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
@@ -218,7 +177,7 @@ export function registerDatasource(program: Command, getCtx: () => AppContext): 
     .option('--credential-ref <ref>', 'credentialRef applied to imported profiles that lack one')
     .option('--dry-run', 'validate and report without saving', false)
     .action((opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       if (!opts.file) throw badInput('Specify --file <path>.');
       const candidates = extractImportArray(JSON.parse(fs.readFileSync(String(opts.file), 'utf8')));
 

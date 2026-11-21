@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import type { LocalExecutor } from '../cli/types.js';
 import type { AppContext } from '../core/app.js';
 import { badInput } from '../core/error-classification.js';
 import { printEnvelope, printJson } from '../core/output.js';
@@ -38,7 +39,7 @@ function resolveOrThrow(query: string, names: string[], label: string): string {
   throw new Error(`${label} '${query}' is ambiguous or unknown. Candidates: ${list}${more}.`);
 }
 
-export function registerGrpc(program: Command, getCtx: () => AppContext): void {
+export function grpcCommand(program: Command, executor: LocalExecutor): void {
   const grpc = program.command('grpc').description('gRPC datasource introspection');
 
   grpc
@@ -51,7 +52,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--skeleton', 'emit an example request JSON for the matched method(s) and a ready-to-run query call line', false)
     .option('--max-depth <n>', 'message expansion depth cap (default 4)', '4')
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const { root, source } = protoRootFor(ctx, opts);
       const maxDepth = Number(opts.maxDepth);
       if (!Number.isInteger(maxDepth) || maxDepth < 0) {
@@ -110,7 +111,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .option('--service <name>', 'restrict to one service (fully-qualified, short name, or unambiguous substring)')
     .action(async (pattern, opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const { root, source } = protoRootFor(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const services = listServices(protobufRoot);
@@ -142,7 +143,7 @@ export function registerGrpc(program: Command, getCtx: () => AppContext): void {
     .option('--datasource <name>', 'grpc datasource whose protoRoot hint to read')
     .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .action(async (pattern, opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const { root, source } = protoRootFor(ctx, opts);
       const { protobufRoot } = await loadProtobufRoot(root);
       const matches = searchMethods(protobufRoot, String(pattern));

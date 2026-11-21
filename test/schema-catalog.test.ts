@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
-import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
+import { cachedSchemaCatalog, ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import { runDatasourceConnectors } from '../src/core/connector-runner.js';
 import type { AppContext } from '../src/core/app.js';
@@ -342,5 +342,72 @@ describe('eager schema catalog', () => {
     expect(before).toBeUndefined();
     expect(listedBefore).toEqual([]);
     expect(store.get('qa-orders')).toMatchObject({ datasource: 'qa-orders', tables: {} });
+  });
+});
+
+describe('cache-first schema catalog', () => {
+  const freeSlot = async () => () => undefined;
+
+  it('waits for the first fetch when nothing is cached', async () => {
+    // arrange
+    const { ctx } = makeContext();
+
+    // act
+    const catalog = await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-first-read'), freeSlot);
+
+    // assert
+    expect(Object.keys(catalog.tables)).toEqual(['customers', 'orders', 'shipments']);
+  });
+
+  it('shares one fetch between callers that find nothing cached', async () => {
+    // arrange
+    const { ctx, seen } = makeContext();
+
+    // act
+    await Promise.all([1, 2, 3].map(() => cachedSchemaCatalog(ctx, datasource('mysql', 'qa-shared'), freeSlot)));
+
+    // assert
+    expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
+  });
+
+  it('answers from an expired catalog at once and refreshes it in the background', async () => {
+    // arrange
+    let columns = ORDERS_COLUMNS;
+    const { ctx } = makeContext((sql) => (sql.includes('information_schema.columns') ? columns : []));
+    await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-expired'), freeSlot);
+    backdateCatalog(ctx, 'qa-expired', 72 * 3600 * 1000);
+    columns = [{ table_name: 'invoices', column_name: 'id' }];
+
+    // act
+    const served = await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-expired'), freeSlot);
+    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-expired'), ROUTINE);
+
+    // assert
+    expect(Object.keys(served.tables)).toEqual(['customers', 'orders', 'shipments']);
+    expect(Object.keys(ctx.schemaCatalogStore.get('qa-expired')!.tables)).toEqual(['invoices']);
+  });
+
+  it('names the fetch error when nothing is cached', async () => {
+    // arrange
+    const { ctx } = makeContext(() => {
+      throw new Error('ECONNREFUSED');
+    });
+
+    // act
+    const read = cachedSchemaCatalog(ctx, datasource('mysql', 'qa-unreachable'), freeSlot);
+
+    // assert
+    await expect(read).rejects.toThrow("CONNECTIVITY: could not read the schema of 'qa-unreachable': ECONNREFUSED.");
+  });
+
+  it('refuses a datasource kind that has no schema', async () => {
+    // arrange
+    const { ctx } = makeContext();
+
+    // act
+    const read = cachedSchemaCatalog(ctx, datasource('redis', 'qa-cache'), freeSlot);
+
+    // assert
+    await expect(read).rejects.toThrow("BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema.");
   });
 });

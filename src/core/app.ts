@@ -5,8 +5,7 @@ import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { SchemaCatalogStore } from '../store/schema-catalog.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
-import { builtinPlugins, type PluginRegistry } from '../plugins/load-builtins.js';
-import type { EnvironmentPolicy } from '../types/core.js';
+import type { EnvironmentPolicy, PluginRegistry, TapRootPlugin } from '../types/core.js';
 
 export interface AppContext {
   paths: ReturnType<typeof resolvePaths>;
@@ -22,6 +21,8 @@ export interface AppContext {
 export function buildContext(opts: {
   kbDir?: string;
   verbose?: boolean;
+  plugins: TapRootPlugin[];
+  useKeychain: boolean;
 }): AppContext {
   let paths = resolvePaths(opts.kbDir);
   try {
@@ -33,11 +34,11 @@ export function buildContext(opts: {
   return {
     paths,
     datasourceStore: new DatasourceStore(paths.datasourceFile),
-    credentialStore: new CredentialStore(paths.credentialFile),
+    credentialStore: new CredentialStore(paths.credentialFile, opts.useKeychain),
     kbStore: new KbStore(paths.kbDir),
     schemaCatalogStore: new SchemaCatalogStore(path.join(paths.cacheDir, 'schema')),
     runtimeConfigStore: new RuntimeConfigStore(paths.runtimeConfigFile),
-    pluginRegistry: builtinPlugins(),
+    pluginRegistry: new Map(opts.plugins.map((plugin) => [plugin.manifest.name, plugin])),
     verbose: Boolean(opts.verbose),
   };
 }
