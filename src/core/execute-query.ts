@@ -1,6 +1,6 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './connector-runner.js';
-import { classifyError } from './error-classification.js';
+import { badInput, classifyError } from './error-classification.js';
 import { parseKeyValuePairs } from './key-value.js';
 import { normalizeNamespace, normalizeService } from './naming.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
@@ -37,6 +37,7 @@ export interface QueryExecutionRequest {
   requestJson?: string;
   skipProtoValidate: boolean;
   timeoutMs: number;
+  maxRows?: number;
   tz?: string;
 }
 
@@ -77,6 +78,7 @@ export interface QuerySuccessData {
   datasource: string;
   plugin: string;
   classification: 'success' | 'error';
+  truncated?: true;
   warnings?: string[];
 }
 
@@ -138,6 +140,11 @@ function failure(error: unknown, meta: QueryOutcomeMeta): QueryOutcome {
   };
 }
 
+function withinRowCap(result: QueryResult['result'], maxRows: number | undefined): { rows: unknown[][]; truncated: boolean } {
+  if (maxRows === undefined) return { rows: result.rows, truncated: Boolean(result.truncated) };
+  return { rows: result.rows.slice(0, maxRows), truncated: Boolean(result.truncated) || result.rows.length > maxRows };
+}
+
 export async function executeQuery(request: QueryExecutionRequest, deps: QueryDeps): Promise<QueryOutcome> {
   const { ctx, report } = deps;
   const startedAt = Date.now();
@@ -168,6 +175,9 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     params = parseKeyValuePairs('--param', request.params || []);
     jsonExtractSpecs = parseJsonExtractSpecs(request.jsonExtract);
     if (!query) throw new Error('No query resolved. Provide --sql (or --query for Redis and gRPC).');
+    if (request.maxRows !== undefined && !(Number.isInteger(request.maxRows) && request.maxRows >= 1)) {
+      throw badInput(`maxRows must be a whole number of 1 or more, got ${JSON.stringify(request.maxRows)}.`);
+    }
   } catch (error) {
     return failure(error, {});
   }
@@ -248,6 +258,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
             query: executedQuery,
             capability: capability as any,
             timeoutMs: remainingMs(),
+            maxRows: request.maxRows,
             sessionTimeZone,
             pluginParams,
             signal,
@@ -276,7 +287,8 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     };
     const mergedSchema = mergeSchemaContext(schemaContext, result.meta?.schemaContext);
 
-    const { columns, rows } = applyJsonExtract(result.result.columns, result.result.rows, jsonExtractSpecs);
+    const capped = withinRowCap(result.result, request.maxRows);
+    const { columns, rows } = applyJsonExtract(result.result.columns, capped.rows, jsonExtractSpecs);
     const data: QuerySuccessData = {
       columns,
       rows: request.rowsObject ? rows.map((row) => rowObject(columns, row)) : rows,
@@ -285,6 +297,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
       classification: result.classification,
     };
     if (!request.rowsObject) data.rowsForm = 'array';
+    if (capped.truncated) data.truncated = true;
     if (result.warnings.length) data.warnings = result.warnings;
 
     return {

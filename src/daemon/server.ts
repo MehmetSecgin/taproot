@@ -102,6 +102,7 @@ export async function startDaemon(input: {
   listen: DaemonListen;
   methods: DaemonMethod[];
   checkDatasource: DatasourceCheck | undefined;
+  checkDatasourceTtlMs?: number;
   log: DaemonLog;
 }): Promise<DaemonInstance> {
   const { ctx, listen, log } = input;
@@ -113,7 +114,7 @@ export async function startDaemon(input: {
     ctx,
     sessions: new SessionRegistry(path.join(ctx.paths.stateRoot, 'run')),
     queryLimiter: new QueryLimiter(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries, RUNTIME_CONSTANTS.daemon.maxQueuedQueries),
-    admitDatasource: datasourceGate(ctx, input.checkDatasource),
+    admitDatasource: datasourceGate(ctx, input.checkDatasource, input.checkDatasourceTtlMs),
     endpoint: () => endpointOf(server.address() as string | AddressInfo),
     startedAt,
   };

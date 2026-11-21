@@ -25,19 +25,33 @@ function refusalError(error: unknown): unknown {
   return new TaprootError('DATASOURCE_REFUSED', error instanceof Error ? error.message : String(error));
 }
 
-export function datasourceGate(ctx: AppContext, check: DatasourceCheck | undefined): DatasourceGate {
+interface CheckEntry {
+  checked: Promise<void>;
+  expiresAt: number;
+}
+
+export function datasourceGate(ctx: AppContext, check: DatasourceCheck | undefined, ttlMs: number | undefined): DatasourceGate {
   if (!check) return async () => undefined;
-  const passed = new Map<string, Promise<void>>();
+  const entries = new Map<string, CheckEntry>();
+  const startCheck = (key: string, datasource: DatasourceProfile, credentials: Record<string, string>, timeoutMs: number): CheckEntry => {
+    const entry: CheckEntry = { checked: Promise.resolve(), expiresAt: Infinity };
+    entry.checked = withQueryTimeout({ timeoutMs, signal: undefined, run: (signal) => check({ ctx, datasource, credentials, timeoutMs, signal }) }).then(
+      () => {
+        entry.expiresAt = Date.now() + (ttlMs ?? Infinity);
+      },
+      (error: unknown) => {
+        entries.delete(key);
+        throw refusalError(error);
+      },
+    );
+    entries.set(key, entry);
+    return entry;
+  };
   return async (datasource, timeoutMs) => {
     const credentials = await ctx.credentialStore.get(datasource.credentialRef);
     const key = createHash('sha256').update(JSON.stringify([datasource, credentials])).digest('hex');
-    if (!passed.has(key)) {
-      const checked = withQueryTimeout({ timeoutMs, signal: undefined, run: (signal) => check({ ctx, datasource, credentials, timeoutMs, signal }) });
-      passed.set(key, checked.catch((error: unknown) => {
-        passed.delete(key);
-        throw refusalError(error);
-      }));
-    }
-    await passed.get(key);
+    const known = entries.get(key);
+    const entry = known && Date.now() < known.expiresAt ? known : startCheck(key, datasource, credentials, timeoutMs);
+    await entry.checked;
   };
 }

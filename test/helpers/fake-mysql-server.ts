@@ -57,10 +57,7 @@ function reply(conn: ServerConnection, write: () => void): void {
   conn.sequenceId = 0;
 }
 
-export async function startFakeMysqlServer(
-  servedRow: (sql: string) => ServedRow | Promise<ServedRow>,
-  answerSet: (sql: string) => FakeMysqlError | undefined,
-): Promise<FakeMysqlServer> {
+async function acceptClients(serve: (client: ServerConnection) => void): Promise<FakeMysqlServer> {
   const server = mysql.createServer((conn) => {
     const client = conn as unknown as ServerConnection;
     client.on('error', () => undefined);
@@ -76,6 +73,21 @@ export async function startFakeMysqlServer(
         client.sequenceId = 0;
       },
     });
+    serve(client);
+  }) as unknown as MysqlServer;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return {
+    port: (server._server.address() as AddressInfo).port,
+    openConnections: () => new Promise((resolve, reject) => server._server.getConnections((error, count) => (error ? reject(error) : resolve(count)))),
+    close: () => server.close(),
+  };
+}
+
+export function startFakeMysqlServer(
+  servedRow: (sql: string) => ServedRow | Promise<ServedRow>,
+  answerSet: (sql: string) => FakeMysqlError | undefined,
+): Promise<FakeMysqlServer> {
+  return acceptClients((client) => {
     client.on('stmt_prepare', (sql: string) =>
       reply(client, () => {
         const error = answerSet(sql);
@@ -91,13 +103,24 @@ export async function startFakeMysqlServer(
         client.writeEof();
       });
     });
-  }) as unknown as MysqlServer;
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return {
-    port: (server._server.address() as AddressInfo).port,
-    openConnections: () => new Promise((resolve, reject) => server._server.getConnections((error, count) => (error ? reject(error) : resolve(count)))),
-    close: () => server.close(),
-  };
+  });
+}
+
+export function startEndlessMysqlServer({ columns, row }: ServedRow): Promise<FakeMysqlServer> {
+  return acceptClients((client) => {
+    client.on('stmt_prepare', () => reply(client, () => client.writeOk()));
+    client.on('query', (sql: string) => {
+      if (sql.startsWith('SET ')) {
+        reply(client, () => client.writeOk());
+        return;
+      }
+      client.sequenceId = 1;
+      client.writeColumns(columns);
+      const sending = setInterval(() => client.writeTextRow(row), 1);
+      client.on('end', () => clearInterval(sending));
+      client.on('error', () => clearInterval(sending));
+    });
+  });
 }
 
 export function leaseFakeMysqlConnection(

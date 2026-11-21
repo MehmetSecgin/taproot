@@ -17,7 +17,7 @@ beforeAll(async () => {
     `import { DATASOURCE_COLUMNS, datasourceListMethod, queryMethod, schemaMethod, startDaemon } from '${DIST}/daemon.js';`,
     `import { mysqlPlugin } from '${DIST}/plugins/mysql.js';`,
     'const ctx = buildContext({ plugins: [mysqlPlugin], useKeychain: false });',
-    "await startDaemon({ ctx, listen: { kind: 'tls', host: '127.0.0.1', port: 0, tls: { caFile: 'ca', certFile: 'crt', keyFile: 'key' }, reloadMs: 1000 }, methods: [queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS }), schemaMethod()], checkDatasource: undefined, log: console.log });",
+    "await startDaemon({ ctx, listen: { kind: 'tls', host: '127.0.0.1', port: 0, tls: { caFile: 'ca', certFile: 'crt', keyFile: 'key' }, reloadMs: 1000 }, methods: [queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS, filter: undefined }), schemaMethod()], checkDatasource: undefined, checkDatasourceTtlMs: undefined, log: console.log });",
   ].join('\n'));
   await build({ entry: [entry], outDir: path.join(dir, 'out'), format: 'esm', platform: 'node', target: 'node20', config: false, silent: true, dts: false, splitting: false, external: ['keytar'] });
   bundle = fs.readFileSync(path.join(dir, 'out', 'daemon-entry.js'), 'utf8');

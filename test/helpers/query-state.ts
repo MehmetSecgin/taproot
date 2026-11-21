@@ -65,6 +65,7 @@ export function queryRequest(overrides: Partial<QueryExecutionRequest> = {}): Qu
     allowKeys: false,
     skipProtoValidate: false,
     timeoutMs: 5_000,
+    maxRows: undefined,
     ...overrides,
   };
 }

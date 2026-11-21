@@ -104,34 +104,39 @@ import { mysqlPlugin } from '@mehmetsecgin/taproot/plugins/mysql';
 await startDaemon({
   ctx: buildContext({ plugins: [mysqlPlugin], useKeychain: false }),
   listen: { kind: 'tls', host: '0.0.0.0', port: 7443, tls: { caFile: 'ca.crt', certFile: 'daemon.crt', keyFile: 'daemon.key' }, reloadMs: 30_000 },
-  methods: [datasourceListMethod({ columns: ['name', 'kind', 'env', 'service'] }), schemaMethod(), queryMethod()],
+  methods: [
+    datasourceListMethod({ columns: ['name', 'kind', 'env', 'service'], filter: (profile) => profile.env !== 'prod' }),
+    schemaMethod(),
+    queryMethod({ shapeRequest: (request) => ({ ...request, allowMutate: false, maxRows: 1000 }) }),
+  ],
   checkDatasource: async ({ datasource }) => {
     if (datasource.env === 'prod') throw new Error(`'${datasource.name}' is not served here.`);
   },
+  checkDatasourceTtlMs: 10 * 60_000,
   log: (event) => console.log(JSON.stringify(event)),
 });
 ```
 
 `useKeychain: false` reads credentials only from the encrypted file under `TAPROOT_STATE_ROOT`. Fill that state root with the stock CLI (`taproot datasource add`, `taproot creds set`), run with the daemon's `TAPROOT_STATE_ROOT` and `TAPROOT_MASTER_KEY` and with `TAPROOT_NO_KEYCHAIN=1`.
 
-`checkDatasource` vets each datasource before a query or schema read first uses it, again when its profile or credentials change, and again after it failed. It is cut off after the `timeoutMs` it is given, and its `signal` aborts then. A refusal reaches the client as `DATASOURCE_REFUSED`, unless the check throws a `TaprootError` or a system error with a `code`, such as a connection failure. `datasourceListMethod` returns only the columns it is given; `DATASOURCE_COLUMNS` holds them all. `queryMethod({ shapeRequest })` gets each request with its defaults applied and returns the one to run: `(request) => ({ ...request, allowMutate: false })`.
+`checkDatasource` vets each datasource before a query or schema read first uses it, again when its profile or credentials change, again `checkDatasourceTtlMs` after it passed, and again after it failed. It is cut off after the `timeoutMs` it is given, and its `signal` aborts then. A refusal reaches the client as `DATASOURCE_REFUSED`, unless the check throws a `TaprootError` or a system error with a `code`, such as a connection failure. `datasourceListMethod` returns only the columns it is given (`DATASOURCE_COLUMNS` holds them all) and only the profiles its `filter` keeps; the filter hides a profile, `checkDatasource` refuses it. `queryMethod({ shapeRequest })` gets each request with its defaults applied and returns the one to run. `maxRows` caps the rows: the mysql plugins stop reading at the cap, and the reply carries `truncated: true` when rows were cut.
 
 `log` receives one object per event: `tlsReload`, `tlsClientError`, `requestFailed` (with code, message, request id, duration and peer) and `requestDropped`. `startDaemon` stops the daemon and exits the process on SIGINT and SIGTERM. A client must run the daemon's TapRoot version; another version gets `DAEMON_VERSION_MISMATCH`. The `unix` listen kind is `taprootd`'s transport: it exits after 30 idle minutes and stops when a client of another version calls, so the next `taproot` call starts a matching one.
 
 A CLI for that daemon:
 
 ```js
-import { buildCli, datasourceListCommand, queryCommand, remoteExecutor, schemaCommand } from '@mehmetsecgin/taproot/cli';
+import { buildCli, datasourceListCommand, queryCommandWith, remoteExecutor, schemaCommand } from '@mehmetsecgin/taproot/cli';
 
 await buildCli({
   name: 'orders-cli',
   description: 'Read the orders databases.',
-  commands: [datasourceListCommand, schemaCommand, queryCommand],
+  commands: [datasourceListCommand, schemaCommand, queryCommandWith({ flags: ['datasource', 'sql', 'timeout'] })],
   executor: remoteExecutor({ host: 'daemon.example.com', port: 7443, tls: { caFile: 'ca.crt', certFile: 'client.crt', keyFile: 'client.key' } }),
 }).run(process.argv);
 ```
 
-Without `--timeout`, a remote query runs with the CLI's default, `TAPROOT_QUERY_TIMEOUT_MS` on the client. `localExecutor` and the other commands `/cli` exports are what `taproot` is built from: they work on the machine's own state root and start `taprootd`.
+`queryCommandWith({ flags })` offers only the given flags of `query`; `QUERY_FLAGS` holds them all, and `queryCommand` offers every one. Without `--timeout`, a remote query runs with the CLI's default, `TAPROOT_QUERY_TIMEOUT_MS` on the client. `localExecutor` and the other commands `/cli` exports are what `taproot` is built from: they work on the machine's own state root and start `taprootd`.
 
 `node_modules/@mehmetsecgin/taproot/scripts/make-mtls-certs.sh <dir> IP:127.0.0.1` writes a CA plus daemon and client certificates for trying it out.
 

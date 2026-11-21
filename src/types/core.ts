@@ -97,6 +97,7 @@ export interface QueryRequest {
   query: string;
   capability: 'executeRead' | 'executeMutate';
   timeoutMs?: number;
+  maxRows?: number;
   sessionTimeZone: string;
   pluginParams?: PluginParams;
   signal: AbortSignal | undefined;
@@ -117,6 +118,7 @@ export interface QueryResult {
   result: {
     columns: string[];
     rows: unknown[][];
+    truncated?: boolean;
   };
   timings: {
     startedAt: string;

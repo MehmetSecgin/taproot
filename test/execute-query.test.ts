@@ -37,6 +37,42 @@ afterEach(() => {
 });
 
 describe('executeQuery success', () => {
+  it('cuts the rows of a plugin that returns more than maxRows and says so', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin({ rows: [[1], [2], [3]] }));
+
+    // act
+    const outcome = await executeQuery(queryRequest({ maxRows: 2 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
+
+    // assert
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data).toMatchObject({ rows: [[1], [2]], truncated: true });
+  });
+
+  it('leaves out truncated when the rows fit under maxRows', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin({ rows: [[1], [2]] }));
+
+    // act
+    const outcome = await executeQuery(queryRequest({ maxRows: 2 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
+
+    // assert
+    if (!outcome.ok) throw new Error('expected success');
+    expect(outcome.data.rows).toEqual([[1], [2]]);
+    expect(outcome.data).not.toHaveProperty('truncated');
+  });
+
+  it('refuses a maxRows that is not a whole number of 1 or more', async () => {
+    // arrange
+    const ctx = contextWith(fakePlugin());
+
+    // act
+    const outcome = await executeQuery(queryRequest({ maxRows: 0 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
+
+    // assert
+    expect(outcome).toMatchObject({ ok: false, code: 'BAD_INPUT' });
+  });
+
   it('returns the shaped envelope and phase timings', async () => {
     // arrange
     const ctx = contextWith(fakePlugin());

@@ -68,6 +68,7 @@ async function readCatalogRows(ctx: AppContext, datasource: DatasourceProfile, r
           datasource,
           query: sql,
           capability: 'executeRead',
+          maxRows: undefined,
           sessionTimeZone: DEFAULT_SESSION_TIME_ZONE,
           signal,
         },

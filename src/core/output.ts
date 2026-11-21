@@ -31,9 +31,10 @@ export function toLines(value: unknown): unknown[] {
     const warnings = env.meta?.warnings;
     return [Array.isArray(warnings) && warnings.length ? { ok: true, warnings } : { ok: true }, ...env.data];
   }
-  const data = env.data as { columns?: unknown; rows?: unknown; warnings?: unknown } | undefined;
+  const data = env.data as { columns?: unknown; rows?: unknown; truncated?: unknown; warnings?: unknown } | undefined;
   if (!data || !Array.isArray(data.rows)) return [value];
   const header: Record<string, unknown> = { ok: true, columns: data.columns };
+  if (data.truncated === true) header.truncated = true;
   if (Array.isArray(data.warnings) && data.warnings.length) header.warnings = data.warnings;
   return [header, ...data.rows];
 }
