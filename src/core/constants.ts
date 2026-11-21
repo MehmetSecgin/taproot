@@ -45,6 +45,9 @@ export const RUNTIME_CONSTANTS = {
     streamMessageLimit: intFromEnv('TAPROOT_GRPC_STREAM_MESSAGE_LIMIT', 1000),
     streamFailureRowLimit: 100,
   },
+  redis: {
+    maxRows: intFromEnv('TAPROOT_REDIS_MAX_ROWS', 200),
+  },
   defaultPorts: {
     mysql: 3306,
     redis: 6379,
