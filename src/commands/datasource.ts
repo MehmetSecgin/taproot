@@ -68,6 +68,7 @@ export function datasourceAdminCommand(program: Command, executor: LocalExecutor
     .option('--allow-mutate', 'allow mutate', false)
     .option('--strict-keyspace', 'redis: refuse KEYS unless --allow-keys, and require SCAN to carry COUNT (max 200)', false)
     .option('--require-database', 'redis: refuse queries when --database is unset instead of falling back to database 0', false)
+    .option('--redis-commands <list>', 'redis: comma-separated verbs this datasource may run, e.g. GET,TTL,SCAN (policy.redisCommands)')
     .option('--confidence <n>', 'confidence 0..1', '0.8')
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
@@ -99,6 +100,7 @@ export function datasourceAdminCommand(program: Command, executor: LocalExecutor
             : (['executeRead'] satisfies Capability[]),
           ...(opts.requireDatabase ? { requireDatabase: true } : {}),
           ...(opts.strictKeyspace ? { strictKeyspace: true } : {}),
+          ...(opts.redisCommands ? { redisCommands: String(opts.redisCommands).split(',').map((v) => v.trim().toUpperCase()).filter(Boolean) } : {}),
         },
         resolverHints: {
           ...connectorCredentialRefHints(opts.connectorRef || []),

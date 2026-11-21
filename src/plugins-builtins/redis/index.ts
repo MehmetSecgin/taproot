@@ -103,6 +103,7 @@ interface GateOptions {
   allowFlush: boolean;
   allowKeys: boolean;
   strictKeyspace: boolean;
+  redisCommands?: string[];
 }
 
 interface AllowedCommand {
@@ -116,6 +117,9 @@ function assertCommandAllowed(tokens: string[], opts: GateOptions): AllowedComma
   const tier = classifyCommand(verb);
   if (tier === 'unknown') {
     throw new Error(`redis command '${verb}' not in allow-list; reject by default.`);
+  }
+  if (opts.redisCommands && !opts.redisCommands.includes(verb)) {
+    throw new Error(`redis command '${verb}' is not in policy.redisCommands for this datasource; allowed: ${opts.redisCommands.join(', ')}.`);
   }
   // SORT with STORE clause is a mutate even though SORT itself can be read-only.
   if (verb === 'SORT' && !tokens.slice(1).some((t) => t.toUpperCase() === 'STORE')) {
@@ -368,6 +372,7 @@ export const redisPlugin: TapRootPlugin = {
       allowFlush: Boolean(pp.allowFlush),
       allowKeys: Boolean(pp.allowKeys),
       strictKeyspace: Boolean(policy?.strictKeyspace),
+      redisCommands: policy?.redisCommands?.map((c) => c.toUpperCase()),
     });
     assertDatabaseSet(request.datasource);
     const { protoRoot, protoMessage } = resolveProtoParams(request);
