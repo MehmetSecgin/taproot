@@ -7,7 +7,7 @@ import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { verboseLog } from './query-direct.js';
+import { verboseLog } from '../cli/query-direct.js';
 import { DoctorStatus } from '../types/core.js';
 import type { DoctorCheck } from '../types/core.js';
 

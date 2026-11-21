@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { buildContext } from '../../src/core/app.js';
-import { builtinPlugins } from '../../src/plugins/load-builtins.js';
+import { builtinPlugins } from '../../src/plugins-builtins/index.js';
 import type { AppContext } from '../../src/core/app.js';
 import type { QueryExecutionRequest } from '../../src/core/execute-query.js';
 import { CredentialStore } from '../../src/store/credentials.js';

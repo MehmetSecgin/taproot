@@ -14,7 +14,7 @@ import {
   schemaCommand,
 } from './api/cli.js';
 import { removedCliHint } from './core/removed-cli.js';
-import { builtinPlugins } from './plugins/load-builtins.js';
+import { builtinPlugins } from './plugins-builtins/index.js';
 
 function credsTopologyHint(message: string, argv: string[]): string | undefined {
   const lower = message.toLowerCase();

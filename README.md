@@ -10,7 +10,6 @@ Requires Node.js 20 or later. Install only the clients your datasources use: `re
 git clone https://github.com/MehmetSecgin/taproot.git
 cd taproot
 npm ci
-npm run build
 npm link
 taproot init
 ```
@@ -113,7 +112,11 @@ await startDaemon({
 });
 ```
 
-`useKeychain: false` reads credentials only from the encrypted file under `TAPROOT_STATE_ROOT`. `checkDatasource` vets each datasource before a query or schema read first uses it, again when its profile or credentials change, and again after it failed. A refusal reaches the client as `DATASOURCE_REFUSED` unless the error already names a class, such as a `TaprootError` or a connection failure. `datasourceListMethod` returns only the columns it is given; `DATASOURCE_COLUMNS` holds them all. `queryMethod({ shapeRequest })` decides which request fields a client may set.
+`useKeychain: false` reads credentials only from the encrypted file under `TAPROOT_STATE_ROOT`. Fill that state root with the stock CLI (`taproot datasource add`, `taproot creds set`), run with the daemon's `TAPROOT_STATE_ROOT` and `TAPROOT_MASTER_KEY` and with `TAPROOT_NO_KEYCHAIN=1`.
+
+`checkDatasource` vets each datasource before a query or schema read first uses it, again when its profile or credentials change, and again after it failed. It is cut off after the `timeoutMs` it is given. A refusal reaches the client as `DATASOURCE_REFUSED`, unless the check throws a `TaprootError` or a system error with a `code`, such as a connection failure. `datasourceListMethod` returns only the columns it is given; `DATASOURCE_COLUMNS` holds them all. `queryMethod({ shapeRequest })` gets each request with its defaults applied and returns the one to run: `(request) => ({ ...request, allowMutate: false })`.
+
+`log` receives one object per event: `tlsReload`, `tlsClientError`, `requestFailed` (with code, message, request id, duration and peer) and `requestDropped`. `startDaemon` stops the daemon and exits the process on SIGINT and SIGTERM. A client must run the daemon's TapRoot version; another version gets `DAEMON_VERSION_MISMATCH`. The `unix` listen kind is `taprootd`'s transport: it exits after 30 idle minutes and stops when a client of another version calls, so the next `taproot` call starts a matching one.
 
 A CLI for that daemon:
 
@@ -128,7 +131,9 @@ await buildCli({
 }).run(process.argv);
 ```
 
-`scripts/make-mtls-certs.sh <dir> IP:127.0.0.1` writes a CA plus daemon and client certificates for trying it out.
+Without `--timeout`, a remote query runs with the CLI's default, `TAPROOT_QUERY_TIMEOUT_MS` on the client. `localExecutor` and the other commands `/cli` exports are what `taproot` is built from: they work on the machine's own state root and start `taprootd`.
+
+`node_modules/@mehmetsecgin/taproot/scripts/make-mtls-certs.sh <dir> IP:127.0.0.1` writes a CA plus daemon and client certificates for trying it out.
 
 ## License
 

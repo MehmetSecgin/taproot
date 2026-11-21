@@ -1,11 +1,13 @@
 import type { Command } from 'commander';
-import { commandGroup, type Executor } from '../cli/types.js';
+import type { Executor } from '../cli/types.js';
 import { printEnvelope } from '../core/output.js';
 
-export const DATASOURCE_GROUP_DESCRIPTION = 'Datasource profile operations';
+export function datasourceGroup(program: Command): Command {
+  return program.commands.find((command) => command.name() === 'datasource') ?? program.command('datasource').description('Datasource profile operations');
+}
 
 export function datasourceListCommand(program: Command, executor: Executor): void {
-  commandGroup(program, 'datasource', DATASOURCE_GROUP_DESCRIPTION)
+  datasourceGroup(program)
     .command('list')
     .description('List datasource profiles; optional [pattern] keeps names containing it')
     .argument('[pattern]', 'case-insensitive substring of the datasource name')

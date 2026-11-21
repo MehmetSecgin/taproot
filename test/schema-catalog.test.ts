@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
 import { cachedSchemaCatalog, ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
+import { readSchema } from '../src/core/schema-read.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import { runDatasourceConnectors } from '../src/core/connector-runner.js';
 import type { AppContext } from '../src/core/app.js';
@@ -409,5 +410,22 @@ describe('cache-first schema catalog', () => {
 
     // assert
     await expect(read).rejects.toThrow("BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema.");
+  });
+});
+
+describe('schema read', () => {
+  it('finds a table created after the catalog was cached', async () => {
+    // arrange
+    let columns = ORDERS_COLUMNS;
+    const { ctx } = makeContext((sql) => (sql.includes('information_schema.columns') ? columns : []));
+    await readSchema(ctx, datasource('mysql', 'qa-grown'), [], undefined);
+    backdateCatalog(ctx, 'qa-grown', 2 * 60 * 1000);
+    columns = [...ORDERS_COLUMNS, { table_name: 'invoices', column_name: 'id' }];
+
+    // act
+    const schema = await readSchema(ctx, datasource('mysql', 'qa-grown'), ['invoices'], undefined);
+
+    // assert
+    expect(schema.tables).toEqual({ invoices: { columns: ['id'] } });
   });
 });

@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import tls from 'node:tls';
-import type { AddressInfo } from 'node:net';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildContext } from '../src/core/app.js';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
@@ -10,12 +9,13 @@ import { TAPROOT_VERSION } from '../src/core/version.js';
 import { remoteRpcCall } from '../src/daemon/client.js';
 import { DATASOURCE_COLUMNS, type DatasourceColumn } from '../src/core/datasource-list.js';
 import type { DatasourceCheck } from '../src/daemon/datasource-check.js';
-import { datasourceListMethod, schemaMethod } from '../src/daemon/handlers/catalog-methods.js';
-import { queryMethod, type QueryMethodOptions } from '../src/daemon/handlers/query-method.js';
+import { datasourceListMethod, schemaMethod } from '../src/daemon/methods/catalog.js';
+import { queryMethod, type QueryMethodOptions } from '../src/daemon/methods/query.js';
 import { startDaemon, type DaemonLog } from '../src/daemon/server.js';
 import { mutualTlsClientOptions, type HostPort, type MutualTlsFiles } from '../src/daemon/transport.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import type { DatasourceProfile, TapRootPlugin } from '../src/types/core.js';
+import { tlsPort } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { createTestPki, type TestPki } from './helpers/mutual-tls.js';
 import { restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
@@ -55,7 +55,7 @@ async function tlsDaemon(input: TlsDaemonInput = {}): Promise<HostPort> {
     log: input.log ?? (() => undefined),
   });
   running.push(daemon.stop);
-  return { host: '127.0.0.1', port: (daemon.address as AddressInfo).port };
+  return { host: '127.0.0.1', port: tlsPort(daemon) };
 }
 
 function callAs(files: MutualTlsFiles, server: HostPort, method: string, params: Record<string, unknown>) {
@@ -119,15 +119,17 @@ describe('daemon over mutual TLS', () => {
     expect(reply).toBe('');
   });
 
-  it('closes the connection when a request line grows past 1 MiB', async () => {
+  it('closes the connection when a request line grows past 1 MiB and reports the drop', async () => {
     // arrange
-    const server = await tlsDaemon();
+    const events: Array<Record<string, unknown>> = [];
+    const server = await tlsDaemon({ log: (event) => events.push(event) });
 
     // act
     const reply = await rawReply(server, pki.client, 'x'.repeat(1024 * 1024 + 1));
 
     // assert
     expect(reply).toBe('');
+    expect(events).toEqual([{ requestDropped: 'request line over 1048576 characters', peer: '127.0.0.1' }]);
   });
 
   it('tells a client of another version to match versions and keeps serving', async () => {
@@ -168,6 +170,25 @@ describe('daemon over mutual TLS', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('fills env and service from the profile of the datasource a client names', async () => {
+    // arrange
+    const server = await tlsDaemon();
+
+    // act
+    const res = await readOk(server);
+
+    // assert
+    expect((res.meta as Record<string, unknown>).resolved).toMatchObject({ env: 'qa', service: 'fake' });
+  });
+
+  it('refuses a reload interval that is not positive', async () => {
+    // act
+    const start = tlsDaemon({ reloadMs: 0 });
+
+    // assert
+    await expect(start).rejects.toThrow('BAD_INPUT: listen.reloadMs must be a positive number of milliseconds, got 0.');
+  });
+
   it('answers a method it was not given as unknown', async () => {
     // arrange
     const server = await tlsDaemon();
@@ -177,6 +198,55 @@ describe('daemon over mutual TLS', () => {
 
     // assert
     expect(res.error?.code).toBe('UNKNOWN_METHOD');
+  });
+});
+
+describe('daemon log', () => {
+  async function loggedDaemon() {
+    const events: Array<Record<string, unknown>> = [];
+    const server = await tlsDaemon({ log: (event) => events.push(event) });
+    return { server, events };
+  }
+
+  it('reports a client whose certificate comes from another CA', async () => {
+    // arrange
+    const { server, events } = await loggedDaemon();
+    const strangerWithOurCa = { ...otherPki.client, caFile: pki.client.caFile };
+
+    // act
+    await readOk(server, strangerWithOurCa).catch(() => undefined);
+
+    // assert
+    await vi.waitFor(() => expect(events).toEqual([{ tlsClientError: expect.any(String) }]));
+  });
+
+  it('reports a request it answered with an error', async () => {
+    // arrange
+    const { server, events } = await loggedDaemon();
+
+    // act
+    const res = await callAs(pki.client, server, 'schema.read', { datasource: 'qa-nope' });
+
+    // assert
+    expect(events).toEqual([{
+      requestFailed: 'schema.read',
+      code: 'UNKNOWN_DATASOURCE',
+      message: res.error?.message,
+      requestId: res.requestId,
+      durationMs: expect.any(Number),
+      peer: '127.0.0.1',
+    }]);
+  });
+
+  it('stays quiet for a request it answered', async () => {
+    // arrange
+    const { server, events } = await loggedDaemon();
+
+    // act
+    await readOk(server);
+
+    // assert
+    expect(events).toEqual([]);
   });
 });
 
@@ -225,7 +295,7 @@ describe('query request shaper', () => {
     const execute = vi.fn(fakePlugin().execute);
     const server = await tlsDaemon({
       plugin: { ...fakePlugin(), execute },
-      query: { shapeRequest: (params, ctx) => ({ ...queryDefaults(ctx), datasource: String(params.datasource), query: String(params.query) }) },
+      query: { shapeRequest: (request) => ({ ...request, allowMutate: false }) },
     });
 
     // act
@@ -261,7 +331,7 @@ describe('datasource check', () => {
   it('checks a datasource once, and again after a check that failed', async () => {
     // arrange
     const checkDatasource = vi.fn<DatasourceCheck>()
-      .mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      .mockRejectedValueOnce(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' }))
       .mockResolvedValue(undefined);
     const server = await tlsDaemon({ checkDatasource });
 
@@ -271,6 +341,36 @@ describe('datasource check', () => {
     // assert
     expect(replies.map((reply) => reply.ok)).toEqual([false, true, true]);
     expect(replies[0].error?.code).toBe('CONNECTIVITY');
+    expect(checkDatasource).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses with its own class when the refusal text reads like a network error', async () => {
+    // arrange
+    const checkDatasource: DatasourceCheck = async () => {
+      throw new Error('the network zone of this datasource is closed');
+    };
+    const server = await tlsDaemon({ checkDatasource });
+
+    // act
+    const res = await readOk(server);
+
+    // assert
+    expect(res.error?.code).toBe('DATASOURCE_REFUSED');
+  });
+
+  it('gives up on a check that outlasts the query timeout and checks again next time', async () => {
+    // arrange
+    const checkDatasource = vi.fn<DatasourceCheck>()
+      .mockReturnValueOnce(new Promise(() => undefined))
+      .mockResolvedValue(undefined);
+    const server = await tlsDaemon({ checkDatasource });
+    const read = () => callAs(pki.client, server, 'query.execute', { datasource: 'qa-fake', query: 'SELECT 1 AS ok', timeoutMs: 50 });
+
+    // act
+    const replies = [await read(), await read()];
+
+    // assert
+    expect(replies.map((reply) => reply.error?.code ?? 'ok')).toEqual(['QUERY_TIMEOUT', 'ok']);
     expect(checkDatasource).toHaveBeenCalledTimes(2);
   });
 
@@ -361,7 +461,7 @@ describe('catalog methods', () => {
     const res = await callAs(pki.client, server, 'schema.read', { datasource: 'qa-fake', tables: ['ORDERS'] });
 
     // assert
-    expect(res.data).toEqual({ tables: { orders: { database: 'fake', columns: ['id', 'note'], primaryKey: [], indexes: [] } } });
+    expect(res.data).toEqual({ tables: { orders: { columns: ['id', 'note'] } } });
   });
 
   it('suggests close names for a table the datasource does not have', async () => {
@@ -386,23 +486,3 @@ describe('catalog methods', () => {
     expect(res.error?.code).toBe('UNKNOWN_DATASOURCE');
   });
 });
-
-function queryDefaults(ctx: Parameters<NonNullable<QueryMethodOptions['shapeRequest']>>[1]) {
-  return {
-    env: '',
-    namespace: '',
-    service: '',
-    query: '',
-    params: [],
-    allowDiscovery: false,
-    allowMutate: false,
-    allowPartitionScan: false,
-    explain: false,
-    rowsObject: false,
-    jsonExtract: [],
-    allowFlush: false,
-    allowKeys: false,
-    skipProtoValidate: false,
-    timeoutMs: ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs,
-  };
-}

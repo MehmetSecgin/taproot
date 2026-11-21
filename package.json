@@ -52,7 +52,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts/make-mtls-certs.sh"
   ],
   "sideEffects": false,
   "scripts": {

@@ -1,13 +1,14 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
-import type { AddressInfo } from 'node:net';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildContext } from '../src/core/app.js';
 import { DATASOURCE_COLUMNS } from '../src/core/datasource-list.js';
-import { datasourceListMethod, schemaMethod } from '../src/daemon/handlers/catalog-methods.js';
-import { queryMethod } from '../src/daemon/handlers/query-method.js';
+import { datasourceListMethod, schemaMethod } from '../src/daemon/methods/catalog.js';
+import { queryMethod } from '../src/daemon/methods/query.js';
 import { startDaemon, type DaemonInstance } from '../src/daemon/server.js';
+import { DatasourceStore } from '../src/store/datasources.js';
+import { tlsPort } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { createTestPki } from './helpers/mutual-tls.js';
 import { restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
@@ -18,18 +19,22 @@ let cliEnv: Record<string, string>;
 
 beforeAll(async () => {
   const pki = createTestPki();
-  await setupQueryState({ kind: 'mysql' });
+  const stateRoot = await setupQueryState({ kind: 'mysql' });
+  const datasources = new DatasourceStore(path.join(stateRoot, 'config', 'datasources.json'));
+  datasources.save({ ...datasources.get('qa-fake')!, name: 'qa-closed' });
   const plugin = fakePlugin({ kind: 'mysql', columns: ['table_name', 'column_name'], rows: [['orders', 'id']] });
   daemon = await startDaemon({
     ctx: buildContext({ kbDir: undefined, verbose: false, plugins: [plugin], useKeychain: false }),
     listen: { kind: 'tls', host: '127.0.0.1', port: 0, tls: pki.daemon, reloadMs: 60_000 },
     methods: [queryMethod(), datasourceListMethod({ columns: DATASOURCE_COLUMNS }), schemaMethod()],
-    checkDatasource: undefined,
+    checkDatasource: async ({ datasource }) => {
+      if (datasource.name === 'qa-closed') throw new Error("'qa-closed' is not served here.");
+    },
     log: () => undefined,
   });
   cliEnv = {
     TEST_DAEMON_HOST: '127.0.0.1',
-    TEST_DAEMON_PORT: String((daemon.address as AddressInfo).port),
+    TEST_DAEMON_PORT: String(tlsPort(daemon)),
     TEST_TLS_CA: pki.client.caFile,
     TEST_TLS_CERT: pki.client.certFile,
     TEST_TLS_KEY: pki.client.keyFile,
@@ -41,11 +46,11 @@ afterAll(async () => {
   restoreQueryEnv();
 });
 
-async function runRemoteCli(args: string[]): Promise<{ lines: string[]; json: Record<string, unknown> }> {
-  const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', REMOTE_CLI, ...args], { env: { ...process.env, ...cliEnv } })
-    .catch((error: { stdout: string }) => ({ stdout: error.stdout }));
+async function runRemoteCli(args: string[]): Promise<{ lines: string[]; json: Record<string, unknown>; exitCode: number }> {
+  const { stdout, exitCode } = await promisify(execFile)(process.execPath, ['--import', 'tsx', REMOTE_CLI, ...args], { env: { ...process.env, ...cliEnv } })
+    .then((done) => ({ stdout: done.stdout, exitCode: 0 }), (error: { stdout: string; code: number }) => ({ stdout: error.stdout, exitCode: error.code }));
   const lines = stdout.trim().split('\n');
-  return { lines, json: JSON.parse(lines[0]) };
+  return { lines, json: JSON.parse(lines[0]), exitCode };
 }
 
 describe('a CLI built with the remote executor', () => {
@@ -81,10 +86,29 @@ describe('a CLI built with the remote executor', () => {
 
   it('lists the daemon datasources', async () => {
     // act
-    const { json } = await runRemoteCli(['datasource', 'list', '--pluck', 'data.rows']);
+    const { json } = await runRemoteCli(['datasource', 'list', 'fake', '--pluck', 'data.rows']);
 
     // assert
     expect(json).toEqual([['qa-fake', 'mysql', 'qa', 'fake', '127.0.0.1', 'fake']]);
+  });
+
+  it('exits 5 with the refusal alone for a datasource the daemon refuses', async () => {
+    // act
+    const { json, exitCode } = await runRemoteCli(['schema', '--datasource', 'qa-closed']);
+
+    // assert
+    expect(json).toEqual({ ok: false, error: { code: 'DATASOURCE_REFUSED', message: "DATASOURCE_REFUSED: 'qa-closed' is not served here." } });
+    expect(exitCode).toBe(5);
+  });
+
+  it('names itself in the query help', async () => {
+    // act
+    const { json } = await runRemoteCli(['query', '--help']);
+
+    // assert
+    const help = JSON.stringify(json);
+    expect(help).toContain('Example: remote query --datasource');
+    expect(help).not.toContain('taproot query');
   });
 
   it('reads table names from the daemon schema cache', async () => {

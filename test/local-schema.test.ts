@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
+import { DatasourceStore } from '../src/store/datasources.js';
 import { runCli } from './helpers/cli.js';
 import { startLocalDaemon } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
@@ -22,7 +23,7 @@ describe('schema on the local daemon', () => {
       const res = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['orders'] } });
 
       // assert
-      expect(res.data).toEqual({ tables: { orders: { database: 'fake', columns: ['id'], primaryKey: [], indexes: [] } } });
+      expect(res.data).toEqual({ tables: { orders: { columns: ['id'] } } });
     } finally {
       await daemon.stop();
     }
@@ -30,6 +31,37 @@ describe('schema on the local daemon', () => {
 });
 
 describe('taproot schema', () => {
+  it('answers through the daemon it starts, with the error alone', () => {
+    // arrange
+    const { stateRoot, configDir } = tempStateRoot();
+    new DatasourceStore(path.join(configDir, 'datasources.json')).save({
+      name: 'qa-cache',
+      kind: 'redis',
+      env: 'qa',
+      service: 'cache',
+      tags: [],
+      connection: { host: '127.0.0.1', port: 1 },
+      credentialRef: 'qa:cache',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: new Date().toISOString(),
+      confidence: 1,
+    });
+    const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
+
+    try {
+      // act
+      const res = runCli(['schema', '--datasource', 'qa-cache'], env);
+      const daemon = runCli(['daemon', 'status'], env);
+
+      // assert
+      expect(JSON.parse(res.stdout)).toEqual({ ok: false, error: { code: 'BAD_INPUT', message: "BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema." } });
+      expect(res.status).toBe(2);
+      expect(daemon.status).toBe(0);
+    } finally {
+      runCli(['daemon', 'stop'], env);
+    }
+  });
+
   it('names a datasource that has no profile', () => {
     // arrange
     const { stateRoot } = tempStateRoot();

@@ -4,7 +4,7 @@ import { discoverKubernetesTargets } from '../core/discovery.js';
 import { executeQuery } from '../core/execute-query.js';
 import type { QueryExecutionRequest } from '../core/execute-query.js';
 import { queryDatasourceResolver } from '../core/resolve-query-datasource.js';
-import { outcomeReply, type DaemonReply } from './query-present.js';
+import { outcomeReply, type QueryReply } from './query-present.js';
 
 export function verboseLog(ctx: AppContext): (msg: string) => void {
   return (msg) => {
@@ -12,7 +12,7 @@ export function verboseLog(ctx: AppContext): (msg: string) => void {
   };
 }
 
-export async function runDirectQuery(request: QueryExecutionRequest, ctx: AppContext): Promise<DaemonReply> {
+export async function runDirectQuery(request: QueryExecutionRequest, ctx: AppContext): Promise<QueryReply> {
   const outcome = await executeQuery(request, {
     ctx,
     report: { log: verboseLog(ctx) },

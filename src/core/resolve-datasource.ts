@@ -53,7 +53,7 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
   if (!matches.length) {
     const close = rawDs ? closeDatasourceNames(rawDs, profiles.map((p) => p.name)) : [];
     const hint = close.length ? ` Did you mean ${close.join(', ')}?` : '';
-    return `${head}${hint} Use --datasource or --env+--service; list profiles with taproot datasource list.`;
+    return `${head}${hint} Use --datasource or --env+--service; list profiles with datasource list.`;
   }
   const names = matches.map((p) => p.name).sort();
   const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` (+${names.length - 6})` : '');
@@ -65,7 +65,7 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
     return !namespace && Boolean(ns) && `${p.env}-${ns}` === env;
   };
   const where = `env '${env}'${namespace ? ` namespace '${namespace}'` : ''}`;
-  const missing = env && !matches.some(inEnv) ? ` No profile in ${where}; add one with taproot datasource add.` : '';
+  const missing = env && !matches.some(inEnv) ? ` No profile in ${where}; add one with datasource add.` : '';
   return `${head} Profiles for service '${service}': ${shown} (envs: ${envs}).${missing}`;
 }
 

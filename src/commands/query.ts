@@ -1,59 +1,16 @@
 import type { Command } from 'commander';
-import type { Executor } from '../cli/types.js';
+import { presentQueryReply } from '../cli/query-present.js';
+import type { Executor, QueryOpts } from '../cli/types.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
-import type { QueryExecutionRequest, QueryTarget } from '../core/execute-query.js';
-import { presentQueryReply } from './query-present.js';
-import type { QueryOpts } from './query-types.js';
-
-function queryText(opts: QueryOpts): string {
-  if (opts.sql && opts.query) {
-    throw badInput('pass the query text once, with --sql or --query, not both.');
-  }
-  const text = opts.sql || opts.query || '';
-  if (opts.explain && !text) {
-    throw badInput('--explain requires --sql.');
-  }
-  return text;
-}
-
-export function queryExecutionRequest(
-  opts: QueryOpts,
-  target: Pick<QueryTarget, 'env' | 'namespace' | 'service'>,
-  allowDiscovery: boolean,
-  timeoutMs: number,
-): QueryExecutionRequest {
-  return {
-    datasource: opts.datasource,
-    optsEnv: opts.env,
-    env: target.env,
-    namespace: target.namespace,
-    service: target.service,
-    query: queryText(opts),
-    params: opts.param || [],
-    allowDiscovery,
-    allowMutate: Boolean(opts.allowMutate),
-    allowPartitionScan: Boolean(opts.allowPartitionScan),
-    explain: Boolean(opts.explain),
-    rowsObject: Boolean(opts.rowsObject),
-    jsonExtract: opts.jsonExtract || [],
-    proto: opts.proto,
-    protoRoot: opts.protoRoot,
-    allowFlush: Boolean(opts.allowFlush),
-    allowKeys: Boolean(opts.allowKeys),
-    requestJson: opts.requestJson,
-    skipProtoValidate: Boolean(opts.skipProtoValidate),
-    timeoutMs,
-    tz: opts.tz,
-  };
-}
 
 export function queryCommand(program: Command, executor: Executor): void {
+  const cli = program.name();
   program
     .command('query')
-    .description('Run a SQL query, Redis command or gRPC call against a datasource. Example: taproot query --datasource <name> --sql "SHOW TABLES"')
+    .description(`Run a SQL query, Redis command or gRPC call against a datasource. Example: ${cli} query --datasource <name> --sql "SHOW TABLES"`)
     .allowExcessArguments()
-    .option('--datasource <name>', 'datasource profile name; find one with taproot datasource list <pattern>')
+    .option('--datasource <name>', `datasource profile name; find one with ${cli} datasource list <pattern>`)
     .option('--env <env>', 'environment (e.g. qa, stg); pair with --service when no --datasource is given')
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .option('--service <service>', 'service name; pair with --env')
@@ -88,7 +45,7 @@ export function queryCommand(program: Command, executor: Executor): void {
     .action(async (opts: QueryOpts, command: Command) => {
       if (command.args.length > 0) {
         throw badInput(
-          `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --sql "<query>" and the datasource with --datasource <name>, e.g. taproot query --datasource demo-db --sql "SELECT 1".`,
+          `'query' takes no positional arguments (got ${command.args.length}). Pass the query text with --sql "<query>" and the datasource with --datasource <name>, e.g. ${cli} query --datasource demo-db --sql "SELECT 1".`,
         );
       }
       presentQueryReply(await executor.query(opts));

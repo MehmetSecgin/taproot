@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { hasDatabase } from '../plugins-builtins/redis/index.js';
 import { Command } from 'commander';
-import { commandGroup, type LocalExecutor } from '../cli/types.js';
-import { DATASOURCE_GROUP_DESCRIPTION } from './datasource-list.js';
+import type { LocalExecutor } from '../cli/types.js';
+import { datasourceGroup } from './datasource-list.js';
 import { saveKbBootstrapCandidate } from '../core/bootstrap.js';
 import { runDatasourceConnectors } from '../core/connector-runner.js';
 import { badInput } from '../core/error-classification.js';
@@ -28,7 +28,7 @@ function connectorCredentialRefHints(values: string[]): Record<string, string> {
 }
 
 export function datasourceAdminCommand(program: Command, executor: LocalExecutor): void {
-  const ds = commandGroup(program, 'datasource', DATASOURCE_GROUP_DESCRIPTION);
+  const ds = datasourceGroup(program);
 
   ds.command('show')
     .description('Print one datasource profile')

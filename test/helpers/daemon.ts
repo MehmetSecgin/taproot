@@ -1,10 +1,10 @@
 import { buildContext } from '../../src/core/app.js';
 import { DATASOURCE_COLUMNS } from '../../src/core/datasource-list.js';
-import { datasourceListMethod, schemaMethod } from '../../src/daemon/handlers/catalog-methods.js';
-import { statusMethod, stopMethod } from '../../src/daemon/handlers/daemon-status.js';
-import { queryMethod } from '../../src/daemon/handlers/query-method.js';
+import { datasourceListMethod, schemaMethod } from '../../src/daemon/methods/catalog.js';
+import { statusMethod, stopMethod } from '../../src/daemon/methods/status.js';
+import { queryMethod } from '../../src/daemon/methods/query.js';
 import { startDaemon, type DaemonInstance } from '../../src/daemon/server.js';
-import { builtinPlugins } from '../../src/plugins/load-builtins.js';
+import { builtinPlugins } from '../../src/plugins-builtins/index.js';
 import type { TapRootPlugin } from '../../src/types/core.js';
 
 export function startLocalDaemon(input: { stateRoot: string; socketPath: string; plugins: TapRootPlugin[] }): Promise<DaemonInstance> {
@@ -16,4 +16,9 @@ export function startLocalDaemon(input: { stateRoot: string; socketPath: string;
     checkDatasource: undefined,
     log: () => undefined,
   });
+}
+
+export function tlsPort(daemon: DaemonInstance): number {
+  if (!('port' in daemon.endpoint)) throw new Error('this daemon does not listen on TLS');
+  return daemon.endpoint.port;
 }

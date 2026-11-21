@@ -4,7 +4,7 @@ import { DATASOURCE_COLUMNS, datasourceListMethod, queryMethod, schemaMethod, st
 import { runRegisteredCleanup } from './core/cleanup.js';
 import { EXIT_CODES, classifyExitCode } from './core/exit-codes.js';
 import { defaultSocketPath } from './daemon/client.js';
-import { builtinPlugins } from './plugins/load-builtins.js';
+import { builtinPlugins } from './plugins-builtins/index.js';
 
 function fatal(error: unknown, code: string): void {
   const message = (error as Error)?.message || String(error || 'Unknown error');

@@ -1,7 +1,7 @@
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { parseTimeoutMs, queryBudgetMs } from '../core/query-timeout.js';
-import { queryExecutionRequest } from '../commands/query.js';
-import { replyData } from '../commands/query-present.js';
+import { queryExecutionRequest } from './query-request.js';
+import { replyData } from './query-present.js';
 import { remoteRpcCall } from '../daemon/client.js';
 import type { MutualTlsFiles } from '../daemon/transport.js';
 import { RpcMethod } from '../daemon/types.js';
@@ -16,8 +16,8 @@ export function remoteExecutor(daemon: { host: string; port: number; tls: Mutual
 
     async query(opts) {
       const timeoutMs = parseTimeoutMs(opts.timeout, RUNTIME_CONSTANTS.query.defaultTimeoutMs);
-      const target = { env: opts.env || '', namespace: opts.namespace || '', service: opts.service || '' };
-      const request = queryExecutionRequest(opts, target, false, timeoutMs);
+      const targetAsTyped = { env: opts.env || '', namespace: opts.namespace || '', service: opts.service || '' };
+      const request = queryExecutionRequest(opts, targetAsTyped, false, timeoutMs);
       return call(RpcMethod.QueryExecute, { ...request }, queryBudgetMs(timeoutMs) + RUNTIME_CONSTANTS.rpc.queryReplyMarginMs);
     },
 

@@ -1,7 +1,7 @@
 import type { AppContext } from '../../core/app.js';
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { executeQuery, silentQueryReport } from '../../core/execute-query.js';
-import type { DatasourceResolver, QueryExecutionRequest } from '../../core/execute-query.js';
+import { deriveQueryTarget, executeQuery, silentQueryReport } from '../../core/execute-query.js';
+import type { QueryExecutionRequest } from '../../core/execute-query.js';
 import { parseTimeoutMs, queryTimeoutError } from '../../core/query-timeout.js';
 import { queryDatasourceResolver } from '../../core/resolve-query-datasource.js';
 import type { DatasourceProfile } from '../../types/core.js';
@@ -9,7 +9,7 @@ import { RpcMethod } from '../types.js';
 import type { SessionRegistry } from '../session-registry.js';
 import type { DaemonMethod, Handler } from './types.js';
 
-export type QueryRequestShaper = (params: Record<string, unknown>, ctx: AppContext) => QueryExecutionRequest;
+export type QueryRequestShaper = (request: QueryExecutionRequest) => QueryExecutionRequest;
 
 export interface QueryMethodOptions {
   shapeRequest?: QueryRequestShaper;
@@ -20,10 +20,14 @@ interface SessionLease {
   release(): void;
 }
 
-const fullQueryRequest: QueryRequestShaper = (params, ctx) => {
+const resolveFromStores = queryDatasourceResolver(undefined);
+
+function completedRequest(params: Record<string, unknown>, ctx: AppContext): QueryExecutionRequest {
+  const asSent = params as unknown as QueryExecutionRequest;
+  const { env, namespace, service } = deriveQueryTarget(ctx, asSent);
   const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
-  return { ...(params as unknown as QueryExecutionRequest), timeoutMs: parseTimeoutMs(params.timeoutMs, timeoutDefault) };
-};
+  return { ...asSent, env, namespace, service, timeoutMs: parseTimeoutMs(params.timeoutMs, timeoutDefault) };
+}
 
 function leaseSession(sessions: SessionRegistry, datasource: DatasourceProfile): SessionLease {
   const { sessionId } = sessions.open({
@@ -46,10 +50,10 @@ function leaseSession(sessions: SessionRegistry, datasource: DatasourceProfile):
   };
 }
 
-function queryHandler(shapeRequest: QueryRequestShaper, resolveDatasource: DatasourceResolver): Handler {
+function queryHandler(shapeRequest: QueryRequestShaper): Handler {
   return async ({ req, base, deps, clientGone }) => {
     const { ctx, sessions, queryLimiter } = deps;
-    const request = shapeRequest(req.params, ctx);
+    const request = shapeRequest(completedRequest(req.params, ctx));
     const timeoutController = new AbortController();
     const timeoutTimer = setTimeout(() => timeoutController.abort(queryTimeoutError(request.timeoutMs)), request.timeoutMs);
     const releaseGlobal = await queryLimiter.acquire({ signal: AbortSignal.any([clientGone, timeoutController.signal]) });
@@ -66,7 +70,7 @@ function queryHandler(shapeRequest: QueryRequestShaper, resolveDatasource: Datas
         },
         acquireQuerySlot: (signal) => queryLimiter.acquire({ signal }),
         resolveDatasource: async (resolveRequest, resolveDeps) => {
-          const resolved = await resolveDatasource(resolveRequest, resolveDeps);
+          const resolved = await resolveFromStores(resolveRequest, resolveDeps);
           await deps.admitDatasource(resolved.datasource, resolveRequest.timeoutMs);
           return resolved;
         },
@@ -98,6 +102,6 @@ function queryHandler(shapeRequest: QueryRequestShaper, resolveDatasource: Datas
 export function queryMethod(options: QueryMethodOptions = {}): DaemonMethod {
   return {
     name: RpcMethod.QueryExecute,
-    handle: queryHandler(options.shapeRequest ?? fullQueryRequest, queryDatasourceResolver(undefined)),
+    handle: queryHandler(options.shapeRequest ?? ((request) => request)),
   };
 }

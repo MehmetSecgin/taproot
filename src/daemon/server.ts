@@ -6,16 +6,17 @@ import tls from 'node:tls';
 import type { AppContext } from '../core/app.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { registerCleanup, runRegisteredCleanup } from '../core/cleanup.js';
+import { badInput } from '../core/error-classification.js';
 import { TAPROOT_VERSION } from '../core/version.js';
 import { rpcCall } from './client.js';
 import { datasourceGate, type DatasourceCheck } from './datasource-check.js';
-import { refuseOtherVersion, stopForOtherVersion } from './handlers/daemon-status.js';
-import type { DaemonEndpoint, DaemonMethod, HandlerDeps } from './handlers/types.js';
+import { refuseOtherVersion, stopForOtherVersion } from './methods/status.js';
+import type { DaemonEndpoint, DaemonMethod, HandlerDeps } from './methods/types.js';
 import { QueryLimiter } from './query-limiter.js';
-import { answerRpc, readRpcRequests, writeRpcResponse } from './rpc-connection.js';
+import { MAX_REQUEST_LINE_CHARS, answerRpc, readRpcRequests, writeRpcResponse } from './rpc-connection.js';
 import { SessionRegistry } from './session-registry.js';
 import { mutualTlsServerOptions, readTlsMaterial, tlsFingerprint, type MutualTlsFiles } from './transport.js';
-import { RpcMethod } from './types.js';
+import { DAEMON_VERSION_MISMATCH, RpcMethod, type RpcRequest, type RpcResponse } from './types.js';
 
 export type DaemonListen =
   | { kind: 'unix'; socketPath: string }
@@ -24,14 +25,14 @@ export type DaemonListen =
 export type DaemonLog = (event: Record<string, unknown>) => void;
 
 export interface DaemonInstance {
-  address: string | AddressInfo;
+  endpoint: DaemonEndpoint;
   stop: () => Promise<void>;
 }
 
 async function claimSocket(socketPath: string): Promise<void> {
   fs.mkdirSync(path.dirname(socketPath), { recursive: true });
   if (!fs.existsSync(socketPath)) return;
-  const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then((res) => res.ok, () => false);
+  const alive = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus }).then((res) => res.error?.code !== DAEMON_VERSION_MISMATCH, () => false);
   if (alive) throw new Error(`taprootd already running on ${socketPath}`);
   fs.rmSync(socketPath, { force: true });
 }
@@ -56,11 +57,24 @@ function reloadTlsOnChange(server: tls.Server, files: MutualTlsFiles, servedFing
   }, intervalMs);
 }
 
-function serverFor(listen: DaemonListen, onConnection: (socket: net.Socket) => void): { server: net.Server; watchCertificates: ((log: DaemonLog) => NodeJS.Timeout) | undefined } {
+function serverFor(listen: DaemonListen, onConnection: (socket: net.Socket) => void, log: DaemonLog): { server: net.Server; watchCertificates: (() => NodeJS.Timeout) | undefined } {
   if (listen.kind === 'unix') return { server: net.createServer(onConnection), watchCertificates: undefined };
+  if (!(listen.reloadMs > 0)) throw badInput(`listen.reloadMs must be a positive number of milliseconds, got ${listen.reloadMs}.`);
   const material = readTlsMaterial(listen.tls);
   const server = tls.createServer(mutualTlsServerOptions(material), onConnection);
-  return { server, watchCertificates: (log) => reloadTlsOnChange(server, listen.tls, tlsFingerprint(material), listen.reloadMs, log) };
+  server.on('tlsClientError', (error) => log({ tlsClientError: error.message.trim() }));
+  return { server, watchCertificates: () => reloadTlsOnChange(server, listen.tls, tlsFingerprint(material), listen.reloadMs, log) };
+}
+
+function failureEvent(req: RpcRequest, response: RpcResponse, socket: net.Socket): Record<string, unknown> {
+  return {
+    requestFailed: req.method,
+    code: response.error?.code,
+    message: response.error?.message,
+    requestId: req.requestId,
+    durationMs: response.meta.timings?.durationMs,
+    peer: socket.remoteAddress,
+  };
 }
 
 function listenOn(server: net.Server, listen: DaemonListen): Promise<void> {
@@ -114,11 +128,13 @@ export async function startDaemon(input: {
     const clientGone = new AbortController();
     socket.on('error', () => socket.destroy());
     socket.on('close', () => clientGone.abort(new Error('client disconnected before the response')));
-    readRpcRequests(socket, (req) => {
+    const onOversizedLine = (): void => log({ requestDropped: `request line over ${MAX_REQUEST_LINE_CHARS} characters`, peer: socket.remoteAddress });
+    readRpcRequests(socket, onOversizedLine, (req) => {
       chain = chain.then(async () => {
         inFlight += 1;
         const handler = req.method === RpcMethod.DaemonStop || req.clientVersion === TAPROOT_VERSION ? handlers.get(req.method) : onOtherVersion;
         const { response, postWrite } = await answerRpc(req, handler, deps, clientGone.signal);
+        if (!response.ok) log(failureEvent(req, response, socket));
         if (postWrite === 'stopSocket') releaseSocket();
         writeRpcResponse(socket, response);
         inFlight -= 1;
@@ -131,10 +147,10 @@ export async function startDaemon(input: {
     });
   };
 
-  const { server, watchCertificates } = serverFor(listen, onConnection);
+  const { server, watchCertificates } = serverFor(listen, onConnection, log);
   await listenOn(server, listen);
   if (listen.kind === 'unix') fs.chmodSync(listen.socketPath, 0o600);
-  const address = server.address() as string | AddressInfo;
+  const endpoint = deps.endpoint();
 
   const timers = [
     setInterval(() => {
@@ -145,7 +161,7 @@ export async function startDaemon(input: {
       if (listen.kind === 'unix' && idle) onSignal();
     }, RUNTIME_CONSTANTS.sweeper.tickMs),
   ];
-  if (watchCertificates) timers.push(watchCertificates(log));
+  if (watchCertificates) timers.push(watchCertificates());
 
   let stopped = false;
   const stop = async (): Promise<void> => {
@@ -158,7 +174,7 @@ export async function startDaemon(input: {
     await closePlugins(ctx);
     releaseSocket();
   };
-  const unregisterStop = registerCleanup(`daemon-stop:${JSON.stringify(endpointOf(address))}`, stop);
+  const unregisterStop = registerCleanup(`daemon-stop:${JSON.stringify(endpoint)}`, stop);
 
   const onSignal = () => {
     void runRegisteredCleanup().finally(() => process.exit(0));
@@ -167,7 +183,7 @@ export async function startDaemon(input: {
   process.on('SIGTERM', onSignal);
 
   return {
-    address,
+    endpoint,
     stop: async () => {
       unregisterStop();
       await stop();

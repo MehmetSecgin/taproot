@@ -1,10 +1,10 @@
 import type net from 'node:net';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { classifyError } from '../core/error-classification.js';
-import type { Handler, HandlerDeps, HandlerResult } from './handlers/types.js';
+import type { Handler, HandlerDeps, HandlerResult } from './methods/types.js';
 import type { RpcRequest, RpcResponse } from './types.js';
 
-const MAX_REQUEST_LINE_CHARS = 1024 * 1024;
+export const MAX_REQUEST_LINE_CHARS = 1024 * 1024;
 
 function parseRequestLine(line: string): RpcRequest {
   const parsed = JSON.parse(line) as RpcRequest;
@@ -36,7 +36,7 @@ function requestOrBadRequest(socket: net.Socket, line: string): RpcRequest | und
   }
 }
 
-export function readRpcRequests(socket: net.Socket, onRequest: (req: RpcRequest) => void): void {
+export function readRpcRequests(socket: net.Socket, onOversizedLine: () => void, onRequest: (req: RpcRequest) => void): void {
   let buffer = '';
   socket.setEncoding('utf8');
   socket.on('data', (chunk: string) => {
@@ -49,7 +49,9 @@ export function readRpcRequests(socket: net.Socket, onRequest: (req: RpcRequest)
       if (req) onRequest(req);
       idx = buffer.indexOf('\n');
     }
-    if (buffer.length > MAX_REQUEST_LINE_CHARS) socket.destroy();
+    if (buffer.length <= MAX_REQUEST_LINE_CHARS) return;
+    onOversizedLine();
+    socket.destroy();
   });
 }
 
