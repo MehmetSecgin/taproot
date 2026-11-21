@@ -30,7 +30,6 @@ export async function setupQueryState(overrides: Partial<DatasourceProfile> = {}
     credentialRef: 'qa:fake',
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: new Date().toISOString(),
-    confidence: 1,
     ...overrides,
   } as DatasourceProfile);
   const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);

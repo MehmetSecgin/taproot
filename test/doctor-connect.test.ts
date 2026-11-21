@@ -24,7 +24,6 @@ describe('doctor --connect', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: { 'kubectl-portforwardCredentialRef': 'qa:demo-forward' },
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );

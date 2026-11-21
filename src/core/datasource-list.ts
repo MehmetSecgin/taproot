@@ -2,11 +2,11 @@ import type { AppContext } from './app.js';
 import { str } from './strings.js';
 import type { DatasourceProfile } from '../types/core.js';
 
-export const DATASOURCE_COLUMNS = ['name', 'kind', 'env', 'namespace', 'service', 'host', 'target', 'database', 'confidence', 'updatedAt'] as const;
+export const DATASOURCE_COLUMNS = ['name', 'kind', 'env', 'namespace', 'service', 'host', 'target', 'database', 'updatedAt'] as const;
 
 export type DatasourceColumn = (typeof DATASOURCE_COLUMNS)[number];
 
-const DETAILED_ONLY_COLUMNS: ReadonlySet<DatasourceColumn> = new Set(['confidence', 'updatedAt']);
+const DETAILED_ONLY_COLUMNS: ReadonlySet<DatasourceColumn> = new Set(['updatedAt']);
 
 const CELLS: Record<DatasourceColumn, (d: DatasourceProfile) => unknown> = {
   name: (d) => d.name,
@@ -17,7 +17,6 @@ const CELLS: Record<DatasourceColumn, (d: DatasourceProfile) => unknown> = {
   host: (d) => d.connection.host,
   target: (d) => d.connection.target,
   database: (d) => d.connection.database,
-  confidence: (d) => d.confidence,
   updatedAt: (d) => d.updatedAt,
 };
 

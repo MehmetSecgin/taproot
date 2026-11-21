@@ -435,7 +435,7 @@ describe('catalog methods', () => {
 
   it('adds the detailed columns it serves only when the client asks', async () => {
     // arrange
-    const server = await tlsDaemon({ listColumns: ['name', 'confidence'] });
+    const server = await tlsDaemon({ listColumns: ['name', 'updatedAt'] });
 
     // act
     const plain = await callAs(pki.client, server, 'datasource.list', {});
@@ -443,7 +443,7 @@ describe('catalog methods', () => {
 
     // assert
     expect(plain.data).toEqual({ columns: ['name'], rows: [['qa-fake']] });
-    expect(detailed.data).toEqual({ columns: ['name', 'confidence'], rows: [['qa-fake', 1]] });
+    expect(detailed.data).toEqual({ columns: ['name', 'updatedAt'], rows: [['qa-fake', expect.any(String)]] });
   });
 
   it('refuses a column it does not know', () => {

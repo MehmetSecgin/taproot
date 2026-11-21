@@ -32,7 +32,6 @@ function datasource(kind: DatasourceKind = 'mysql'): DatasourceProfile {
     credentialRef: 'orders',
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: '',
-    confidence: 1,
   };
 }
 

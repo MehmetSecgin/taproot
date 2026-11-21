@@ -2,6 +2,15 @@ import { readJsonFile, writeJsonFile } from '../core/json.js';
 import type { DatasourceProfile } from '../types/core.js';
 import { parseDatasourceProfile } from './schemas.js';
 import { str } from '../core/strings.js';
+import { ambiguousDatasource } from '../core/error-classification.js';
+
+function ambiguousMatchError(candidates: DatasourceProfile[], env: string, service: string, namespace?: string): Error {
+  const names = candidates.map((d) => d.name);
+  const target = `env=${env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`;
+  const pickByName = 'use --datasource <name> on query and doctor';
+  const fix = namespace ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
+  return ambiguousDatasource(`${names.length} datasources match ${target}: ${names.join(', ')}. ${fix}`);
+}
 
 function rowName(row: unknown): string {
   return str((row as { name?: unknown } | null)?.name);
@@ -58,9 +67,10 @@ export class DatasourceStore {
         if (nsValue == null || nsValue === '') return true;
         return str(d.namespace) === nsValue;
       });
-      if (!filtered.length) return undefined;
       const ofKind = filtered.filter((d) => preferKinds.includes(d.kind));
-      return (ofKind.length ? ofKind : filtered).toSorted((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
+      const candidates = ofKind.length ? ofKind : filtered;
+      if (candidates.length > 1) throw ambiguousMatchError(candidates, envValue, service, nsValue);
+      return candidates[0];
     };
 
     const direct = tryMatch(env, namespace);

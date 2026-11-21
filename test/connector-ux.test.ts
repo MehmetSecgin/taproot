@@ -21,7 +21,6 @@ function setupStateRoot() {
         policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
         resolverHints: { 'kubectl-portforwardCredentialRef': 'kpf:qa:demo' },
         updatedAt: new Date().toISOString(),
-        confidence: 0.9,
       },
     ]),
   );
@@ -53,7 +52,6 @@ describe('connector UX', () => {
           resolverHints: {},
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );

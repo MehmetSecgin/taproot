@@ -309,7 +309,6 @@ describe('executeQuery datasource kind routing', () => {
       credentialRef: 'qa:fake',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: new Date().toISOString(),
-      confidence: 0.5,
       ...overrides,
     } as DatasourceProfile);
   }
@@ -321,8 +320,8 @@ describe('executeQuery datasource kind routing', () => {
   }
 
   it('sends SQL text to the sql datasource when env and service also match a grpc one', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 1 });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
     const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
       ctx: bothKinds(),
       report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
@@ -332,8 +331,8 @@ describe('executeQuery datasource kind routing', () => {
   });
 
   it('sends Service/method text to the grpc datasource when env and service also match a sql one', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 0.5 });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 1 });
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
     const outcome = await executeQuery(
       queryRequest({ datasource: undefined, service: 'svc', query: 'taproot.test.ProfileService/getProfile' }),
       { ctx: bothKinds(), report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver },
@@ -353,8 +352,8 @@ describe('executeQuery datasource kind routing', () => {
   });
 
   it('honours an explicit --datasource regardless of the query text', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc', confidence: 1 });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql', confidence: 0.5 });
+    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
+    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
     const outcome = await executeQuery(queryRequest({ datasource: 'qa-svc-grpc', service: 'svc', query: 'SELECT 1 AS ok' }), {
       ctx: bothKinds(),
       report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,

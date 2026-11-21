@@ -27,7 +27,6 @@ function setupState(input?: {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ],
     ),
@@ -55,6 +54,33 @@ describe('query resolution', () => {
     expect(out.stdout).not.toContain('DETERMINISTIC_REQUIRED');
   });
 
+  it('names every matching profile instead of picking one when env and service match several', () => {
+    // arrange
+    const orders = {
+      kind: 'mysql',
+      env: 'qa',
+      service: 'orders',
+      tags: [],
+      connection: { host: '127.0.0.1', port: 1, database: 'orders' },
+      credentialRef: 'qa:orders',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: new Date().toISOString(),
+    };
+    const { env } = setupState({
+      datasources: [
+        { ...orders, name: 'qa-orders-develop', namespace: 'develop' },
+        { ...orders, name: 'qa-orders-test', namespace: 'test' },
+      ],
+    });
+    // act
+    const out = runCli(['query', '--env', 'qa', '--service', 'orders', '--sql', 'SELECT 1'], env);
+    // assert
+    expect(out.status).toBe(2);
+    const error = JSON.parse(out.stdout).error;
+    expect(error.code).toBe('AMBIGUOUS_DATASOURCE');
+    expect(error.message).toContain('qa-orders-develop, qa-orders-test. Narrow with --namespace, or use --datasource <name> on query and doctor.');
+  });
+
   it('explicit --datasource with non-conventional name uses profile env/service for KB conflict checks', () => {
     // Profile name 'nudge-test' would naively parse as env='nudge' service='test'. The
     // profile's actual env is 'prod' / service 'orders'. KB has a conflicting prod/orders
@@ -74,7 +100,6 @@ describe('query resolution', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ],
       kbServices: [
@@ -294,7 +319,6 @@ describe('query resolution', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ],
       kbServices: [

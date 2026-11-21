@@ -30,6 +30,7 @@ const ERROR_CLASSES = {
   DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
   KB_MISSING: { exitCode: EXIT_CODES.NOT_READY, match: /kb_missing/ },
   UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },
+  AMBIGUOUS_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /ambiguous_datasource/ },
   AMBIGUOUS_DB_USER: { exitCode: EXIT_CODES.BAD_INPUT, match: /found several allowed db users/ },
   UNKNOWN_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /unknown column|column \S+ does not exist/ },
   AMBIGUOUS_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /column \S+ in .+ is ambiguous|column reference \S+ is ambiguous/ },
@@ -85,6 +86,7 @@ export const badInput = makeThrower('BAD_INPUT');
 export const missingPartitionPredicate = makeThrower('MISSING_PARTITION_PREDICATE');
 export const queryTimeoutErr = makeThrower('QUERY_TIMEOUT');
 export const misconfiguredDatasource = makeThrower('MISCONFIGURED_DATASOURCE');
+export const ambiguousDatasource = makeThrower('AMBIGUOUS_DATASOURCE');
 export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');
 export const kbMissing = makeThrower('KB_MISSING');
 export const overloaded = makeThrower('OVERLOADED');

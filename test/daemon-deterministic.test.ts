@@ -106,7 +106,6 @@ describe('daemon deterministic resolution', () => {
           credentialRef: 'qa:slow',
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: new Date().toISOString(),
-          confidence: 1,
         },
       ]),
     );

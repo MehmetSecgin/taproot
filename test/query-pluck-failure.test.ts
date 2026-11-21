@@ -21,7 +21,6 @@ function setupStateRoot(): string {
         policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
         resolverHints: { dbUser: 'reader' },
         updatedAt: new Date().toISOString(),
-        confidence: 0.9,
       },
     ]),
   );

@@ -44,7 +44,6 @@ describe('taproot schema', () => {
       credentialRef: 'qa:cache',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: new Date().toISOString(),
-      confidence: 1,
     });
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-master-key' };
 

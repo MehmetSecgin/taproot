@@ -27,7 +27,6 @@ function seedTeleportState(resolverHints: Record<string, string>): string {
         policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
         resolverHints,
         updatedAt: new Date().toISOString(),
-        confidence: 0.9,
       },
     ]),
   );
@@ -147,7 +146,6 @@ describe('teleport mysql execution', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );
@@ -189,7 +187,6 @@ describe('teleport mysql execution', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: { dbUser: 'reader' },
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );
@@ -219,7 +216,6 @@ describe('teleport mysql execution', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.9,
         },
       ]),
     );

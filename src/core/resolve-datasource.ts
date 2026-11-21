@@ -159,7 +159,6 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
       datasource = await saveKbBootstrapCandidate(ctx, env, service, rawDs || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
         targetOverride: target,
         tags: ['discovery-derived'],
-        confidence: 0.6,
       });
       if (datasource) source = 'kb';
     }

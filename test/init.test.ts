@@ -64,7 +64,6 @@ function initDatasourceOverSavedOrdersProfile(savedPort: number) {
           'kubectl-portforwardCredentialRef': 'kpf:qa:orders',
         },
         updatedAt: new Date().toISOString(),
-        confidence: 0.9,
       },
     ]),
   );
@@ -110,7 +109,6 @@ describe('init command', () => {
       credentialRef: 'qa:cache',
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: new Date().toISOString(),
-      confidence: 0.9,
     };
     fs.writeFileSync(path.join(configDir, 'datasources.json'), JSON.stringify([valid, { name: 'qa-broken', kind: 'mysql' }]));
 
@@ -448,7 +446,6 @@ describe('init command', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           resolverHints: {},
           updatedAt: new Date().toISOString(),
-          confidence: 0.4,
         },
       ]),
     );

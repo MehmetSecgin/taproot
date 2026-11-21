@@ -11,7 +11,7 @@ export function datasourceListCommand(program: Command, executor: Executor): voi
     .command('list')
     .description('List datasource profiles; optional [pattern] keeps names containing it')
     .argument('[pattern]', 'case-insensitive substring of the datasource name')
-    .option('--detailed', 'include confidence and updatedAt', false)
+    .option('--detailed', 'include updatedAt', false)
     .action(async (pattern: string | undefined, opts: { detailed: boolean }) => {
       printEnvelope(true, await executor.listDatasources({ pattern: pattern || '', detailed: Boolean(opts.detailed) }));
     });
