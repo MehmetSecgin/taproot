@@ -69,6 +69,7 @@ export interface EnvironmentPolicy {
   allowDiscoveryByDefault: boolean;
   preferredAccessMethods: string[];
   targetPreference: string[];
+  denyKinds: string[];
 }
 
 export interface RuntimeConfig {

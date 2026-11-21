@@ -11,6 +11,7 @@ import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate 
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
 import { ensureDatasourceCatalog } from './schema-refresh.js';
 import type { QuerySlot } from './schema-refresh.js';
+import { deniedKindCheck } from './env-policy.js';
 import { resolveSessionTimeZone } from './session-timezone.js';
 import { str } from './strings.js';
 import { DatasourceKind, DoctorStatus } from '../types/core.js';
@@ -160,6 +161,8 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return failure(error, {});
   }
 
+  const denied = deniedKindCheck(ctx, datasource);
+  if (denied) return failure(new Error(denied.detail), {});
   const sessionId = deps.openSession?.(datasource);
   let params: Record<string, string>;
   let jsonExtractSpecs: JsonExtractSpec[];

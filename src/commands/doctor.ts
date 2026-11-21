@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import type { LocalExecutor } from '../cli/types.js';
 import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
+import { deniedKindCheck } from '../core/env-policy.js';
 import { runDatasourceConnectors } from '../core/connector-runner.js';
 import { classifyError } from '../core/error-classification.js';
 import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
@@ -118,11 +119,17 @@ export function doctorCommand(program: Command, executor: LocalExecutor): void {
           if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
         }
       }
-      const creds = await ctx.credentialStore.get(datasource.credentialRef);
-      const connectorInput = { datasource, credentialStore: ctx.credentialStore, pluginRegistry: ctx.pluginRegistry };
-      const checks = opts.connect ? await runDatasourceConnectors({ ...connectorInput, mode: 'connect' }) : [];
-      checks.push(...(await runDatasourceConnectors({ ...connectorInput, mode: 'doctor' })));
-      checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
+      const denied = deniedKindCheck(ctx, datasource);
+      const checks: DoctorCheck[] = [];
+      if (denied) {
+        checks.push(denied);
+      } else {
+        const creds = await ctx.credentialStore.get(datasource.credentialRef);
+        const connectorInput = { datasource, credentialStore: ctx.credentialStore, pluginRegistry: ctx.pluginRegistry };
+        if (opts.connect) checks.push(...(await runDatasourceConnectors({ ...connectorInput, mode: 'connect' })));
+        checks.push(...(await runDatasourceConnectors({ ...connectorInput, mode: 'doctor' })));
+        checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
+      }
 
       const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
       const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
