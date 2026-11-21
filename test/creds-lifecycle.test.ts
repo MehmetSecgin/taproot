@@ -87,7 +87,7 @@ describe('credential lifecycle', () => {
     const jsonOut = runCli(['creds', 'list'], env);
     expect(jsonOut.status).toBe(0);
     const parsed = JSON.parse(jsonOut.stdout).data as Array<{ ref: string; keys: string[]; source: string }>;
-    expect(parsed.map((e) => e.ref).sort()).toEqual(['prod:billing', 'qa:orders']);
+    expect(parsed.map((e) => e.ref).toSorted()).toEqual(['prod:billing', 'qa:orders']);
     for (const entry of parsed) {
       for (const key of entry.keys) {
         expect(['user', 'dbUser', 'password', 'token', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']).toContain(

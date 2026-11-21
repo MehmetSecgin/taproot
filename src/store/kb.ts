@@ -57,7 +57,7 @@ export class KbStore {
           .map((row) => str(row.service).trim())
           .filter(Boolean),
       ),
-    ).sort((a, b) => a.localeCompare(b));
+    ).toSorted((a, b) => a.localeCompare(b));
   }
 
   resolveConnection(service: string, env: string, namespace?: string): Record<string, unknown> | null {
@@ -70,6 +70,6 @@ export class KbStore {
       return str(c.namespace) === namespace;
     });
     if (!active.length) return null;
-    return active.sort((a: any, b: any) => str(b.verified_at_utc).localeCompare(str(a.verified_at_utc)))[0];
+    return active.toSorted((a: any, b: any) => str(b.verified_at_utc).localeCompare(str(a.verified_at_utc)))[0];
   }
 }

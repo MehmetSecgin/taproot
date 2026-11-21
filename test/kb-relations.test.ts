@@ -28,7 +28,7 @@ describe('KbStore relations', () => {
     ]);
     expect(result.added).toBe(1);
     expect(result.total).toBe(2);
-    expect(store.typedRelations().map((r) => r.id).sort()).toEqual(['a', 'b']);
+    expect(store.typedRelations().map((r) => r.id).toSorted()).toEqual(['a', 'b']);
   });
 
   it('typedRelations returns empty when relations.json is absent', () => {

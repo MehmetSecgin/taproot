@@ -247,7 +247,7 @@ describe('grpc-introspect', () => {
     const services = listServices(protobufRoot);
     expect(services).toHaveLength(1);
     expect(services[0].name).toBe('taproot.test.ProfileService');
-    const methodNames = services[0].methods.map((m) => m.name).sort();
+    const methodNames = services[0].methods.map((m) => m.name).toSorted();
     expect(methodNames).toEqual(['GetProfile', 'ListProfiles']);
     const get = services[0].methods.find((m) => m.name === 'GetProfile')!;
     expect(get.requestType).toBe('taproot.test.GetProfileRequest');
@@ -377,7 +377,7 @@ describe('grpc-introspect discovery helpers', () => {
     );
 
     // assert
-    expect(Object.keys(JSON.parse(out.stdout)).sort()).toEqual(['taproot.test.GetProfileRequest', 'taproot.test.GetProfileResponse']);
+    expect(Object.keys(JSON.parse(out.stdout)).toSorted()).toEqual(['taproot.test.GetProfileRequest', 'taproot.test.GetProfileResponse']);
   });
 
   it('buildRequestSkeleton expands nested messages, repeated, enum, map, oneof', async () => {

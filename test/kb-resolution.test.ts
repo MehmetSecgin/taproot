@@ -187,7 +187,7 @@ describe('kb resolution', () => {
     const out = runCli(['kb', 'tables', '--service', 'orders', '--list'], env);
     expect(out.status).toBe(0);
     const parsed = JSON.parse(out.stdout).data as Array<{ table: string }>;
-    expect(parsed.map((r) => r.table).sort()).toEqual(['order_items', 'orders']);
+    expect(parsed.map((r) => r.table).toSorted()).toEqual(['order_items', 'orders']);
   });
 
   it('kb relations list shows relationships', () => {

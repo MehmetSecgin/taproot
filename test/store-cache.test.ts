@@ -91,7 +91,7 @@ describe('credential fallback key', () => {
     const lookups = [await store.get('qa:orders'), await store.get('qa:orders'), await store.get('qa:orders')];
 
     // assert
-    expect(lookups).toEqual(Array(3).fill({ user: 'qa_user', password: 'secret123' }));
+    expect(lookups).toEqual(Array.from({ length: 3 }, () => ({ user: 'qa_user', password: 'secret123' })));
     expect(pbkdf2).toHaveBeenCalledTimes(1);
   });
 });

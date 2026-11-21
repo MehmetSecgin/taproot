@@ -31,7 +31,7 @@ describe('schema context', () => {
       makeCatalog(),
     );
 
-    expect(Object.keys(out.tables).sort()).toEqual(['customers', 'orders']);
+    expect(Object.keys(out.tables).toSorted()).toEqual(['customers', 'orders']);
     expect(out.tables.orders.indexes[0].columns).toEqual(['order_date', 'customer_id']);
     expect(out.tables.orders.partition?.key).toBe('order_date');
   });
@@ -42,7 +42,7 @@ describe('schema context', () => {
       SELECT * FROM recent WHERE id IN (SELECT customer_id FROM customers)
     `);
 
-    expect(refs.sort()).toEqual(['customers', 'orders']);
+    expect(refs.toSorted()).toEqual(['customers', 'orders']);
   });
 
   it('resolves aliases for predicate columns', () => {

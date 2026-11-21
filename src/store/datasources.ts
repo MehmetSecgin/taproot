@@ -60,7 +60,7 @@ export class DatasourceStore {
       });
       if (!filtered.length) return undefined;
       const ofKind = filtered.filter((d) => preferKinds.includes(d.kind));
-      return (ofKind.length ? ofKind : filtered).sort((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
+      return (ofKind.length ? ofKind : filtered).toSorted((a, b) => (b.confidence - a.confidence) || b.updatedAt.localeCompare(a.updatedAt))[0];
     };
 
     const direct = tryMatch(env, namespace);

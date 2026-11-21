@@ -93,6 +93,10 @@ async function closePlugins(ctx: AppContext): Promise<void> {
   for (const plugin of ctx.pluginRegistry.values()) await plugin.close?.();
 }
 
+function cleanUpAndExit(): void {
+  void runRegisteredCleanup().finally(() => process.exit(0));
+}
+
 export async function startDaemon(input: {
   ctx: AppContext;
   listen: DaemonListen;
@@ -158,7 +162,7 @@ export async function startDaemon(input: {
         for (const plugin of ctx.pluginRegistry.values()) void plugin.closeSession?.(sessionId);
       }
       const idle = inFlight === 0 && Date.now() - lastActivityAt >= RUNTIME_CONSTANTS.daemon.idleExitMs;
-      if (listen.kind === 'unix' && idle) onSignal();
+      if (listen.kind === 'unix' && idle) cleanUpAndExit();
     }, RUNTIME_CONSTANTS.sweeper.tickMs),
   ];
   if (watchCertificates) timers.push(watchCertificates());
@@ -167,8 +171,8 @@ export async function startDaemon(input: {
   const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
+    process.off('SIGINT', cleanUpAndExit);
+    process.off('SIGTERM', cleanUpAndExit);
     for (const timer of timers) clearInterval(timer);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await closePlugins(ctx);
@@ -176,11 +180,8 @@ export async function startDaemon(input: {
   };
   const unregisterStop = registerCleanup(`daemon-stop:${JSON.stringify(endpoint)}`, stop);
 
-  const onSignal = () => {
-    void runRegisteredCleanup().finally(() => process.exit(0));
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', cleanUpAndExit);
+  process.on('SIGTERM', cleanUpAndExit);
 
   return {
     endpoint,

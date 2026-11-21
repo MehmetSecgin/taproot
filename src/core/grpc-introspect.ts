@@ -240,7 +240,7 @@ export function levenshtein(a: string, b: string): number {
   if (!m) return n;
   if (!n) return m;
   let prev = Array.from({ length: n + 1 }, (_, i) => i);
-  let curr = new Array<number>(n + 1).fill(0);
+  let curr = Array.from({ length: n + 1 }, () => 0);
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++) {
@@ -256,7 +256,7 @@ export function suggestNames(query: string, names: string[], limit = 5): string[
   const q = query.toLowerCase();
   return [...new Set(names)]
     .map((n) => ({ n, d: Math.min(levenshtein(q, n.toLowerCase()), levenshtein(q, shortName(n).toLowerCase())) }))
-    .sort((x, y) => x.d - y.d || x.n.localeCompare(y.n))
+    .toSorted((x, y) => x.d - y.d || x.n.localeCompare(y.n))
     .slice(0, limit)
     .map((x) => x.n);
 }

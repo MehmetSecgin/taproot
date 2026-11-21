@@ -181,7 +181,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
 
   const database = String(datasource.connection.database || '');
   const tables: Record<string, TableContext> = {};
-  for (const [table, columns] of [...columnsByTable.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [table, columns] of [...columnsByTable.entries()].toSorted(([a], [b]) => a.localeCompare(b))) {
     const indexes = [...(indexesByTable.get(table)?.values() || [])];
     tables[table] = {
       database,

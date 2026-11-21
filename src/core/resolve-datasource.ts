@@ -17,7 +17,7 @@ export interface ResolutionAsk {
 
 function splitDatasourceName(rawDs: string, services: string[]): { service: string; env: string } | undefined {
   const parts = rawDs.split('-');
-  for (const service of [...services].sort((a, b) => b.length - a.length)) {
+  for (const service of services.toSorted((a, b) => b.length - a.length)) {
     const want = service.split('-');
     for (let i = 0; i + want.length <= parts.length; i++) {
       if (want.every((w, j) => parts[i + j] === w)) return { service, env: parts.slice(0, i).join('-') };
@@ -32,8 +32,12 @@ function closeDatasourceNames(rawDs: string, names: string[]): string[] {
   const demoted = (n: string) => !q.startsWith('prod') && n.toLowerCase().startsWith('prod');
   return suggestNames(rawDs, names, names.length)
     .filter((n) => n.toLowerCase().includes(q) || levenshtein(q, n.toLowerCase()) <= maxDistance)
-    .sort((a, b) => Number(demoted(a)) - Number(demoted(b)))
+    .toSorted((a, b) => Number(demoted(a)) - Number(demoted(b)))
     .slice(0, 3);
+}
+
+function envLabel(p: DatasourceProfile): string {
+  return str(p.env).trim() + (str(p.namespace).trim() ? `/${str(p.namespace).trim()}` : '');
 }
 
 export function describeResolutionFailure(profiles: DatasourceProfile[], ask: ResolutionAsk): string {
@@ -55,10 +59,9 @@ export function describeResolutionFailure(profiles: DatasourceProfile[], ask: Re
     const hint = close.length ? ` Did you mean ${close.join(', ')}?` : '';
     return `${head}${hint} Use --datasource or --env+--service; list profiles with datasource list.`;
   }
-  const names = matches.map((p) => p.name).sort();
+  const names = matches.map((p) => p.name).toSorted();
   const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` (+${names.length - 6})` : '');
-  const envLabel = (p: DatasourceProfile) => str(p.env).trim() + (str(p.namespace).trim() ? `/${str(p.namespace).trim()}` : '');
-  const envs = [...new Set(matches.map(envLabel).filter(Boolean))].sort().join(', ');
+  const envs = [...new Set(matches.map(envLabel).filter(Boolean))].toSorted().join(', ');
   const inEnv = (p: DatasourceProfile) => {
     const ns = str(p.namespace).trim();
     if (p.env === env) return !namespace || ns === namespace;
@@ -151,7 +154,7 @@ export async function resolveDatasourceWithFallbacks(input: ResolveWithFallbacks
         db_user: dbUser,
         target,
         namespace: targetNamespace,
-        ...(kb || {}),
+        ...kb,
       };
       datasource = await saveKbBootstrapCandidate(ctx, env, service, rawDs || defaultDatasourceName(env, service, targetNamespace), syntheticKb, {
         targetOverride: target,

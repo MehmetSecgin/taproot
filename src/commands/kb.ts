@@ -35,7 +35,7 @@ export function kbCommand(program: Command, executor: LocalExecutor): void {
       }
       const envs = Array.from(new Set((Array.isArray(svc.connections) ? svc.connections : [])
         .filter((c: any) => String(c.status || 'active') === 'active')
-        .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).sort();
+        .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).toSorted();
       const nsHint = namespace ? ` namespace=${namespace}` : '';
       throw new Error(
         `No KB connection match: service '${service}' is registered but not for env=${env}${nsHint}. Available: ${envs.join(', ') || '(none active)'}. Register this env with 'taproot datasource add --env ${env} --service ${service} ...' or pick an available env.`,
@@ -91,7 +91,7 @@ export function kbCommand(program: Command, executor: LocalExecutor): void {
       try {
         parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch (error) {
-        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`);
+        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`, { cause: error });
       }
       if (!Array.isArray(parsed)) throw new Error('Relations file must be a JSON array of relation objects.');
       const normalized = normalizeRelations(parsed);
