@@ -1,5 +1,5 @@
 import mysql from 'mysql2';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mysqlPlugin } from '../src/plugins-builtins/mysql/index.js';
 import type { DatasourceProfile } from '../src/types/core.js';
 import { column, startEndlessMysqlServer, type FakeMysqlServer } from './helpers/fake-mysql-server.js';
@@ -37,5 +37,6 @@ describe('MySQL row cap', () => {
 
     // assert
     expect(result.result).toEqual({ columns: ['id'], rows: [[7], [7], [7]], truncated: true });
+    await vi.waitFor(async () => expect(await server.openConnections()).toBe(0), { timeout: 2_000 });
   });
 });

@@ -25,33 +25,30 @@ function refusalError(error: unknown): unknown {
   return new TaprootError('DATASOURCE_REFUSED', error instanceof Error ? error.message : String(error));
 }
 
-interface CheckEntry {
-  checked: Promise<void>;
-  expiresAt: number;
-}
-
 export function datasourceGate(ctx: AppContext, check: DatasourceCheck | undefined, ttlMs: number | undefined): DatasourceGate {
   if (!check) return async () => undefined;
-  const entries = new Map<string, CheckEntry>();
-  const startCheck = (key: string, datasource: DatasourceProfile, credentials: Record<string, string>, timeoutMs: number): CheckEntry => {
-    const entry: CheckEntry = { checked: Promise.resolve(), expiresAt: Infinity };
-    entry.checked = withQueryTimeout({ timeoutMs, signal: undefined, run: (signal) => check({ ctx, datasource, credentials, timeoutMs, signal }) }).then(
-      () => {
-        entry.expiresAt = Date.now() + (ttlMs ?? Infinity);
-      },
-      (error: unknown) => {
-        entries.delete(key);
-        throw refusalError(error);
-      },
-    );
-    entries.set(key, entry);
-    return entry;
-  };
+  const checks = new Map<string, Promise<void>>();
+  const passedAt = new Map<string, number>();
+  const expired = (key: string): boolean => Date.now() - (passedAt.get(key) ?? Infinity) >= (ttlMs ?? Infinity);
   return async (datasource, timeoutMs) => {
     const credentials = await ctx.credentialStore.get(datasource.credentialRef);
     const key = createHash('sha256').update(JSON.stringify([datasource, credentials])).digest('hex');
-    const known = entries.get(key);
-    const entry = known && Date.now() < known.expiresAt ? known : startCheck(key, datasource, credentials, timeoutMs);
-    await entry.checked;
+    if (expired(key)) {
+      checks.delete(key);
+      passedAt.delete(key);
+    }
+    if (!checks.has(key)) {
+      const checked = withQueryTimeout({ timeoutMs, signal: undefined, run: (signal) => check({ ctx, datasource, credentials, timeoutMs, signal }) });
+      checks.set(key, checked.then(
+        () => {
+          passedAt.set(key, Date.now());
+        },
+        (error: unknown) => {
+          checks.delete(key);
+          throw refusalError(error);
+        },
+      ));
+    }
+    await checks.get(key);
   };
 }

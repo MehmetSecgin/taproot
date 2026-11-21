@@ -123,10 +123,20 @@ interface StreamingQuery {
 
 interface StreamingConnection {
   query(options: { sql: string; rowsAsArray: boolean; timeout: number | undefined }): StreamingQuery;
+  stream: { destroy(): void };
+}
+
+function wireOf(conn: Connection): StreamingConnection {
+  return (conn as unknown as { connection: StreamingConnection }).connection;
+}
+
+function hangUp(conn: Connection): void {
+  conn.destroy();
+  wireOf(conn).stream.destroy();
 }
 
 function readRows(conn: Connection, sql: string, timeoutMs: number | undefined, maxRows: number | undefined): Promise<QueryResult['result']> {
-  const wire = (conn as unknown as { connection: StreamingConnection }).connection;
+  const wire = wireOf(conn);
   return new Promise((resolve, reject) => {
     let columns: string[] = [];
     const rows: unknown[][] = [];
@@ -142,7 +152,7 @@ function readRows(conn: Connection, sql: string, timeoutMs: number | undefined, 
       .on('result', (row) => {
         if (settled || !Array.isArray(row)) return;
         if (rows.length === maxRows) {
-          conn.destroy();
+          hangUp(conn);
           settle({ columns, rows, truncated: true });
           return;
         }
@@ -164,12 +174,12 @@ async function queryRows(
   maxRows: number | undefined,
   signal: AbortSignal | undefined,
 ): Promise<QueryResult['result']> {
-  const destroy = () => conn.destroy();
-  signal?.addEventListener('abort', destroy, { once: true });
+  const abort = () => hangUp(conn);
+  signal?.addEventListener('abort', abort, { once: true });
   try {
     return await readRows(conn, sql, timeoutMs, maxRows);
   } finally {
-    signal?.removeEventListener('abort', destroy);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -202,7 +212,7 @@ export async function executeMysqlQuery(
   } catch (error) {
     const message = str((error as Error).message);
     if (request.timeoutMs && /timeout/i.test(message)) {
-      conn.destroy();
+      hangUp(conn);
       throw queryTimeoutError(request.timeoutMs);
     }
     const enriched = enrichSqlSyntaxError(enrichResourceLimitError(message), request.query);

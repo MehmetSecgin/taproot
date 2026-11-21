@@ -4,7 +4,7 @@ import type { CliCommand, QueryOpts } from '../cli/types.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
 import { badInput } from '../core/error-classification.js';
 
-const QUERY_OPTIONS = {
+const QUERY_FLAG_DEFINITIONS = {
   datasource: (command, cli) => command.option('--datasource <name>', `datasource profile name; find one with ${cli} datasource list <pattern>`),
   env: (command) => command.option('--env <env>', 'environment (e.g. qa, stg); pair with --service when no --datasource is given'),
   namespace: (command) => command.option('--namespace <namespace>', 'namespace within the environment (e.g. develop)'),
@@ -39,9 +39,9 @@ const QUERY_OPTIONS = {
   ),
 } satisfies Record<string, (command: Command, cli: string) => Command>;
 
-export type QueryFlag = keyof typeof QUERY_OPTIONS;
+export type QueryFlag = keyof typeof QUERY_FLAG_DEFINITIONS;
 
-export const QUERY_FLAGS = Object.keys(QUERY_OPTIONS) as QueryFlag[];
+export const QUERY_FLAGS = Object.keys(QUERY_FLAG_DEFINITIONS) as QueryFlag[];
 
 function knownQueryFlags(flags: readonly string[]): readonly QueryFlag[] {
   const unknown = flags.filter((flag) => !(QUERY_FLAGS as readonly string[]).includes(flag));
@@ -57,7 +57,7 @@ export function queryCommandWith(options: { flags: readonly QueryFlag[] }): CliC
       .command('query')
       .description(`Run a SQL query, Redis command or gRPC call against a datasource. Example: ${cli} query --datasource <name> --sql "SHOW TABLES"`)
       .allowExcessArguments();
-    for (const flag of offered) QUERY_OPTIONS[flag](command, cli);
+    for (const flag of offered) QUERY_FLAG_DEFINITIONS[flag](command, cli);
     command.action(async (opts: QueryOpts, invoked: Command) => {
       if (invoked.args.length > 0) {
         throw badInput(

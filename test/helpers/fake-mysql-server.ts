@@ -4,6 +4,7 @@ import { leaseMysqlConnection, type MysqlLeaseRequest } from '../../src/plugins-
 
 interface ServerConnection {
   sequenceId: number;
+  stream: { on(event: 'close', listener: () => void): void };
   on(event: string, listener: (sql: string) => void): void;
   serverHandshake(args: Record<string, unknown>): void;
   writeOk(): void;
@@ -14,7 +15,7 @@ interface ServerConnection {
 }
 
 interface MysqlServer {
-  _server: Server;
+  _server: Server & { allowHalfOpen: boolean };
   listen(port: number, host: string, onListening: () => void): void;
   close(): void;
 }
@@ -57,7 +58,7 @@ function reply(conn: ServerConnection, write: () => void): void {
   conn.sequenceId = 0;
 }
 
-async function acceptClients(serve: (client: ServerConnection) => void): Promise<FakeMysqlServer> {
+async function acceptClients(serve: (client: ServerConnection) => void, allowHalfOpen: boolean): Promise<FakeMysqlServer> {
   const server = mysql.createServer((conn) => {
     const client = conn as unknown as ServerConnection;
     client.on('error', () => undefined);
@@ -75,6 +76,7 @@ async function acceptClients(serve: (client: ServerConnection) => void): Promise
     });
     serve(client);
   }) as unknown as MysqlServer;
+  server._server.allowHalfOpen = allowHalfOpen;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return {
     port: (server._server.address() as AddressInfo).port,
@@ -103,7 +105,7 @@ export function startFakeMysqlServer(
         client.writeEof();
       });
     });
-  });
+  }, false);
 }
 
 export function startEndlessMysqlServer({ columns, row }: ServedRow): Promise<FakeMysqlServer> {
@@ -117,10 +119,10 @@ export function startEndlessMysqlServer({ columns, row }: ServedRow): Promise<Fa
       client.sequenceId = 1;
       client.writeColumns(columns);
       const sending = setInterval(() => client.writeTextRow(row), 1);
-      client.on('end', () => clearInterval(sending));
+      client.stream.on('close', () => clearInterval(sending));
       client.on('error', () => clearInterval(sending));
     });
-  });
+  }, true);
 }
 
 export function leaseFakeMysqlConnection(
