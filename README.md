@@ -27,6 +27,7 @@ Credentials go to the OS keychain through the optional `keytar` dependency. If `
 | `TAPROOT_CATALOG_TIMEOUT_MS` | Timeout of one schema catalog fetch | `20000` |
 | `TAPROOT_MAX_RANGE_DAYS` | Widest date range before a range warning | `90` |
 | `TAPROOT_ALLOW_PARTITION_SCAN` | `1` allows partition scans on every query | unset |
+| `TAPROOT_CONFINE_TO_DATABASE` | `1` confines every SQL datasource to its `--database` | unset |
 
 ## Agent skill
 
@@ -58,6 +59,17 @@ taproot datasource add --name prod-analytics --kind teleport-mysql --env prod --
   --credential-ref prod:analytics --database analytics --target <teleport-db-name> \
   --connector teleport --teleport-ref tsh:work
 ```
+
+### Confine SQL datasources to their schema
+
+On a server that holds many schemas, `TAPROOT_CONFINE_TO_DATABASE=1` limits every mysql and teleport-mysql datasource to the schema in its `--database`. Before a query runs, TapRoot parses it and refuses with `DATABASE_CONFINED` any statement that names another schema, in joins, subqueries, CTEs, `UNION`, `EXPLAIN`, `DESCRIBE` and the `SHOW` forms that take a schema. Its tables may be bare or qualified with the exact spelling of the datasource's schema. `schema` answers from the catalog of that schema alone.
+
+- The system schemas count as other schemas, and so does `SHOW DATABASES`. TapRoot's own catalog reads still run.
+- It refuses what it cannot check: statements it cannot parse, executable comments (`/*! */`, `/*T! */`), `--` with no ASCII space after it, backslashes (escape `LIKE` wildcards with `ESCAPE '!'`), sequence functions, `USE`, `SET`, and `SHOW` forms other than `TABLES`, `TABLE STATUS`, `COLUMNS`, `INDEX` and `CREATE TABLE`/`VIEW`, which may carry `LIKE` but not `WHERE`.
+- A SQL datasource with no `--database` refuses every query.
+- The process that runs the query reads the variable: the daemon, which `taproot` starts on its first query. Restart it with `taproot daemon stop` after changing the variable.
+
+The check is parser-based, and the server follows views and routines of the confined schema wherever they lead. A database user granted only that schema is the hard limit.
 
 ## Knowledge base
 
