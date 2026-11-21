@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { startLocalDaemon } from './helpers/daemon.js';
 import { TAPROOT_VERSION } from '../src/core/version.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import type { TapRootPlugin } from '../src/types/core.js';
@@ -38,15 +38,11 @@ async function setupDaemon(datasourceCount: number, plugin: TapRootPlugin) {
       confidence: 1,
     });
   }
-  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));
+  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
   await creds.set('qa:fake', { user: 'x', password: 'x' });
 
   const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-  const daemon = await startDaemon({
-    stateRoot,
-    socketPath,
-    configurePlugins: (registry) => registry.set('fake', plugin),
-  });
+  const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [plugin] });
   return { daemon, socketPath };
 }
 

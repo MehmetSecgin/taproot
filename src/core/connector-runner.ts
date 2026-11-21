@@ -1,7 +1,6 @@
 import { RUNTIME_CONSTANTS } from './constants.js';
-import type { PluginRegistry } from '../plugins/load-builtins.js';
 import { DoctorStatus } from '../types/core.js';
-import type { DatasourceProfile, DoctorCheck } from '../types/core.js';
+import type { DatasourceProfile, DoctorCheck, PluginRegistry } from '../types/core.js';
 import { str } from './strings.js';
 
 async function withConnectorTimeout(name: string, mode: string, timeoutMs: number, run: () => Promise<DoctorCheck[]>): Promise<DoctorCheck[]> {

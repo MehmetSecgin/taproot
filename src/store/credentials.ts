@@ -59,13 +59,12 @@ function decryptJson(input: FallbackFileShape, secret: string): Record<string, R
   return JSON.parse(out) as Record<string, Record<string, string>>;
 }
 
-function keychainDisabled(): boolean {
+function keychainDisabledByEnv(): boolean {
   const raw = str(process.env.TAPROOT_NO_KEYCHAIN).trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
 async function tryKeychainGet(ref: string): Promise<Record<string, string> | null> {
-  if (keychainDisabled()) return null;
   try {
     const keytar = await import('keytar');
     const raw = await keytar.getPassword(SERVICE_NAME, ref);
@@ -77,7 +76,6 @@ async function tryKeychainGet(ref: string): Promise<Record<string, string> | nul
 }
 
 async function tryKeychainSet(ref: string, value: Record<string, string>): Promise<boolean> {
-  if (keychainDisabled()) return false;
   try {
     const keytar = await import('keytar');
     await keytar.setPassword(SERVICE_NAME, ref, JSON.stringify(value));
@@ -88,7 +86,14 @@ async function tryKeychainSet(ref: string, value: Record<string, string>): Promi
 }
 
 export class CredentialStore {
-  constructor(private readonly encryptedFile: string) {}
+  constructor(
+    private readonly encryptedFile: string,
+    private readonly useKeychain: boolean,
+  ) {}
+
+  private keychainOn(): boolean {
+    return this.useKeychain && !keychainDisabledByEnv();
+  }
 
   private loadFallback(): Record<string, Record<string, string>> {
     const raw = readJsonFile<unknown>(this.encryptedFile, null);
@@ -119,13 +124,13 @@ export class CredentialStore {
   }
 
   async get(ref: string): Promise<Record<string, string>> {
-    const keychain = await tryKeychainGet(ref);
+    const keychain = this.keychainOn() ? await tryKeychainGet(ref) : null;
     if (keychain) return keychain;
     return this.loadFallback()[ref] || {};
   }
 
   async set(ref: string, value: Record<string, string>): Promise<void> {
-    const saved = await tryKeychainSet(ref, value);
+    const saved = this.keychainOn() && (await tryKeychainSet(ref, value));
     if (saved) return;
     const payload = this.loadFallback();
     payload[ref] = value;
@@ -134,7 +139,7 @@ export class CredentialStore {
 
   async list(): Promise<Array<{ ref: string; keys: string[]; source: 'keychain' | 'fallback' }>> {
     const out = new Map<string, { ref: string; keys: string[]; source: 'keychain' | 'fallback' }>();
-    if (!keychainDisabled()) {
+    if (this.keychainOn()) {
       try {
         const mod = (await import('keytar')) as unknown as Record<string, unknown>;
         type FindFn = (service: string) => Promise<Array<{ account: string; password: string }>>;
@@ -166,7 +171,7 @@ export class CredentialStore {
   }
 
   async remove(ref: string): Promise<void> {
-    if (!keychainDisabled()) {
+    if (this.keychainOn()) {
       try {
         const keytar = await import('keytar');
         await keytar.deletePassword(SERVICE_NAME, ref);

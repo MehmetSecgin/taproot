@@ -1,9 +1,9 @@
-import { Command } from 'commander';
+import type { CliCommand, LocalExecutor } from '../cli/types.js';
 import { printJson } from '../core/output.js';
 import { rpcCall } from '../daemon/client.js';
 import { RpcMethod } from '../daemon/types.js';
 
-export function registerDaemon(program: Command): void {
+export const daemonCommand: CliCommand<LocalExecutor> = (program) => {
   const d = program.command('daemon').description('The background daemon that keeps tunnels and connection pools open; the first query starts it');
 
   d.command('status').description('Show the running daemon: version, pid, sessions and query limits').action(async () => {
@@ -21,4 +21,4 @@ export function registerDaemon(program: Command): void {
     if (!res.ok) throw new Error(res.error?.message || 'daemon stop failed');
     printJson({ ok: true, data: res.data || {}, meta: { ...res.meta, requestId: res.requestId } });
   });
-}
+};

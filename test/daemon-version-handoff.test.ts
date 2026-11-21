@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { startLocalDaemon } from './helpers/daemon.js';
 import type { RpcResponse } from '../src/daemon/types.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -53,7 +53,7 @@ describe('daemon version handoff', () => {
     // act
     const res = await rawRpc(socketPath, '0.0.0-other');
     const socketLeftAfterMismatch = fs.existsSync(socketPath);
-    const successor = await startDaemon({ stateRoot, socketPath });
+    const successor = await startLocalDaemon({ stateRoot, socketPath, plugins: [] });
     await oldExited;
 
     // assert

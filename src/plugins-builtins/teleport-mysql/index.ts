@@ -1,7 +1,7 @@
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { registerCleanup } from '../../core/cleanup.js';
-import { executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
+import { closeAllMysqlPools, closeMysqlSessionPools, executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
 import { classifyExecutorDoctorCode, connectivity, spawnErrorMessage } from '../../core/error-classification.js';
 import { fetchTshDatabases, tshDbAllowedUsers, tshDbName } from '../../core/tsh-databases.js';
 import { DoctorStatus } from '../../types/core.js';
@@ -321,5 +321,15 @@ export const teleportMysqlPlugin: TapRootPlugin = {
     } finally {
       if (!sessionId) await closeTeleportMysqlSessionProxies(proxySessionId);
     }
+  },
+
+  async closeSession(sessionId) {
+    await closeTeleportMysqlSessionProxies(sessionId);
+    await closeMysqlSessionPools(sessionId);
+  },
+
+  async close() {
+    await closeAllTeleportMysqlProxies();
+    await closeAllMysqlPools();
   },
 };
