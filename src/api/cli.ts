@@ -1,0 +1,14 @@
+export { buildCli, type CommanderHint } from '../cli/build-cli.js';
+export { localExecutor } from '../cli/local-executor.js';
+export { remoteExecutor } from '../cli/remote-executor.js';
+export type { CliCommand, Executor, LocalExecutor } from '../cli/types.js';
+export { queryCommand } from '../commands/query.js';
+export { datasourceListCommand } from '../commands/datasource-list.js';
+export { schemaCommand } from '../commands/schema.js';
+export { datasourceAdminCommand } from '../commands/datasource.js';
+export { doctorCommand } from '../commands/doctor.js';
+export { kbCommand } from '../commands/kb.js';
+export { credsCommand } from '../commands/creds.js';
+export { daemonCommand } from '../commands/daemon.js';
+export { initCommand } from '../commands/init.js';
+export { grpcCommand } from '../commands/grpc.js';

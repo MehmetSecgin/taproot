@@ -169,7 +169,7 @@ const grpcCache = new WeakMap<LoadedProtoBundle, Promise<GrpcPackageBundle>>();
 export async function loadProtobufRoot(protoRoot: string): Promise<LoadedProtoBundle> {
   const roots = splitProtoRoots(protoRoot).map((root) => path.resolve(root));
   if (!roots.length) throw new Error(`empty proto root: '${protoRoot}'`);
-  const key = [...roots].sort().join('|');
+  const key = roots.toSorted().join('|');
   const files = listAllProtoFiles(roots);
   const stamp = protoFilesStamp(files);
   const cached = protobufCache.get(key);

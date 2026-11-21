@@ -12,11 +12,11 @@ function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) 
 }
 
 describe('cli contract', () => {
-  it('prints root help with the eight commands', () => {
+  it('prints root help with the nine commands', () => {
     const out = runCli(['--help']);
     expect(out.status).toBe(0);
     const names = JSON.parse(out.stdout).data.commands.map((c: { name: string }) => c.name.split(' ')[0]);
-    expect(names.filter((n: string) => n !== 'help').sort()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query']);
+    expect(names.filter((n: string) => n !== 'help').toSorted()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query', 'schema']);
   });
 
   it('prints the version as JSON', async () => {

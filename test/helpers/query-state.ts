@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { buildContext } from '../../src/core/app.js';
+import { builtinPlugins } from '../../src/plugins-builtins/index.js';
 import type { AppContext } from '../../src/core/app.js';
 import type { QueryExecutionRequest } from '../../src/core/execute-query.js';
 import { CredentialStore } from '../../src/store/credentials.js';
@@ -31,7 +32,7 @@ export async function setupQueryState(overrides: Partial<DatasourceProfile> = {}
     updatedAt: new Date().toISOString(),
     ...overrides,
   } as DatasourceProfile);
-  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'));
+  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
   await creds.set('qa:fake', { user: 'x', password: 'x' });
   return stateRoot;
 }
@@ -43,9 +44,7 @@ export function restoreQueryEnv(): void {
 }
 
 export function contextWith(plugin: TapRootPlugin): AppContext {
-  const ctx = buildContext({});
-  ctx.pluginRegistry.set(plugin.manifest.name, plugin);
-  return ctx;
+  return buildContext({ kbDir: undefined, verbose: false, plugins: [...builtinPlugins(), plugin], useKeychain: true });
 }
 
 export function queryRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecutionRequest {

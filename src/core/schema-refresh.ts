@@ -2,8 +2,9 @@ import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './connector-runner.js';
 import { DoctorStatus, SQL_DATASOURCE_KINDS } from '../types/core.js';
 import type { DatasourceProfile, SchemaIndex, SchemaPartition, TableContext } from '../types/core.js';
+import type { SchemaCatalog } from '../store/schema-catalog.js';
 import { RUNTIME_CONSTANTS } from './constants.js';
-import { connectivity } from './error-classification.js';
+import { badInput, connectivity } from './error-classification.js';
 import { withQueryTimeout } from './query-timeout.js';
 import { rowObject } from './rows.js';
 import { DEFAULT_SESSION_TIME_ZONE } from './session-timezone.js';
@@ -180,7 +181,7 @@ async function fetchSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile
 
   const database = String(datasource.connection.database || '');
   const tables: Record<string, TableContext> = {};
-  for (const [table, columns] of [...columnsByTable.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [table, columns] of [...columnsByTable.entries()].toSorted(([a], [b]) => a.localeCompare(b))) {
     const indexes = [...(indexesByTable.get(table)?.values() || [])];
     tables[table] = {
       database,
@@ -236,4 +237,15 @@ export function ensureDatasourceCatalog(ctx: AppContext, datasource: DatasourceP
     .finally(() => catalogFetches.delete(datasource.name));
   catalogFetches.set(datasource.name, fetch);
   return fetch;
+}
+
+export async function cachedSchemaCatalog(ctx: AppContext, datasource: DatasourceProfile, acquireQuerySlot: QuerySlot | undefined): Promise<SchemaCatalog> {
+  if (!SQL_DATASOURCE_KINDS.has(datasource.kind)) throw badInput(`'${datasource.name}' is a ${datasource.kind} datasource; only SQL datasources have a schema.`);
+  const refresh = ensureDatasourceCatalog(ctx, datasource, { sessionId: undefined, acquireQuerySlot, afterSchemaError: false });
+  const cached = ctx.schemaCatalogStore.get(datasource.name);
+  if (cached) return cached;
+  const { error } = await refresh;
+  const fetched = ctx.schemaCatalogStore.get(datasource.name);
+  if (!fetched) throw connectivity(`could not read the schema of '${datasource.name}': ${error}.`);
+  return fetched;
 }

@@ -35,7 +35,7 @@ export class RuntimeConfigStore {
     const current = key ? (config.environmentPolicies || {})[key] : undefined;
     return {
       ...DEFAULT_ENVIRONMENT_POLICY,
-      ...(current || {}),
+      ...current,
     };
   }
 

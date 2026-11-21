@@ -1,14 +1,11 @@
-import { environmentPolicy } from './app.js';
 import type { AppContext } from './app.js';
-import { criticalDatasourceKbConflicts, datasourceKbConflicts } from './conflicts.js';
 import { runDatasourceConnectors } from './connector-runner.js';
-import { classifyError, deterministicRequired as deterministicRequiredErr, misconfiguredDatasource } from './error-classification.js';
+import { classifyError } from './error-classification.js';
 import { parseKeyValuePairs } from './key-value.js';
 import { normalizeNamespace, normalizeService } from './naming.js';
 import { applyJsonExtract, parseJsonExtractSpecs } from './json-extract.js';
 import type { JsonExtractSpec } from './json-extract.js';
 import { preflightBudgetMs, withQueryTimeout } from './query-timeout.js';
-import { describeResolutionFailure, resolveDatasourceWithFallbacks } from './resolve-datasource.js';
 import { rowObject } from './rows.js';
 import { collectRangeWarnings, enforceMutationPolicy, enforcePartitionPredicate } from './safety.js';
 import { buildSchemaContext, suggestSchemaNames } from './schema-context.js';
@@ -53,7 +50,16 @@ export interface QueryDeps {
   signal: AbortSignal | undefined;
   openSession?: (datasource: DatasourceProfile) => string;
   acquireQuerySlot: QuerySlot | undefined;
+  resolveDatasource: DatasourceResolver;
 }
+
+export interface ResolvedQueryDatasource {
+  datasource: DatasourceProfile;
+  source: string;
+  warnings: string[];
+}
+
+export type DatasourceResolver = (request: QueryExecutionRequest, deps: Pick<QueryDeps, 'ctx' | 'report'>) => Promise<ResolvedQueryDatasource>;
 
 export interface QueryOutcomeMeta {
   sessionId?: string;
@@ -118,7 +124,7 @@ function buildPluginParams(request: QueryExecutionRequest, params: Record<string
 
 function mergeSchemaContext(base: SchemaContext, pluginSchema: SchemaContext | undefined): SchemaContext {
   if (!pluginSchema) return base;
-  return { ...base, ...pluginSchema, tables: { ...(base.tables || {}), ...(pluginSchema.tables || {}) } };
+  return { ...base, ...pluginSchema, tables: { ...base.tables, ...pluginSchema.tables } };
 }
 
 function failure(error: unknown, meta: QueryOutcomeMeta): QueryOutcome {
@@ -130,57 +136,6 @@ function failure(error: unknown, meta: QueryOutcomeMeta): QueryOutcome {
     details: (error as Error & { details?: unknown }).details,
     meta,
   };
-}
-
-async function resolveTargetDatasource(
-  request: QueryExecutionRequest,
-  deps: QueryDeps,
-): Promise<{ datasource: DatasourceProfile; source: string; warnings: string[] }> {
-  const { ctx, report } = deps;
-  const { env, namespace, service } = request;
-  const policy = environmentPolicy(ctx, env);
-  const deterministic = policy.deterministicRequired;
-  report.log(`resolving datasource (${request.datasource || `${env}-${service || 'unknown'}`})`);
-  const resolution = await resolveDatasourceWithFallbacks({
-    ctx,
-    rawDs: request.datasource,
-    optsEnv: request.optsEnv,
-    env,
-    namespace: namespace || undefined,
-    service,
-    query: request.query,
-    allowDiscovery: request.allowDiscovery,
-    policy,
-  });
-  for (const line of resolution.verboseLogs) report.log(line);
-  const datasource = resolution.datasource;
-  const kbMissing = !datasource && !request.datasource && env && service ? ctx.kbStore.missingReason() : undefined;
-  const kbSuffix = kbMissing ? ` ${kbMissing}` : '';
-  if (!datasource && deterministic && !request.allowDiscovery) {
-    throw deterministicRequiredErr(
-      `environment '${env || 'unknown'}' requires deterministic datasource resolution from profile or KB. Use --datasource or --env+--service.${kbSuffix}`,
-    );
-  }
-  if (!datasource) throw new Error(`${describeResolutionFailure(ctx.datasourceStore.list(), { rawDs: request.datasource, env: request.optsEnv || env, namespace: namespace || undefined, service })}${kbSuffix}`);
-  const warnings: string[] = [];
-  if (env && service) {
-    const kb = ctx.kbStore.resolveConnection(service, env, namespace || undefined);
-    if (kb) {
-      const critical = criticalDatasourceKbConflicts(datasource, kb);
-      if (critical.length) {
-        throw misconfiguredDatasource(
-          `datasource '${datasource.name}' conflicts with KB for env=${env} service=${service} (${critical.join('; ')}). Datasource store blocks KB-backed execution. Repair the profile with taproot init datasource --env ${env}${namespace ? ` --namespace ${namespace}` : ''} --service ${service}.`,
-        );
-      }
-      const conflicts = datasourceKbConflicts(datasource, kb);
-      if (conflicts.length) {
-        const warning = `datasource overrides KB (${conflicts.join('; ')})`;
-        warnings.push(warning);
-        report.log(`warning: ${warning}`);
-      }
-    }
-  }
-  return { datasource, source: resolution.source, warnings };
 }
 
 export async function executeQuery(request: QueryExecutionRequest, deps: QueryDeps): Promise<QueryOutcome> {
@@ -195,7 +150,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
   let phaseResolveMs = 0;
   try {
     const resolveStart = Date.now();
-    const resolved = await resolveTargetDatasource(request, deps);
+    const resolved = await deps.resolveDatasource(request, deps);
     datasource = resolved.datasource;
     resolutionSource = resolved.source;
     warnings.push(...resolved.warnings);
@@ -352,7 +307,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
     return {
       ...outcome,
       message: `${outcome.message}. Did you mean: ${didYouMean.join(', ')}?`,
-      details: { ...((outcome.details as Record<string, unknown>) || {}), didYouMean },
+      details: { ...(outcome.details as Record<string, unknown>), didYouMean },
     };
   }
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { QueryOutcome } from '../src/core/execute-query.js';
-import { presentQueryOutcome, queryFailureError } from '../src/commands/query-present.js';
+import { presentQueryOutcome, queryFailureError } from '../src/cli/query-present.js';
 import { setPluck } from '../src/core/output.js';
 
 function successOutcome(overrides: Partial<Extract<QueryOutcome, { ok: true }>> = {}): QueryOutcome {

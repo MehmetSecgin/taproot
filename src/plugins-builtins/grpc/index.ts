@@ -102,7 +102,7 @@ function resolveRequestPayload(request: QueryRequest, paramPairs: Record<string,
       }
       return parsed as Record<string, unknown> | unknown[];
     } catch (err) {
-      throw new Error(`invalid --request-json: ${(err as Error).message}`);
+      throw new Error(`invalid --request-json: ${(err as Error).message}`, { cause: err });
     }
   }
   const out: Record<string, unknown> = {};

@@ -26,6 +26,7 @@ const ERROR_CLASSES = {
     exitCode: EXIT_CODES.BAD_INPUT,
     match: /misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/,
   },
+  DATASOURCE_REFUSED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /datasource_refused/ },
   DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
   KB_MISSING: { exitCode: EXIT_CODES.NOT_READY, match: /kb_missing/ },
   UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },

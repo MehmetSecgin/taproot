@@ -3,7 +3,7 @@ import type { DoctorCheck, QueryRequest, QueryResult, TapRootPlugin } from '../.
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/error-classification.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
-import { baseConnConfig, executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
+import { baseConnConfig, closeAllMysqlPools, closeMysqlSessionPools, executeMysqlQuery, loadMysql } from '../_shared/db-conn.js';
 
 function connConfig(ds: QueryRequest['datasource'], creds: Record<string, string>) {
   return {
@@ -35,4 +35,7 @@ export const mysqlPlugin: TapRootPlugin = {
   async execute(request, creds): Promise<QueryResult> {
     return executeMysqlQuery('mysql', request, connConfig(request.datasource, creds), creds.__sessionId);
   },
+
+  closeSession: closeMysqlSessionPools,
+  close: closeAllMysqlPools,
 };

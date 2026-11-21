@@ -251,7 +251,11 @@ export interface TapRootPlugin {
   doctor?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
   connect?: (input: { datasource: DatasourceProfile; credentials: Record<string, string> }) => Promise<DoctorCheck[]>;
   execute?: (request: QueryRequest, creds: Record<string, string>) => Promise<QueryResult>;
+  closeSession?: (sessionId: string) => Promise<void>;
+  close?: () => Promise<void>;
 }
+
+export type PluginRegistry = Map<string, TapRootPlugin>;
 
 export interface CliOutputEnvelope<T = unknown> {
   ok: boolean;

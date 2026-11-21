@@ -324,7 +324,7 @@ describe('datasource CRUD', () => {
     expect(listed.data.rows.map((row: unknown[]) => row[0])).toEqual(['qa-svc']);
     expect(listed.data.warnings).toEqual([expect.stringContaining('qa-broken: connection.port')]);
     const names = JSON.parse(fs.readFileSync(file, 'utf8')).map((row: { name: string }) => row.name);
-    expect(names.sort()).toEqual(['qa-broken', 'qa-svc']);
+    expect(names.toSorted()).toEqual(['qa-broken', 'qa-svc']);
   });
 
   it('datasource add --port abc is BAD_INPUT and saves nothing', () => {

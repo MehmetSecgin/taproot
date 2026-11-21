@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { queryRoute } from '../src/commands/query-route.js';
+import { queryRoute } from '../src/cli/query-route.js';
 import { queryRequest } from './helpers/query-state.js';
 
 const savedForceDirect = process.env.TAPROOT_FORCE_DIRECT;

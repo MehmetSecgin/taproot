@@ -11,7 +11,7 @@ export function registerCleanup(key: string, fn: CleanupFn): () => void {
 export async function runRegisteredCleanup(): Promise<void> {
   if (running) return;
   running = true;
-  const fns = [...entries.values()].reverse();
+  const fns = [...entries.values()].toReversed();
   entries.clear();
   for (const fn of fns) {
     try {

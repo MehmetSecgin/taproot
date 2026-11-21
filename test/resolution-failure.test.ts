@@ -25,7 +25,7 @@ describe('describeResolutionFailure', () => {
     const message = describeResolutionFailure(profiles, { rawDs: 'preprod-orders' });
     // assert
     expect(message).toBe(
-      "Datasource resolution failed: no profile for datasource 'preprod-orders'. Profiles for service 'orders': prod-orders, qa-orders, stg-orders (envs: prod, qa, stg). No profile in env 'preprod'; add one with taproot datasource add.",
+      "Datasource resolution failed: no profile for datasource 'preprod-orders'. Profiles for service 'orders': prod-orders, qa-orders, stg-orders (envs: prod, qa, stg). No profile in env 'preprod'; add one with datasource add.",
     );
   });
 
@@ -49,7 +49,7 @@ describe('describeResolutionFailure', () => {
 
   it('does not match a service that is only part of a name segment', () => {
     const message = describeResolutionFailure(profiles, { rawDs: 'stg-ordersync' });
-    expect(message).toContain('list profiles with taproot datasource list');
+    expect(message).toContain('list profiles with datasource list');
   });
 
   it('treats an env-namespace prefix as covered by a profile in that namespace', () => {
@@ -69,7 +69,7 @@ describe('describeResolutionFailure', () => {
     // act
     const message = describeResolutionFailure(profiles, { rawDs: 'qa-ordres' });
     // assert
-    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders? Use --datasource or --env+--service; list profiles with taproot datasource list.");
+    expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders? Use --datasource or --env+--service; list profiles with datasource list.");
   });
 
   it('names the first token when extra words are glued into the datasource value', () => {
@@ -102,6 +102,6 @@ describe('describeResolutionFailure', () => {
 
   it('points at the list command without suggestions when no name is asked', () => {
     const message = describeResolutionFailure(profiles, { env: 'qa', service: 'missing' });
-    expect(message).toBe('Datasource resolution failed: no profile for env=qa service=missing. Use --datasource or --env+--service; list profiles with taproot datasource list.');
+    expect(message).toBe('Datasource resolution failed: no profile for env=qa service=missing. Use --datasource or --env+--service; list profiles with datasource list.');
   });
 });

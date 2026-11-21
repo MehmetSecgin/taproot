@@ -2,7 +2,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeQuery } from '../src/core/execute-query.js';
 import { rpcCall } from '../src/daemon/client.js';
-import { startDaemon } from '../src/daemon/server.js';
+import { startLocalDaemon } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
 
@@ -18,7 +18,7 @@ describe('daemon query request', () => {
     // arrange
     const stateRoot = await setupQueryState();
     const socketPath = path.join(stateRoot, 'run', 'taprootd-request.sock');
-    const daemon = await startDaemon({ stateRoot, socketPath, configurePlugins: (registry) => registry.set('fake', fakePlugin()) });
+    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [fakePlugin()] });
 
     try {
       // act

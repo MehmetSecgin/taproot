@@ -1,12 +1,12 @@
 import { Command } from 'commander';
-import type { AppContext } from '../core/app.js';
+import type { LocalExecutor } from '../cli/types.js';
 import { parseKeyValuePairs } from '../core/key-value.js';
 import { printEnvelope } from '../core/output.js';
 
 const PLAIN_CREDENTIAL_KEYS = ['user', 'dbUser', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand'];
 const SECRET_CREDENTIAL_KEYS = ['password', 'token'];
 
-export function registerCreds(program: Command, getCtx: () => AppContext): void {
+export function credsCommand(program: Command, executor: LocalExecutor): void {
   const c = program.command('creds').description('Credential reference management');
 
   c.command('set')
@@ -22,7 +22,7 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     .option('--login-command <cmd>', 'teleport connector: shell command that logs in when the session expired')
     .option('--kv <key=value>', 'repeatable extra credential value', (v, p: string[]) => (p || []).concat(v), [])
     .action(async (opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const value = parseKeyValuePairs('--kv', opts.kv || []);
       for (const key of [...PLAIN_CREDENTIAL_KEYS, ...SECRET_CREDENTIAL_KEYS]) {
         if (opts[key]) value[key] = String(opts[key]);
@@ -32,7 +32,7 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
     });
 
   c.command('show').description('Show a credential ref with secrets redacted').requiredOption('--ref <ref>', 'credential ref name').action(async (opts) => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const value = await ctx.credentialStore.get(opts.ref);
     if (!Object.keys(value).length) throw new Error(`Credential ref not found: ${opts.ref}`);
     const redacted = Object.fromEntries(
@@ -42,13 +42,13 @@ export function registerCreds(program: Command, getCtx: () => AppContext): void 
   });
 
   c.command('list').description('List credential refs and their keys, secrets redacted').action(async () => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const entries = await ctx.credentialStore.list();
     printEnvelope(true, entries.map((e) => ({ ref: e.ref, keys: e.keys, source: e.source })));
   });
 
   c.command('unset').description('Delete a credential ref').requiredOption('--ref <ref>', 'credential ref name').action(async (opts) => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     await ctx.credentialStore.remove(opts.ref);
     printEnvelope(true, { removed: true, ref: opts.ref });
   });

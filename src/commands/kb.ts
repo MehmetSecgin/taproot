@@ -1,15 +1,15 @@
 import { Command } from 'commander';
+import type { LocalExecutor } from '../cli/types.js';
 import fs from 'node:fs';
-import type { AppContext } from '../core/app.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printEnvelope } from '../core/output.js';
 import { badInput } from '../core/error-classification.js';
 import { normalizeRelations } from '../core/relations.js';
 import { str } from '../core/strings.js';
 
-export function registerKb(program: Command, getCtx: () => AppContext): void {
+export function kbCommand(program: Command, executor: LocalExecutor): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
-  kb.hook('preAction', () => getCtx().kbStore.requirePresent());
+  kb.hook('preAction', () => executor.context().kbStore.requirePresent());
 
   kb.command('resolve')
     .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')
@@ -18,7 +18,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .option('--env <env>', 'environment (e.g. qa, stg)')
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .action((opts) => {
-    const ctx = getCtx();
+    const ctx = executor.context();
     const profile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
     if (opts.datasource && !profile) throw badInput(`Datasource not found: ${opts.datasource}. List profiles with taproot datasource list.`);
     const env = str(opts.env || profile?.env).trim();
@@ -35,7 +35,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
       }
       const envs = Array.from(new Set((Array.isArray(svc.connections) ? svc.connections : [])
         .filter((c: any) => String(c.status || 'active') === 'active')
-        .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).sort();
+        .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).toSorted();
       const nsHint = namespace ? ` namespace=${namespace}` : '';
       throw new Error(
         `No KB connection match: service '${service}' is registered but not for env=${env}${nsHint}. Available: ${envs.join(', ') || '(none active)'}. Register this env with 'taproot datasource add --env ${env} --service ${service} ...' or pick an available env.`,
@@ -53,7 +53,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .option('--match <text>', 'substring filter on table names (alias of --text)')
     .option('--list', 'render flat list of matching table names instead of per-database counts', false)
     .action((opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
       const matchText = str(opts.match || opts.text).trim();
       const rows = ctx.kbStore.tables().filter((r) => str(r.service).toLowerCase() === service.toLowerCase());
@@ -74,7 +74,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .description('List all curated relations in the KB')
     .option('--cross-service', 'only relations that cross a service boundary', false)
     .action((opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       let rows = ctx.kbStore.typedRelations();
       if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
       printEnvelope(true, rows);
@@ -84,14 +84,14 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
     .description('Merge a JSON file of curated relations into KB relations.json (dedup by id)')
     .requiredOption('--file <path>', 'path to a JSON array of relation objects')
     .action((opts) => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       const file = String(opts.file);
       if (!fs.existsSync(file)) throw new Error(`Relations file not found: ${file}`);
       let parsed: unknown;
       try {
         parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch (error) {
-        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`);
+        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`, { cause: error });
       }
       if (!Array.isArray(parsed)) throw new Error('Relations file must be a JSON array of relation objects.');
       const normalized = normalizeRelations(parsed);
@@ -103,7 +103,7 @@ export function registerKb(program: Command, getCtx: () => AppContext): void {
   kb.command('list-services')
     .description('List the services the KB knows')
     .action(() => {
-      const ctx = getCtx();
+      const ctx = executor.context();
       printEnvelope(true, ctx.kbStore.listServices());
     });
 }
