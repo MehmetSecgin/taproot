@@ -59,6 +59,16 @@ taproot datasource add --name prod-analytics --kind teleport-mysql --env prod --
   --connector teleport --teleport-ref tsh:work
 ```
 
+### Confine a datasource to its schema
+
+On a server that holds many schemas, `datasource add --confine-to-database` limits a mysql or teleport-mysql profile to the schema in `--database`. `datasource show` prints it as `policy.confineToDatabase`. Before a query or `schema` read runs, TapRoot parses it and refuses, with `DATABASE_CONFINED`, any statement that names another schema, in joins, subqueries, CTEs, `UNION`, `EXPLAIN`, `DESCRIBE` and the `SHOW` forms that take a schema. Tables of the profile's schema may be bare or qualified with its exact spelling.
+
+- The system schemas count as other schemas, and so does `SHOW DATABASES`. TapRoot's own catalog reads still run.
+- It refuses what it cannot check: statements it cannot parse, executable comments (`/*! */`, `/*T! */`), `--` with no ASCII space after it, backslashes (escape `LIKE` wildcards with `ESCAPE '!'`), `USE`, `SET`, and `SHOW` forms other than `TABLES`, `TABLE STATUS`, `COLUMNS`, `INDEX` and `CREATE TABLE`/`VIEW`, which may carry `LIKE` but not `WHERE`.
+- A confined profile with no `--database` refuses every query.
+
+The check is parser-based, and the server follows views and routines of the confined schema wherever they lead. A database user granted only that schema is the hard limit.
+
 ## Knowledge base
 
 With a KB, `taproot init datasource --env <env> --service <service>` creates the profile for you. Save the KB directory once with `taproot init --kb-dir <path>`. It must hold a `services.json`:

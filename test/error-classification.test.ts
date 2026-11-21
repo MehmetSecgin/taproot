@@ -91,6 +91,11 @@ describe('error classification', () => {
     expect(exitCodeForClass('MISSING_PARTITION_PREDICATE')).toBe(EXIT_CODES.BAD_INPUT);
   });
 
+  it('maps a database confinement refusal to access denied', () => {
+    expect(classifyError("DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop'")).toBe('DATABASE_CONFINED');
+    expect(exitCodeForClass('DATABASE_CONFINED')).toBe(EXIT_CODES.ACCESS_DENIED);
+  });
+
   it('maps executor doctor failures to machine-readable codes', () => {
     expect(classifyExecutorDoctorCode('connect ECONNREFUSED 127.0.0.1:4406')).toBe('executor_connectivity');
     expect(classifyExecutorDoctorCode('Access denied for user')).toBe('executor_access_denied');

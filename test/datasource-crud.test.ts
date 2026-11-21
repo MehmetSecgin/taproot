@@ -75,6 +75,43 @@ describe('datasource CRUD', () => {
     expect(out.status).toBe(0);
   });
 
+  it('datasource add saves --confine-to-database and datasource show prints it', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const added = addProfile(env, ['--confine-to-database']);
+    const shown = runCli(['datasource', 'show', 'qa-svc'], env);
+
+    // assert
+    expect(added.status).toBe(0);
+    expect(JSON.parse(shown.stdout).data).toMatchObject({ connection: { database: 'svcdb' }, policy: { confineToDatabase: true } });
+  });
+
+  it('datasource add refuses --confine-to-database without --database', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    const out = runCli(['datasource', 'add', '--name', 'qa-svc', '--kind', 'mysql', '--env', 'qa', '--host', '127.0.0.1', '--confine-to-database'], env);
+
+    // assert
+    expect(out.status).toBe(2);
+    expect(JSON.parse(out.stdout).error.message).toBe('BAD_INPUT: --confine-to-database needs --database <schema>, the one schema its queries may reach.');
+  });
+
+  it('datasource add leaves confineToDatabase out without the flag', () => {
+    // arrange
+    const { env } = setupState();
+
+    // act
+    addProfile(env);
+    const shown = runCli(['datasource', 'show', 'qa-svc'], env);
+
+    // assert
+    expect(JSON.parse(shown.stdout).data.policy).not.toHaveProperty('confineToDatabase');
+  });
+
   it('datasource add creates profile', () => {
     const { env } = setupState();
     const out = addProfile(env);

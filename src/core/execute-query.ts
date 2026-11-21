@@ -1,5 +1,6 @@
 import type { AppContext } from './app.js';
 import { runDatasourceConnectors } from './connector-runner.js';
+import { enforceDatabaseConfinement } from './database-confinement.js';
 import { badInput, classifyError } from './error-classification.js';
 import { parseKeyValuePairs } from './key-value.js';
 import { normalizeNamespace, normalizeService } from './naming.js';
@@ -210,6 +211,7 @@ export async function executeQuery(request: QueryExecutionRequest, deps: QueryDe
 
   try {
     enforceMutationPolicy({ sql: query, allowMutate: request.allowMutate, datasource });
+    enforceDatabaseConfinement({ sql: query, datasource });
     warnings.push(
       ...enforcePartitionPredicate({
         sql: query,

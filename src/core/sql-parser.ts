@@ -15,6 +15,7 @@ const ANALYZE_RE = /\banalyze\b/i;
 const EXPLAIN_ANALYZE_RE = /^\s*(?:explain|describe|desc)\s+(?:format\s*=\s*\S+\s+)?analyze\s+(?:format\s*=\s*\S+\s+)?/i;
 const SECOND_STATEMENT_RE = /;\s*\S/;
 const QUOTES = new Set(["'", '"', '`']);
+const DASH_COMMENT_SPACE_RE = /[ \t\n\v\f\r]/;
 const LITERAL_FILLER = 'x';
 
 function astifySql(sql: string): unknown {
@@ -24,7 +25,7 @@ function astifySql(sql: string): unknown {
 
 function startsLineComment(sql: string, at: number): boolean {
   if (sql[at] === '#') return true;
-  return sql.startsWith('--', at) && (at + 2 === sql.length || /\s/.test(sql[at + 2]));
+  return sql.startsWith('--', at) && (at + 2 === sql.length || DASH_COMMENT_SPACE_RE.test(sql[at + 2]));
 }
 
 function startsBlockComment(sql: string, at: number): boolean {
@@ -43,7 +44,7 @@ function closingQuoteAt(sql: string, open: number): number {
   return sql.length;
 }
 
-export function maskCommentsAndLiterals(sql: string): string {
+function maskSql(sql: string, maskLiterals: boolean): string {
   let out = '';
   let at = 0;
   while (at < sql.length) {
@@ -59,7 +60,9 @@ export function maskCommentsAndLiterals(sql: string): string {
       at = end;
     } else if (QUOTES.has(sql[at])) {
       const close = closingQuoteAt(sql, at);
-      out += sql[at] + LITERAL_FILLER.repeat(Math.min(close, sql.length) - at - 1) + (close < sql.length ? sql[close] : '');
+      out += maskLiterals
+        ? sql[at] + LITERAL_FILLER.repeat(Math.min(close, sql.length) - at - 1) + (close < sql.length ? sql[close] : '')
+        : sql.slice(at, close + 1);
       at = close + 1;
     } else {
       out += sql[at];
@@ -67,6 +70,14 @@ export function maskCommentsAndLiterals(sql: string): string {
     }
   }
   return out;
+}
+
+export function maskCommentsAndLiterals(sql: string): string {
+  return maskSql(sql, true);
+}
+
+export function maskComments(sql: string): string {
+  return maskSql(sql, false);
 }
 
 export function hasSecondStatement(sql: string): boolean {

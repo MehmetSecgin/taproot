@@ -27,6 +27,7 @@ const ERROR_CLASSES = {
     match: /misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/,
   },
   DATASOURCE_REFUSED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /datasource_refused/ },
+  DATABASE_CONFINED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /database_confined/ },
   DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
   KB_MISSING: { exitCode: EXIT_CODES.NOT_READY, match: /kb_missing/ },
   UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },
@@ -86,6 +87,7 @@ export const badInput = makeThrower('BAD_INPUT');
 export const missingPartitionPredicate = makeThrower('MISSING_PARTITION_PREDICATE');
 export const queryTimeoutErr = makeThrower('QUERY_TIMEOUT');
 export const misconfiguredDatasource = makeThrower('MISCONFIGURED_DATASOURCE');
+export const databaseConfined = makeThrower('DATABASE_CONFINED');
 export const ambiguousDatasource = makeThrower('AMBIGUOUS_DATASOURCE');
 export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');
 export const kbMissing = makeThrower('KB_MISSING');

@@ -68,10 +68,12 @@ export function datasourceAdminCommand(program: Command, executor: LocalExecutor
     .option('--allow-mutate', 'allow mutate', false)
     .option('--strict-keyspace', 'redis: refuse KEYS unless --allow-keys, and require SCAN to carry COUNT (max 200)', false)
     .option('--require-database', 'redis: refuse queries when --database is unset instead of falling back to database 0', false)
+    .option('--confine-to-database', 'mysql, teleport-mysql: refuse statements and schema reads that reach a schema other than --database', false)
     .option('--probe', 'after save, run plugin doctor() against the new profile; the profile stays saved on failure', false)
     .action(async (opts) => {
       const ctx = executor.context();
       if (opts.requireDatabase && !hasDatabase(opts.database)) throw badInput('--require-database needs --database <n>; without it every query on this datasource would fail.');
+      if (opts.confineToDatabase && !opts.database) throw badInput('--confine-to-database needs --database <schema>, the one schema its queries may reach.');
       const credentialRef = opts.credentialRef || opts.env;
       if (!credentialRef) throw badInput('datasource add needs --env or --credential-ref; the credential ref defaults to --env.');
       const profile = {
@@ -98,6 +100,7 @@ export function datasourceAdminCommand(program: Command, executor: LocalExecutor
             : (['executeRead'] satisfies Capability[]),
           ...(opts.requireDatabase ? { requireDatabase: true } : {}),
           ...(opts.strictKeyspace ? { strictKeyspace: true } : {}),
+          ...(opts.confineToDatabase ? { confineToDatabase: true } : {}),
         },
         resolverHints: {
           ...connectorCredentialRefHints(opts.connectorRef || []),
