@@ -1,5 +1,4 @@
 import type { AppContext } from './app.js';
-import { enforceConfinedTables } from './database-confinement.js';
 import { TaprootError } from './error-classification.js';
 import { suggestNames } from './grpc-introspect.js';
 import { describeResolutionFailure } from './resolve-datasource.js';
@@ -50,7 +49,6 @@ async function catalogAfterMiss(ctx: AppContext, datasource: DatasourceProfile, 
 }
 
 export async function readSchema(ctx: AppContext, datasource: DatasourceProfile, tables: string[], acquireQuerySlot: QuerySlot | undefined): Promise<{ tables: string[] | Record<string, TableDescription> }> {
-  enforceConfinedTables(datasource, tables);
   const cached = await cachedSchemaCatalog(ctx, datasource, acquireQuerySlot);
   if (!tables.length) return { tables: Object.keys(cached.tables) };
   const allCached = tables.every((name) => tableNamed(cached, name));

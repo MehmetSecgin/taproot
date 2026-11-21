@@ -7,7 +7,6 @@ export const DatasourcePolicySchema = z.object({
   allowedCapabilities: z.array(z.string()).default(['executeRead']),
   requireDatabase: z.boolean().optional(),
   strictKeyspace: z.boolean().optional(),
-  confineToDatabase: z.boolean().optional(),
 });
 
 export const DatasourceProfileSchema = z.object({

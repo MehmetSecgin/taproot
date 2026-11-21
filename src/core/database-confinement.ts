@@ -12,6 +12,7 @@ const TOKEN_RE = /\s*(`(?:[^`]|``)*`|'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"|[
 const NAME_RE = /^(?:`|[\w$\u0080-￿])/;
 const STRING_RE = /^['"]/;
 const EXECUTABLE_COMMENT_RE = /\/\*[A-Za-z]?!/;
+const SEQUENCE_FUNCTION_RE = /\b(?:nextval|setval|lastval)\b|\bnext\s+value\s+for\b/i;
 const STATEMENT_STARTS = new Set(['select', 'with', 'insert', 'update', 'delete', 'replace', '(']);
 const PARSED_STATEMENT_TYPES = new Set(['select', 'insert', 'update', 'delete', 'replace']);
 const SCHEMA_KEYS = new Set(['db', 'schema']);
@@ -35,31 +36,31 @@ class TokenCursor {
     return true;
   }
 
-  string(): boolean {
+  takeString(): boolean {
     if (!STRING_RE.test(this.peek()?.text ?? '')) return false;
     this.at += 1;
     return true;
   }
 
-  name(): string | undefined {
+  takeName(): string | undefined {
     const text = this.peek()?.text ?? '';
     if (!NAME_RE.test(text)) return undefined;
     this.at += 1;
     return text.startsWith('`') ? text.slice(1, -1).replaceAll('``', '`') : text;
   }
 
-  schemaName(): boolean {
-    const schema = this.name();
+  takeSchemaName(): boolean {
+    const schema = this.takeName();
     if (schema !== undefined) this.schemas.push(schema);
     return schema !== undefined;
   }
 
-  tableName(): boolean {
-    const first = this.name();
+  takeTableName(): boolean {
+    const first = this.takeName();
     if (first === undefined) return false;
     if (!this.take('.')) return true;
     this.schemas.push(first);
-    return this.name() !== undefined;
+    return this.takeName() !== undefined;
   }
 
   done(): boolean {
@@ -98,15 +99,15 @@ function statementSchemas(code: string): string[] | undefined {
 function showSchemas(cursor: TokenCursor): string[] | undefined {
   if (cursor.take('databases', 'schemas')) return ['information_schema'];
   if (cursor.take('create')) {
-    if (!cursor.take('table', 'view') || !cursor.tableName()) return undefined;
+    if (!cursor.take('table', 'view') || !cursor.takeTableName()) return undefined;
   } else {
     cursor.take('full', 'extended');
     cursor.take('full');
     const listsTables = cursor.take('tables') || (cursor.take('table') && cursor.take('status'));
     const describesTable = !listsTables && cursor.take('columns', 'fields', 'index', 'indexes', 'keys');
-    if (!listsTables && !(describesTable && cursor.take('from', 'in') && cursor.tableName())) return undefined;
-    if (cursor.take('from', 'in') && !cursor.schemaName()) return undefined;
-    if (cursor.take('like') && !cursor.string()) return undefined;
+    if (!listsTables && !(describesTable && cursor.take('from', 'in') && cursor.takeTableName())) return undefined;
+    if (cursor.take('from', 'in') && !cursor.takeSchemaName()) return undefined;
+    if (cursor.take('like') && !cursor.takeString()) return undefined;
   }
   return cursor.done() ? cursor.schemas : undefined;
 }
@@ -114,12 +115,12 @@ function showSchemas(cursor: TokenCursor): string[] | undefined {
 function explainSchemas(code: string, cursor: TokenCursor): string[] | undefined {
   let tookOption = true;
   while (tookOption) {
-    tookOption = cursor.take('analyze', 'extended', 'partitions') || (cursor.take('format') && cursor.take('=') && (cursor.string() || cursor.name() !== undefined));
+    tookOption = cursor.take('analyze', 'extended', 'partitions') || (cursor.take('format') && cursor.take('=') && (cursor.takeString() || cursor.takeName() !== undefined));
   }
   const next = cursor.peek();
   if (next && STATEMENT_STARTS.has(next.text.toLowerCase())) return statementSchemas(code.slice(next.at));
-  if (!cursor.tableName()) return undefined;
-  if (!cursor.string()) cursor.name();
+  if (!cursor.takeTableName()) return undefined;
+  if (!cursor.takeString()) cursor.takeName();
   return cursor.done() ? cursor.schemas : undefined;
 }
 
@@ -134,19 +135,21 @@ function reachedSchemas(code: string): string[] | undefined {
 
 function lexicalHazard(sql: string): string | undefined {
   if (EXECUTABLE_COMMENT_RE.test(sql)) return 'it holds an executable comment (/*! */), which the server runs and the parser skips';
-  if (maskCommentsAndLiterals(sql).includes('--')) return "it holds '--' without an ASCII space after it, which the server reads as two minus signs and the parser may read as a comment";
+  const code = maskCommentsAndLiterals(sql);
+  if (code.includes('--')) return "it holds '--' without an ASCII space after it, which the server reads as two minus signs and the parser may read as a comment";
+  if (SEQUENCE_FUNCTION_RE.test(code)) return 'it calls a sequence function, whose sequence the parser reads as a column';
   if (sql.includes('\\')) return 'it holds a backslash, which ends a string early on a server running NO_BACKSLASH_ESCAPES';
   return undefined;
 }
 
 function isConfined(datasource: DatasourceProfile): boolean {
-  return Boolean(datasource.policy.confineToDatabase) && SQL_DATASOURCE_KINDS.has(datasource.kind);
+  return process.env.TAPROOT_CONFINE_TO_DATABASE === '1' && SQL_DATASOURCE_KINDS.has(datasource.kind);
 }
 
 function confinedDatabase(datasource: DatasourceProfile): string {
   const database = datasource.connection.database;
   if (database) return database;
-  throw misconfiguredDatasource(`datasource '${datasource.name}' is confined to its database but names none. Set one with datasource add --database <schema>.`);
+  throw misconfiguredDatasource(`TAPROOT_CONFINE_TO_DATABASE confines datasource '${datasource.name}' to its database, but it names none. Set one with datasource add --database <schema>.`);
 }
 
 function outsideDatabase(datasource: DatasourceProfile, database: string, reached: string): Error {
@@ -156,21 +159,17 @@ function outsideDatabase(datasource: DatasourceProfile, database: string, reache
   );
 }
 
+function unconfirmedReach(datasource: DatasourceProfile, database: string, reason: string): Error {
+  return databaseConfined(`datasource '${datasource.name}' is confined to schema '${database}', and TapRoot cannot tell which schemas this statement reaches: ${reason}.`);
+}
+
 export function enforceDatabaseConfinement(input: { sql: string; datasource: DatasourceProfile }): void {
   if (!isConfined(input.datasource)) return;
   const database = confinedDatabase(input.datasource);
   const hazard = lexicalHazard(input.sql);
-  const schemas = hazard ? undefined : reachedSchemas(maskComments(input.sql));
-  if (!schemas) {
-    throw databaseConfined(`datasource '${input.datasource.name}' is confined to schema '${database}', and TapRoot cannot tell which schemas this statement reaches: ${hazard ?? UNSUPPORTED}.`);
-  }
+  if (hazard) throw unconfirmedReach(input.datasource, database, hazard);
+  const schemas = reachedSchemas(maskComments(input.sql));
+  if (!schemas) throw unconfirmedReach(input.datasource, database, UNSUPPORTED);
   const outside = schemas.find((schema) => schema !== database);
   if (outside !== undefined) throw outsideDatabase(input.datasource, database, outside);
-}
-
-export function enforceConfinedTables(datasource: DatasourceProfile, tables: string[]): void {
-  if (!isConfined(datasource)) return;
-  const database = confinedDatabase(datasource);
-  const outside = tables.map((table) => table.split('.')).find((parts) => parts.length > 1 && parts[0] !== database);
-  if (outside) throw outsideDatabase(datasource, database, outside[0]);
 }

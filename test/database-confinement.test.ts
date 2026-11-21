@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { enforceConfinedTables, enforceDatabaseConfinement } from '../src/core/database-confinement.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { enforceDatabaseConfinement } from '../src/core/database-confinement.js';
 import { executeQuery, silentQueryReport } from '../src/core/execute-query.js';
 import { queryDatasourceResolver } from '../src/core/resolve-query-datasource.js';
 import { rpcCall } from '../src/daemon/client.js';
@@ -9,16 +9,26 @@ import { startLocalDaemon } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
 import { contextWith, queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
 
-afterEach(restoreQueryEnv);
+const savedConfine = process.env.TAPROOT_CONFINE_TO_DATABASE;
 
-function profile(overrides: { database?: string; confineToDatabase?: boolean; kind?: string } = {}): DatasourceProfile {
-  const { database = 'shop', confineToDatabase = true, kind = 'mysql' } = overrides;
+beforeEach(() => {
+  process.env.TAPROOT_CONFINE_TO_DATABASE = '1';
+});
+
+afterEach(() => {
+  restoreQueryEnv();
+  if (savedConfine === undefined) delete process.env.TAPROOT_CONFINE_TO_DATABASE;
+  else process.env.TAPROOT_CONFINE_TO_DATABASE = savedConfine;
+});
+
+function profile(overrides: { database?: string; kind?: string } = {}): DatasourceProfile {
+  const { database = 'shop', kind = 'mysql' } = overrides;
   return {
     name: 'qa-shop',
     kind,
     connection: { database },
     credentialRef: 'qa',
-    policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'], confineToDatabase },
+    policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
     updatedAt: '',
   };
 }
@@ -102,14 +112,19 @@ describe('database confinement of a statement', () => {
     expect(refusal(sql)?.message).toMatch(/^DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop', and TapRoot cannot tell which schemas this statement reaches: it is not one SELECT/);
   });
 
-  it('runs anything with confinement off', () => {
-    expect(refusal('SELECT * FROM other.refunds', profile({ confineToDatabase: false }))).toBeUndefined();
-    expect(refusal('SHOW PROCESSLIST', profile({ confineToDatabase: false }))).toBeUndefined();
+  it('runs anything with TAPROOT_CONFINE_TO_DATABASE unset', () => {
+    delete process.env.TAPROOT_CONFINE_TO_DATABASE;
+    expect(refusal('SELECT * FROM other.refunds')).toBeUndefined();
+    expect(refusal('SHOW PROCESSLIST')).toBeUndefined();
+  });
+
+  it('leaves a non-SQL datasource alone', () => {
+    expect(refusal('GET other.key', profile({ kind: 'redis' }))).toBeUndefined();
   });
 
   it('refuses a confined profile that names no database', () => {
     expect(refusal('SELECT 1', profile({ database: '' }))?.message).toBe(
-      "MISCONFIGURED_DATASOURCE: datasource 'qa-shop' is confined to its database but names none. Set one with datasource add --database <schema>.",
+      "MISCONFIGURED_DATASOURCE: TAPROOT_CONFINE_TO_DATABASE confines datasource 'qa-shop' to its database, but it names none. Set one with datasource add --database <schema>.",
     );
   });
 });
@@ -129,6 +144,15 @@ describe('database confinement against parser bypasses', () => {
 
   it('refuses -- before a non-ASCII space, which the server reads as code', () => {
     expect(refusal('SELECT 1 --\u00a0x FROM other.refunds')?.message).toContain("it holds '--' without an ASCII space after it");
+  });
+
+  it.each([
+    'SELECT NEXTVAL(other.seq)',
+    'SELECT SETVAL(other.seq, 1)',
+    'SELECT LASTVAL(other.seq)',
+    'SELECT NEXT VALUE FOR other.seq',
+  ])('refuses the sequence function in %s, whose sequence the parser reads as a column', (sql) => {
+    expect(refusal(sql)?.message).toContain('it calls a sequence function');
   });
 
   it('refuses a backslash, which ends a string early on a server running NO_BACKSLASH_ESCAPES', () => {
@@ -167,36 +191,12 @@ describe('database confinement against parser bypasses', () => {
   });
 });
 
-describe('database confinement of a schema read', () => {
-  it('refuses a table qualified with another schema', () => {
-    expect(() => enforceConfinedTables(profile(), ['orders', 'other.refunds'])).toThrow(
-      "DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop', and 'other' is another schema.",
-    );
-  });
-
-  it('lets bare tables and tables of the profile database through', () => {
-    expect(() => enforceConfinedTables(profile(), ['orders', 'shop.refunds'])).not.toThrow();
-  });
-
-  it('refuses a confined profile that names no database even with no table asked for', () => {
-    expect(() => enforceConfinedTables(profile({ database: '' }), [])).toThrow(/^MISCONFIGURED_DATASOURCE/);
-  });
-
-  it('lets any table through with confinement off', () => {
-    expect(() => enforceConfinedTables(profile({ confineToDatabase: false }), ['other.refunds'])).not.toThrow();
-  });
-});
-
 describe('database confinement where queries run', () => {
-  const confinedProfile = {
-    kind: 'mysql',
-    connection: { host: '127.0.0.1', port: 1, database: 'shop' },
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead' as const], confineToDatabase: true },
-  };
+  const shopProfile = { kind: 'mysql', connection: { host: '127.0.0.1', port: 1, database: 'shop' } };
 
   it('refuses a cross-schema query before it reaches the plugin', async () => {
     // arrange
-    await setupQueryState(confinedProfile);
+    await setupQueryState(shopProfile);
     const sent: string[] = [];
     const plugin = fakePlugin({ kind: 'mysql' });
     const inner = plugin.execute!;
@@ -220,21 +220,19 @@ describe('database confinement where queries run', () => {
     expect(sent.filter((query) => query.includes('other'))).toEqual([]);
   });
 
-  it('serves schema.read from the catalog of the profile database and refuses another schema', async () => {
+  it('still serves schema.read from the catalog of the profile database', async () => {
     // arrange
-    const stateRoot = await setupQueryState(confinedProfile);
+    const stateRoot = await setupQueryState(shopProfile);
     const socketPath = path.join(stateRoot, 'run', 'taprootd-confined.sock');
     const plugin = fakePlugin({ kind: 'mysql', columns: ['table_name', 'column_name'], rows: [['orders', 'id']] });
     const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [plugin] });
 
     try {
       // act
-      const own = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['orders'] } });
-      const other = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['other.refunds'] } });
+      const res = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['orders'] } });
 
       // assert
-      expect(own.data).toEqual({ tables: { orders: { columns: ['id'] } } });
-      expect(other).toMatchObject({ ok: false, error: { code: 'DATABASE_CONFINED' } });
+      expect(res.data).toEqual({ tables: { orders: { columns: ['id'] } } });
     } finally {
       await daemon.stop();
     }
