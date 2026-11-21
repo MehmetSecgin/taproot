@@ -9,6 +9,7 @@ export type DatasourceCheck = (input: {
   datasource: DatasourceProfile;
   credentials: Record<string, string>;
   timeoutMs: number;
+  signal: AbortSignal;
 }) => Promise<void>;
 
 export type DatasourceGate = (datasource: DatasourceProfile, timeoutMs: number) => Promise<void>;
@@ -31,7 +32,7 @@ export function datasourceGate(ctx: AppContext, check: DatasourceCheck | undefin
     const credentials = await ctx.credentialStore.get(datasource.credentialRef);
     const key = createHash('sha256').update(JSON.stringify([datasource, credentials])).digest('hex');
     if (!passed.has(key)) {
-      const checked = withQueryTimeout({ timeoutMs, signal: undefined, run: () => check({ ctx, datasource, credentials, timeoutMs }) });
+      const checked = withQueryTimeout({ timeoutMs, signal: undefined, run: (signal) => check({ ctx, datasource, credentials, timeoutMs, signal }) });
       passed.set(key, checked.catch((error: unknown) => {
         passed.delete(key);
         throw refusalError(error);
