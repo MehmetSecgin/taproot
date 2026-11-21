@@ -73,6 +73,31 @@ describe('datasource resolution', () => {
     expect(store.resolveByEnvService('qa', 'svc', 'test')?.name).toBe('qa-test-svc');
   });
 
+  it('loads a profile saved with the removed confidence key', () => {
+    // arrange
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
+    const file = path.join(dir, 'datasources.json');
+    fs.writeFileSync(file, JSON.stringify([{
+      name: 'qa-orders',
+      kind: 'mysql',
+      env: 'qa',
+      service: 'orders',
+      tags: [],
+      connection: {},
+      credentialRef: 'qa',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: '2026-03-01T00:00:00.000Z',
+      confidence: 0.8,
+    }]));
+
+    // act
+    const loaded = new DatasourceStore(file).load();
+
+    // assert
+    expect(loaded.warnings).toEqual([]);
+    expect(loaded.profiles.map((profile) => profile.name)).toEqual(['qa-orders']);
+  });
+
   it('only offers --datasource when the namespace is already given', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const store = new DatasourceStore(path.join(dir, 'datasources.json'));
