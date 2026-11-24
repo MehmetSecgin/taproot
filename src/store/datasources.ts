@@ -5,7 +5,7 @@ import { isNonEmpty, textUnlessFalsy } from '../core/text-presence.js';
 import { ambiguousDatasource } from '../core/taproot-error.js';
 import { isRecord } from '../core/json-shapes.js';
 
-type ServiceQuery = {
+export type ServiceQuery = {
   env: string;
   namespace: string | undefined;
   service: string;
@@ -102,14 +102,13 @@ export class DatasourceStore {
     return true;
   }
 
-  public resolveByEnvService(env: string, service: string, namespace?: string, preferKinds: readonly string[] = []): DatasourceProfile | undefined {
+  public resolveByEnvService(query: ServiceQuery): DatasourceProfile | undefined {
     const profiles = this.list();
-    const query: ServiceQuery = { env, namespace, service, preferKinds };
     const direct = findUniqueProfile(profiles, query);
     if (direct !== undefined) {
       return direct;
     }
-    return isNonEmpty(namespace) ? undefined : findWithEnvSplitIntoNamespace(profiles, query);
+    return isNonEmpty(query.namespace) ? undefined : findWithEnvSplitIntoNamespace(profiles, query);
   }
 
   private rawRows(): unknown[] {

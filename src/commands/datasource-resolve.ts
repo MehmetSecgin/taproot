@@ -26,7 +26,7 @@ async function profileFromKb(ctx: AppContext, target: NormalizedTarget, kbConnec
 
 export async function resolveDatasourceProfile(ctx: AppContext, opts: DatasourceResolveOptions): Promise<{ source: string; profile: unknown }> {
   const target = normalizedTarget(ctx, opts);
-  const fromStore = ctx.datasourceStore.resolveByEnvService(target.env, target.service, target.namespace);
+  const fromStore = ctx.datasourceStore.resolveByEnvService({ env: target.env, namespace: target.namespace, service: target.service, preferKinds: [] });
   if (fromStore) {
     return { source: 'datasource-store', profile: fromStore };
   }

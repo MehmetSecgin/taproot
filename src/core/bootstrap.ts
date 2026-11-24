@@ -128,7 +128,7 @@ export async function reconcileDatasource(ctx: AppContext, lookup: KbLookup): Pr
     return undefined;
   }
   const { env, service, namespace } = lookup;
-  const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
+  const existing = ctx.datasourceStore.resolveByEnvService({ env, namespace, service, preferKinds: [] });
   if (existing && blockingDatasourceKbConflicts(existing, candidate.kb).length === 0) {
     return { profile: existing, source: 'store-existing', credentialRefs: credentialRefsOf(existing) };
   }

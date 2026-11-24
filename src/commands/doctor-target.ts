@@ -52,7 +52,7 @@ function findNamedDatasource(ctx: AppContext, rawName: string | undefined): Data
 function resolveByEnvAndService(ctx: AppContext, request: { env: string; service: string; namespace?: string }): DoctorResolution {
   const service = normalizeService(request.service, ctx.runtimeConfigStore.serviceAliases());
   const namespace = emptyToUndefined(normalizeNamespace(request.namespace));
-  const found = ctx.datasourceStore.resolveByEnvService(request.env, service, namespace);
+  const found = ctx.datasourceStore.resolveByEnvService({ env: request.env, namespace, service, preferKinds: [] });
   if (found) {
     return { datasource: found };
   }

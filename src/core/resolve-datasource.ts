@@ -55,7 +55,7 @@ function resolveFromStore(input: ResolveWithFallbacksInput): { datasource: Datas
   for (const env of [explicitEnvFlag, effectiveEnv]) {
     const datasource = env === undefined || env === '' || service === ''
       ? undefined
-      : ctx.datasourceStore.resolveByEnvService(env, service, emptyToUndefined(namespace), preferredKinds);
+      : ctx.datasourceStore.resolveByEnvService({ env, namespace: emptyToUndefined(namespace), service, preferKinds: preferredKinds });
     if (datasource !== undefined) {
       return { datasource, source: 'store' };
     }

@@ -35,7 +35,7 @@ describe('datasource resolution', () => {
       updatedAt: '2026-03-02T00:00:00.000Z',
     });
 
-    expect(() => store.resolveByEnvService('prod', 'svc')).toThrow(
+    expect(() => store.resolveByEnvService({ env: 'prod', namespace: undefined, service: 'svc', preferKinds: [] })).toThrow(
       'AMBIGUOUS_DATASOURCE: 2 datasources match env=prod service=svc: a, b. Narrow with --namespace, or use --datasource <name> on query and doctor.',
     );
   });
@@ -70,8 +70,8 @@ describe('datasource resolution', () => {
       updatedAt: '2026-03-02T00:00:00.000Z',
     });
 
-    expect(store.resolveByEnvService('qa', 'svc', 'develop')?.name).toBe('qa-develop-svc');
-    expect(store.resolveByEnvService('qa', 'svc', 'test')?.name).toBe('qa-test-svc');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: 'develop', service: 'svc', preferKinds: [] })?.name).toBe('qa-develop-svc');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: 'test', service: 'svc', preferKinds: [] })?.name).toBe('qa-test-svc');
   });
 
   it('loads a profile saved with the removed confidence key', () => {
@@ -115,7 +115,7 @@ describe('datasource resolution', () => {
     store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' });
     store.save({ ...base, name: 'qa-svc-legacy-grpc', kind: 'grpc' });
 
-    expect(() => store.resolveByEnvService('qa', 'svc', 'develop', ['grpc'])).toThrow(
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: 'develop', service: 'svc', preferKinds: ['grpc'] })).toThrow(
       'AMBIGUOUS_DATASOURCE: 2 datasources match env=qa namespace=develop service=svc: qa-svc-grpc, qa-svc-legacy-grpc. Pick one: use --datasource <name> on query and doctor.',
     );
   });
@@ -135,10 +135,10 @@ describe('datasource resolution', () => {
     store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' });
     store.save({ ...base, name: 'qa-svc-sql', kind: 'mysql' });
 
-    expect(store.resolveByEnvService('qa', 'svc', undefined, ['mysql'])?.name).toBe('qa-svc-sql');
-    expect(store.resolveByEnvService('qa', 'svc', undefined, ['grpc'])?.name).toBe('qa-svc-grpc');
-    expect(() => store.resolveByEnvService('qa', 'svc')).toThrow('AMBIGUOUS_DATASOURCE');
-    expect(() => store.resolveByEnvService('qa', 'svc', undefined, ['redis'])).toThrow('AMBIGUOUS_DATASOURCE');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['mysql'] })?.name).toBe('qa-svc-sql');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['grpc'] })?.name).toBe('qa-svc-grpc');
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: [] })).toThrow('AMBIGUOUS_DATASOURCE');
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['redis'] })).toThrow('AMBIGUOUS_DATASOURCE');
   });
 });
 
