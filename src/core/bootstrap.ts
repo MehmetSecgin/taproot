@@ -1,229 +1,137 @@
 import type { AppContext } from './app.js';
 import { defaultDatasourceName } from './naming.js';
-import { criticalDatasourceKbConflicts } from './conflicts.js';
-import { kubectlPortforwardLocalPort } from './kubectl-portforward.js';
-import { nowIso } from './time.js';
-import { AccessMethod, DatasourceKind } from '../types/core.js';
-import type { DatasourceProfile } from '../types/core.js';
-import { str } from './strings.js';
-import { badInput } from './error-classification.js';
+import { blockingDatasourceKbConflicts } from './conflicts.js';
+import type { AccessMethod, DatasourceProfile } from '../types/datasource.js';
+import { emptyToUndefined, firstNonEmpty, isNonEmpty, textUnlessFalsy } from './text-presence.js';
+import { badInput } from './taproot-error.js';
+import { KB_ACCESS_METHODS, buildKbDatasourceCandidate, isKbAccessMethod } from './kb-datasource-candidates.js';
+import type { CredentialDefaultSpec, KbDatasourceCandidate, KbEntry } from './kb-datasource-candidates.js';
 
-export interface BootstrapResult {
+type BootstrapResult = {
   profile: DatasourceProfile;
   source: 'store-existing' | 'kb-bootstrap' | 'kb-repaired';
   credentialRefs: string[];
-}
+};
 
-interface CredentialDefaultSpec {
-  ref: string;
-  defaults: Record<string, string>;
-  overwrite?: boolean;
-}
-
-interface KbBootstrapCandidate {
-  kb: Record<string, unknown>;
-  profile: DatasourceProfile;
-  credentialDefaults: CredentialDefaultSpec[];
-}
-
-interface KbBootstrapOptions {
+type KbBootstrapOptions = {
   targetOverride?: string;
   tags?: string[];
-}
+};
 
-function collectBootstrapMetadata(profile: DatasourceProfile): Pick<BootstrapResult, 'credentialRefs'> {
-  const refs = new Set<string>();
-  if (profile.credentialRef) refs.add(profile.credentialRef);
-  for (const value of Object.values(profile.resolverHints || {})) {
-    const ref = str(value).trim();
-    if (ref) refs.add(ref);
-  }
-  return { credentialRefs: [...refs] };
-}
+type KbLookup = {
+  env: string;
+  service: string;
+  namespace?: string;
+};
 
-async function ensureCredentialDefaults(
-  ctx: AppContext,
-  ref: string,
-  defaults: Record<string, string>,
-  overwrite = false,
-): Promise<void> {
-  const current = await ctx.credentialStore.get(ref);
-  const merged = overwrite ? { ...current, ...defaults } : { ...defaults, ...current };
-  const changed = overwrite
-    ? Object.keys(defaults).some((k) => current[k] !== defaults[k])
-    : Object.keys(defaults).some((k) => !current[k] && defaults[k]);
-  if (changed) await ctx.credentialStore.set(ref, merged);
-}
-
-interface BootstrapContext {
+type KbCandidateRequest = {
   env: string;
   service: string;
   datasourceName: string;
-  kb: Record<string, unknown>;
-  database: string;
-  dbUser: string;
-  target: string;
-  credentialRef: string;
-  tags: string[];
-  namespace?: string;
-}
-
-function buildKubectlPortforwardCandidate(c: BootstrapContext): KbBootstrapCandidate {
-  const effectiveNamespace = String(c.namespace || 'default');
-  const context = String(c.kb.k8s_context || c.env || effectiveNamespace);
-  const localPort = kubectlPortforwardLocalPort(c.env, c.namespace, c.service);
-  const logFile = `/tmp/taproot-pf-${c.env}-${c.service}.log`;
-  const forwardArgs = `--context ${context} -n ${effectiveNamespace} port-forward svc/${c.target} ${localPort}:`;
-  const listenerPid = `$(lsof -tiTCP:${localPort} -sTCP:LISTEN | head -n 1)`;
-  const statusCommand = `ps -o command= -p "${listenerPid}" 2>/dev/null | grep -qF -- '${forwardArgs}'`;
-  const connectCommand = `${statusCommand} || (svc_port=$(kubectl --context ${context} -n ${effectiveNamespace} get svc/${c.target} -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo 4000); nohup kubectl ${forwardArgs}$svc_port >${logFile} 2>&1 & for _ in 1 2 3 4 5; do ${statusCommand} && break; sleep 1; done; ${statusCommand})`;
-  const kpfRef = `kpf:${c.env}:${c.namespace || 'default'}:${c.service}`;
-  return {
-    kb: c.kb,
-    profile: {
-      name: c.datasourceName,
-      kind: DatasourceKind.Mysql,
-      env: c.env,
-      namespace: c.namespace,
-      service: c.service,
-      tags: c.tags,
-      connection: { host: '127.0.0.1', port: localPort, database: c.database },
-      credentialRef: c.credentialRef,
-      connectors: ['kubectl-portforward'],
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      resolverHints: {
-        'kubectl-portforwardCredentialRef': kpfRef,
-      },
-      updatedAt: nowIso(),
-    },
-    credentialDefaults: [
-      { ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } },
-      { ref: kpfRef, defaults: { statusCommand, connectCommand }, overwrite: true },
-    ],
-  };
-}
-
-function buildNativeCandidate(c: BootstrapContext): KbBootstrapCandidate | undefined {
-  const host = str(c.kb.host).trim();
-  if (!host) return undefined;
-  const port = Number(c.kb.port || 0) || 3306;
-  return {
-    kb: c.kb,
-    profile: {
-      name: c.datasourceName,
-      kind: DatasourceKind.Mysql,
-      env: c.env,
-      namespace: c.namespace,
-      service: c.service,
-      tags: c.tags,
-      connection: { host, port, database: c.database },
-      credentialRef: c.credentialRef,
-      connectors: [],
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      resolverHints: {},
-      updatedAt: nowIso(),
-    },
-    credentialDefaults: [{ ref: c.credentialRef, defaults: { user: c.dbUser || 'root' } }],
-  };
-}
-
-function buildTshCandidate(c: BootstrapContext): KbBootstrapCandidate {
-  const tshRef = `tsh:${c.env}`;
-  return {
-    kb: c.kb,
-    profile: {
-      name: c.datasourceName,
-      kind: DatasourceKind.TeleportMysql,
-      env: c.env,
-      namespace: c.namespace,
-      service: c.service,
-      tags: c.tags,
-      connection: { database: c.database, target: c.target },
-      credentialRef: c.credentialRef,
-      connectors: ['teleport'],
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      resolverHints: {
-        teleportCredentialRef: tshRef,
-        ...(c.dbUser ? { dbUser: c.dbUser } : {}),
-      },
-      updatedAt: nowIso(),
-    },
-    credentialDefaults: [
-      { ref: c.credentialRef, defaults: { dbUser: c.dbUser } },
-      { ref: tshRef, defaults: { statusCommand: 'tsh status' } },
-    ],
-  };
-}
-
-const CANDIDATE_BUILDERS: Record<AccessMethod, (c: BootstrapContext) => KbBootstrapCandidate | undefined> = {
-  [AccessMethod.KubectlPortforward]: buildKubectlPortforwardCandidate,
-  [AccessMethod.Native]: buildNativeCandidate,
-  [AccessMethod.Tsh]: buildTshCandidate,
+  kb: KbEntry;
+  options?: KbBootstrapOptions;
 };
 
-export function requireAccessMethod(value: string, where: string): AccessMethod {
-  if (Object.hasOwn(CANDIDATE_BUILDERS, value)) return value as AccessMethod;
-  throw badInput(`Unknown access method '${value}' in ${where}. Known: ${Object.keys(CANDIDATE_BUILDERS).join(', ')}.`);
+const DEFAULT_CANDIDATE_TAGS = ['auto-bootstrap', 'kb-derived'];
+
+function credentialRefsOf(profile: DatasourceProfile): string[] {
+  const refs = new Set<string>();
+  if (profile.credentialRef !== '') {
+    refs.add(profile.credentialRef);
+  }
+  for (const hint of Object.values(profile.resolverHints ?? {})) {
+    const ref = textUnlessFalsy(hint).trim();
+    if (ref !== '') {
+      refs.add(ref);
+    }
+  }
+  return [...refs];
 }
 
-function buildKbBootstrapCandidate(
-  env: string,
-  service: string,
-  datasourceName: string,
-  kb: Record<string, unknown>,
-  options?: KbBootstrapOptions,
-): KbBootstrapCandidate | undefined {
-  const accessMethod = str(kb.access_method).toLowerCase();
-  if (!accessMethod) return undefined;
-  const build = CANDIDATE_BUILDERS[requireAccessMethod(accessMethod, `the KB entry for env=${env} service=${service}`)];
-  const c: BootstrapContext = {
+async function ensureCredentialDefaults(ctx: AppContext, spec: CredentialDefaultSpec): Promise<void> {
+  const current = await ctx.credentialStore.get(spec.ref);
+  const overwrite = spec.overwrite ?? false;
+  const merged = overwrite ? { ...current, ...spec.defaults } : { ...spec.defaults, ...current };
+  const changed = Object.entries(spec.defaults).some(([key, value]) =>
+    overwrite ? current[key] !== value : !isNonEmpty(current[key]) && isNonEmpty(value),
+  );
+  if (changed) {
+    await ctx.credentialStore.set(spec.ref, merged);
+  }
+}
+
+export function requireAccessMethod(value: string, where: string): AccessMethod {
+  if (isKbAccessMethod(value)) {
+    return value;
+  }
+  throw badInput(`Unknown access method '${value}' in ${where}. Known: ${KB_ACCESS_METHODS.join(', ')}.`);
+}
+
+function buildKbCandidate(request: KbCandidateRequest): KbDatasourceCandidate | undefined {
+  const { env, service, datasourceName, kb, options } = request;
+  const accessMethod = textUnlessFalsy(kb.access_method).toLowerCase();
+  if (accessMethod === '') {
+    return undefined;
+  }
+  const validatedMethod = requireAccessMethod(accessMethod, `the KB entry for env=${env} service=${service}`);
+  const targetOverride = options?.targetOverride;
+  return buildKbDatasourceCandidate(validatedMethod, {
     env,
     service,
     datasourceName,
     kb,
-    database: str(kb.database),
-    dbUser: str(kb.db_user),
-    target: str(options?.targetOverride || kb.target),
+    database: textUnlessFalsy(kb.database),
+    dbUser: textUnlessFalsy(kb.db_user),
+    target: textUnlessFalsy(isNonEmpty(targetOverride) ? targetOverride : kb.target),
     credentialRef: env,
-    tags: options?.tags || ['auto-bootstrap', 'kb-derived'],
-    namespace: str(kb.namespace).trim() || undefined,
-  };
-  return build(c);
+    tags: options?.tags ?? DEFAULT_CANDIDATE_TAGS,
+    namespace: emptyToUndefined(textUnlessFalsy(kb.namespace).trim()),
+  });
 }
 
-export async function saveKbBootstrapCandidate(
-  ctx: AppContext,
-  env: string,
-  service: string,
-  datasourceName: string,
-  kb: Record<string, unknown>,
-  options?: KbBootstrapOptions,
-): Promise<DatasourceProfile | undefined> {
-  // Keep every KB-backed datasource materialization path on this helper so init/doctor/query/resolve
-  // all persist the same canonical routing shape instead of drifting through ad-hoc saves.
-  const candidate = buildKbBootstrapCandidate(env, service, datasourceName, kb, options);
-  if (!candidate) return undefined;
-  for (const spec of candidate.credentialDefaults) await ensureCredentialDefaults(ctx, spec.ref, spec.defaults, spec.overwrite);
+async function persistCandidate(ctx: AppContext, candidate: KbDatasourceCandidate): Promise<DatasourceProfile> {
+  for (const spec of candidate.credentialDefaults) {
+    await ensureCredentialDefaults(ctx, spec);
+  }
   return ctx.datasourceStore.save(candidate.profile);
 }
 
-export async function reconcileDatasource(
-  ctx: AppContext,
-  env: string,
-  service: string,
-  namespace?: string,
-): Promise<BootstrapResult | undefined> {
+export async function saveKbBootstrapCandidate(ctx: AppContext, request: KbCandidateRequest): Promise<DatasourceProfile | undefined> {
+  const candidate = buildKbCandidate(request);
+  if (!candidate) {
+    return undefined;
+  }
+  return persistCandidate(ctx, candidate);
+}
+
+function kbDatasourceName(lookup: KbLookup, kb: KbEntry): string {
+  return defaultDatasourceName(lookup.env, lookup.service, firstNonEmpty(textUnlessFalsy(kb.namespace), lookup.namespace));
+}
+
+export async function saveKbDatasource(ctx: AppContext, found: KbLookup & { kb: KbEntry }): Promise<DatasourceProfile | undefined> {
+  const { env, service, kb } = found;
+  return saveKbBootstrapCandidate(ctx, { env, service, datasourceName: kbDatasourceName(found, kb), kb });
+}
+
+function loadKbCandidate(ctx: AppContext, lookup: KbLookup): KbDatasourceCandidate | undefined {
+  const { env, service, namespace } = lookup;
   const kb = ctx.kbStore.resolveConnection(service, env, namespace);
-  if (!kb) return undefined;
+  if (!kb) {
+    return undefined;
+  }
+  return buildKbCandidate({ env, service, datasourceName: kbDatasourceName(lookup, kb), kb });
+}
 
-  const resolvedName = defaultDatasourceName(env, service, str(kb.namespace || namespace).trim() || undefined);
-  if (!buildKbBootstrapCandidate(env, service, resolvedName, kb)) return undefined;
-
+export async function reconcileDatasource(ctx: AppContext, lookup: KbLookup): Promise<BootstrapResult | undefined> {
+  const candidate = loadKbCandidate(ctx, lookup);
+  if (!candidate) {
+    return undefined;
+  }
+  const { env, service, namespace } = lookup;
   const existing = ctx.datasourceStore.resolveByEnvService(env, service, namespace);
-  const critical = existing ? criticalDatasourceKbConflicts(existing, kb) : [];
-  if (existing && !critical.length) return { profile: existing, source: 'store-existing', ...collectBootstrapMetadata(existing) };
-
-  const profile = await saveKbBootstrapCandidate(ctx, env, service, resolvedName, kb);
-  if (!profile) return undefined;
-  return { profile, source: existing ? 'kb-repaired' : 'kb-bootstrap', ...collectBootstrapMetadata(profile) };
+  if (existing && blockingDatasourceKbConflicts(existing, candidate.kb).length === 0) {
+    return { profile: existing, source: 'store-existing', credentialRefs: credentialRefsOf(existing) };
+  }
+  const profile = await persistCandidate(ctx, candidate);
+  return { profile, source: existing ? 'kb-repaired' : 'kb-bootstrap', credentialRefs: credentialRefsOf(profile) };
 }

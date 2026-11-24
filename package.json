@@ -61,7 +61,7 @@
     "prepare": "npm run build",
     "dev": "tsx src/index.ts",
     "check": "tsc --noEmit",
-    "lint": "oxlint src test",
+    "lint": "oxlint --type-aware",
     "test": "npm run build && vitest run",
     "test:watch": "vitest"
   },
@@ -80,6 +80,7 @@
   "devDependencies": {
     "@types/node": "^24.4.0",
     "oxlint": "^1.94.0",
+    "oxlint-tsgolint": "^7.0.2008",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

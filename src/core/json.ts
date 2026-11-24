@@ -1,74 +1,88 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { deepFreeze } from './deep-freeze.js';
 
 const OWNER_ONLY_FILE_MODE = 0o600;
 
-interface ParsedFile {
+type ParsedFile = {
   mtimeMs: number;
   size: number;
   value: unknown;
-}
+};
 
 const parsedFiles = new Map<string, ParsedFile>();
 
-function deepFreeze<T>(value: T): T {
-  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value)) deepFreeze(child);
-  return Object.freeze(value);
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
-function readText(file: string): string | undefined {
+function readTextIfExists(file: string): string | undefined {
   try {
     return fs.readFileSync(file, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return undefined;
+    }
+    throw error;
   }
 }
 
-export function readJsonFile<T>(file: string, fallback: T): T {
-  const stat = fs.statSync(file, { throwIfNoEntry: false });
-  if (!stat) return fallback;
-  const cached = parsedFiles.get(file);
-  if (cached?.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.value as T;
-  const text = readText(file);
-  if (text === undefined) return fallback;
-  let value: T;
+function parseFrozenJson(file: string, text: string): unknown {
   try {
-    value = deepFreeze(JSON.parse(text) as T);
-  } catch (err) {
-    throw new Error(`${file} is not valid JSON (${(err as Error).message}). Fix or remove it; TapRoot does not overwrite it while it is unreadable.`, { cause: err });
+    return deepFreeze<unknown>(JSON.parse(text));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${file} is not valid JSON (${reason}). Fix or remove it; TapRoot does not overwrite it while it is unreadable.`, { cause: error });
   }
+}
+
+function parseAndCache(file: string, text: string, stat: fs.Stats): unknown {
+  const value = parseFrozenJson(file, text);
   parsedFiles.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, value });
   return value;
 }
 
-function jsonText(value: unknown): string {
+export function readJsonFile<Shape>(file: string, fallback: Shape): Shape {
+  const stat = fs.statSync(file, { throwIfNoEntry: false });
+  if (stat === undefined) {
+    return fallback;
+  }
+  const cached = parsedFiles.get(file);
+  if (cached?.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.value as Shape;
+  }
+  const text = readTextIfExists(file);
+  return text === undefined ? fallback : parseAndCache(file, text, stat) as Shape;
+}
+
+function prettyJsonWithNewline(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-function replaceFile(file: string, writeTemp: (temp: string) => void): void {
+function writeFileAtomically(file: string, writeTemp: (temp: string) => void): void {
   const temp = `${file}.${crypto.randomUUID()}.tmp`;
   try {
     writeTemp(temp);
     fs.renameSync(temp, file);
     parsedFiles.delete(file);
-  } catch (err) {
+  } catch (error) {
     fs.rmSync(temp, { force: true });
-    throw err;
+    throw error;
   }
 }
 
 export function writeJsonFile(file: string, value: unknown): void {
-  replaceFile(file, (temp) => fs.writeFileSync(temp, jsonText(value), { encoding: 'utf8', flag: 'wx' }));
+  writeFileAtomically(file, (temp) => {
+    fs.writeFileSync(temp, prettyJsonWithNewline(value), { encoding: 'utf8', flag: 'wx' });
+  });
 }
 
 export function writeOwnerOnlyJsonFile(file: string, value: unknown): void {
-  replaceFile(file, (temp) => {
+  writeFileAtomically(file, (temp) => {
     const fd = fs.openSync(temp, 'wx', OWNER_ONLY_FILE_MODE);
     try {
       fs.fchmodSync(fd, OWNER_ONLY_FILE_MODE);
-      fs.writeFileSync(fd, jsonText(value), 'utf8');
+      fs.writeFileSync(fd, prettyJsonWithNewline(value), 'utf8');
     } finally {
       fs.closeSync(fd);
     }

@@ -1,12 +1,13 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import * as grpc from '@grpc/grpc-js';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Client, credentials } from '@grpc/grpc-js';
+import type { ServerUnaryCall, sendUnaryData } from '@grpc/grpc-js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { QueryRequest } from '../src/types/core.js';
+import type { QueryRequest } from '../src/types/plugin.js';
+import { protoRootWith, startProfileServer } from './helpers/grpc-streaming-support.js';
 import { testDatasource } from './helpers/datasource.js';
-import { profileServiceDefinition, startGrpcServer } from './helpers/grpc-server.js';
+import { executeOf } from './helpers/mysql-row-cap-support.js';
 
 function profileProto(responseFields: string): string {
   return `syntax = "proto3";
@@ -28,33 +29,17 @@ service ProfileService {
 
 const NAME_ONLY = profileProto('  string name = 1;');
 const NAME_AND_CITY = profileProto('  string name = 1;\n  string city = 2;');
+const PROTO_ROOT_PREFIX = 'taproot-grpc-client-';
 
-function protoRootWith(proto: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-grpc-client-'));
-  fs.writeFileSync(path.join(dir, 'profile.proto'), proto, 'utf8');
-  return dir;
+async function startAdaServer(): Promise<number> {
+  return startProfileServer(protoRootWith(PROTO_ROOT_PREFIX, NAME_AND_CITY), {
+    GetProfile: (_call: ServerUnaryCall<unknown, unknown>, reply: sendUnaryData<unknown>) => {
+      reply(null, { name: 'Ada', city: 'Lyon' });
+    },
+  });
 }
 
-let port = 0;
-let server: grpc.Server;
-
-beforeAll(async () => {
-  ({ server, port } = await startGrpcServer(await profileServiceDefinition(protoRootWith(NAME_AND_CITY)), {
-    GetProfile: (_call: grpc.ServerUnaryCall<unknown, unknown>, callback: grpc.sendUnaryData<unknown>) => {
-      callback(null, { name: 'Ada', city: 'Lyon' });
-    },
-  }));
-});
-
-afterAll(() => {
-  server?.forceShutdown();
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-function getProfile(datasourceProtoRoot: string, protoRoot: string): QueryRequest {
+function getProfile(port: number, datasourceProtoRoot: string, protoRoot: string): QueryRequest {
   return {
     datasource: testDatasource('grpc', port, { protoRoot: datasourceProtoRoot }),
     query: 'taproot.test.ProfileService/GetProfile',
@@ -63,46 +48,53 @@ function getProfile(datasourceProtoRoot: string, protoRoot: string): QueryReques
     sessionTimeZone: '+00:00',
     pluginParams: { protoRoot, requestJson: JSON.stringify({ id: '1' }) },
     signal: undefined,
-  } as QueryRequest;
+  };
 }
 
 describe('grpcPlugin client cache', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('decodes with the definitions from --proto-root when it differs from the datasource root', async () => {
     // arrange
-    const datasourceRoot = protoRootWith(NAME_ONLY);
-    const overrideRoot = protoRootWith(NAME_AND_CITY);
-    await grpcPlugin.execute!(getProfile(datasourceRoot, datasourceRoot), {});
+    const port = await startAdaServer();
+    const datasourceRoot = protoRootWith(PROTO_ROOT_PREFIX, NAME_ONLY);
+    const overrideRoot = protoRootWith(PROTO_ROOT_PREFIX, NAME_AND_CITY);
+    await executeOf(grpcPlugin)(getProfile(port, datasourceRoot, datasourceRoot), {});
 
     // act
-    const result = await grpcPlugin.execute!(getProfile(datasourceRoot, overrideRoot), {});
+    const result = await executeOf(grpcPlugin)(getProfile(port, datasourceRoot, overrideRoot), {});
 
     // assert
-    expect(result.result.rows).toEqual([[{ name: 'Ada', city: 'Lyon' }]]);
+    expect(result.result.rows).toStrictEqual([[{ name: 'Ada', city: 'Lyon' }]]);
   });
 
   it('closes the old client and decodes with the edited .proto', async () => {
     // arrange
-    const root = protoRootWith(NAME_ONLY);
-    await grpcPlugin.execute!(getProfile(root, root), {});
+    const port = await startAdaServer();
+    const root = protoRootWith(PROTO_ROOT_PREFIX, NAME_ONLY);
+    await executeOf(grpcPlugin)(getProfile(port, root, root), {});
     fs.writeFileSync(path.join(root, 'profile.proto'), NAME_AND_CITY, 'utf8');
-    const close = vi.spyOn(grpc.Client.prototype, 'close');
+    const close = vi.spyOn(Client.prototype, 'close');
 
     // act
-    const result = await grpcPlugin.execute!(getProfile(root, root), {});
+    const result = await executeOf(grpcPlugin)(getProfile(port, root, root), {});
 
     // assert
-    expect(result.result.rows).toEqual([[{ name: 'Ada', city: 'Lyon' }]]);
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(result.result.rows).toStrictEqual([[{ name: 'Ada', city: 'Lyon' }]]);
+    expect(close.mock.calls.map(() => 'closed')).toStrictEqual(['closed']);
   });
 
   it('reuses one client across tokens', async () => {
     // arrange
-    const root = protoRootWith(NAME_ONLY);
-    await grpcPlugin.execute!(getProfile(root, root), { token: 'first' });
-    const newChannelCredentials = vi.spyOn(grpc.credentials, 'createInsecure');
+    const port = await startAdaServer();
+    const root = protoRootWith(PROTO_ROOT_PREFIX, NAME_ONLY);
+    await executeOf(grpcPlugin)(getProfile(port, root, root), { token: 'first' });
+    const newChannelCredentials = vi.spyOn(credentials, 'createInsecure');
 
     // act
-    await grpcPlugin.execute!(getProfile(root, root), { token: 'second' });
+    await executeOf(grpcPlugin)(getProfile(port, root, root), { token: 'second' });
 
     // assert
     expect(newChannelCredentials).not.toHaveBeenCalled();
@@ -110,14 +102,19 @@ describe('grpcPlugin client cache', () => {
 });
 
 describe('grpcPlugin unary call', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('clears its backup deadline timer once the call returns', async () => {
     // arrange
-    const root = protoRootWith(NAME_AND_CITY);
+    const port = await startAdaServer();
+    const root = protoRootWith(PROTO_ROOT_PREFIX, NAME_AND_CITY);
     const setTimer = vi.spyOn(globalThis, 'setTimeout');
     const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
 
     // act
-    await grpcPlugin.execute!(getProfile(root, root), {});
+    await executeOf(grpcPlugin)(getProfile(port, root, root), {});
 
     // assert
     const backupCall = setTimer.mock.calls.findIndex(([, delay]) => delay === 5500);

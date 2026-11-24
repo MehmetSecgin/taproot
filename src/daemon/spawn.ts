@@ -2,24 +2,48 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { defaultSocketPath, rpcCall } from './client.js';
-import { RpcMethod, type RpcResponse } from './types.js';
+import { rpcCall } from './client.js';
+import { defaultSocketPath } from './socket-path.js';
+import { RpcMethod } from './types.js';
+import type { RpcResponse } from './types.js';
+import { waitMs } from '../core/wait.js';
+
+const DAEMON_STARTUP_WAIT_MS = 5000;
+const DAEMON_STATUS_POLL_MS = 50;
 
 function resolveDaemonEntry(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
+  const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.join(here, 'daemon-main.js'),
-    path.join(here, '..', 'daemon-main.js'),
-    path.join(here, '..', '..', 'dist', 'daemon-main.js'),
+    path.join(currentDirectory, 'daemon-main.js'),
+    path.join(currentDirectory, '..', 'daemon-main.js'),
+    path.join(currentDirectory, '..', '..', 'dist', 'daemon-main.js'),
   ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return candidates[0];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 }
 
 function daemonLogPath(): string {
   return path.join(path.dirname(defaultSocketPath()), 'taprootd.log');
+}
+
+async function readDaemonStatusIfUp(): Promise<RpcResponse | undefined> {
+  try {
+    const reply = await rpcCall({ method: RpcMethod.DaemonStatus });
+    return reply.ok ? reply : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForDaemonStatus(): Promise<RpcResponse | undefined> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < DAEMON_STARTUP_WAIT_MS) {
+    const status = await readDaemonStatusIfUp();
+    if (status !== undefined) {
+      return status;
+    }
+    await waitMs(DAEMON_STATUS_POLL_MS);
+  }
+  return undefined;
 }
 
 export async function spawnDaemon(): Promise<RpcResponse | undefined> {
@@ -30,16 +54,5 @@ export async function spawnDaemon(): Promise<RpcResponse | undefined> {
     stdio: ['ignore', fs.openSync(logPath, 'a'), fs.openSync(logPath, 'a')],
   });
   child.unref();
-
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 5000) {
-    try {
-      const res = await rpcCall({ method: RpcMethod.DaemonStatus });
-      if (res.ok) return res;
-    } catch {
-      // wait for daemon
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return undefined;
+  return waitForDaemonStatus();
 }

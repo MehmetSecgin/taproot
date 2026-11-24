@@ -5,5 +5,5 @@ export { datasourceListMethod, schemaMethod } from '../daemon/methods/catalog.js
 export { statusMethod, stopMethod } from '../daemon/methods/status.js';
 export type { DaemonMethod } from '../daemon/methods/types.js';
 export type { MutualTlsFiles } from '../daemon/transport.js';
-export type { QueryExecutionRequest } from '../core/execute-query.js';
+export type { QueryExecutionRequest } from '../core/query-types.js';
 export { DATASOURCE_COLUMNS, type DatasourceColumn } from '../core/datasource-list.js';

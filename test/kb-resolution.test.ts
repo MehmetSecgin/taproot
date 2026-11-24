@@ -1,10 +1,12 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { outputData, outputDataList, outputDataRecord, outputError } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function setupKbState() {
+function setupKbState(): { env: Record<string, string> } {
   const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'deterministic-config.json'),
@@ -97,33 +99,36 @@ function setupKbState() {
   };
 }
 
+const serviceNamesSchema = z.array(z.string());
+const tableRowsSchema = z.array(z.object({ table: z.string() }));
+
 describe('kb resolution', () => {
-  it('kb resolve returns active connection', () => {
+  it('resolves the active connection of the service', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'kubectl-portforward' });
+    expect(outputDataRecord(out.stdout)).toMatchObject({ engine: 'mysql', database: 'orders', access_method: 'kubectl-portforward' });
   });
 
   it('kb resolve prefers latest verified_at', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.verified_at_utc).toBe('2026-03-10T00:00:00Z');
+    expect(outputDataRecord(out.stdout).verified_at_utc).toBe('2026-03-10T00:00:00Z');
   });
 
   it('kb resolve returns credential hints', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.db_user).toBe('orders_reader');
+    expect(outputDataRecord(out.stdout).db_user).toBe('orders_reader');
   });
 
-  it('kb resolve returns database', () => {
+  it('resolves the database name of the connection', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.database).toBe('orders');
+    expect(outputDataRecord(out.stdout).database).toBe('orders');
   });
 
   it('kb resolve --datasource takes env and service from the profile', () => {
@@ -134,7 +139,7 @@ describe('kb resolution', () => {
     const out = runCli(['kb', 'resolve', '--datasource', 'qa-orders'], env);
     // assert
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toMatchObject({ service: 'orders', database: 'orders', db_user: 'orders_reader' });
+    expect(outputDataRecord(out.stdout)).toMatchObject({ service: 'orders', database: 'orders', db_user: 'orders_reader' });
   });
 
   it('kb resolve without a datasource or env and service is bad input', () => {
@@ -147,12 +152,11 @@ describe('kb resolution', () => {
     expect(out.stderr + out.stdout).toContain('Specify --datasource <name>, or --env <env> and --service <service>.');
   });
 
-  it('kb tables lists table catalog', () => {
+  it('lists the tables of the service', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'tables', '--service', 'orders'], env);
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed[0].tables).toEqual(['orders', 'order_items']);
+    expect(outputDataList(out.stdout)[0].tables).toStrictEqual(['orders', 'order_items']);
   });
 
   it('kb resolve unknown env returns hint listing available envs', () => {
@@ -179,22 +183,22 @@ describe('kb resolution', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'tables', '--service', 'orders', '--match', 'item'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data[0].tables).toEqual(['order_items']);
+    expect(outputDataList(out.stdout)[0].tables).toStrictEqual(['order_items']);
   });
 
   it('kb tables --list returns flat table-name rows', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'tables', '--service', 'orders', '--list'], env);
     expect(out.status).toBe(0);
-    const parsed = JSON.parse(out.stdout).data as Array<{ table: string }>;
-    expect(parsed.map((r) => r.table).toSorted()).toEqual(['order_items', 'orders']);
+    const tableNames = outputData(out.stdout, tableRowsSchema).map((row) => row.table);
+    expect(tableNames.toSorted()).toStrictEqual(['order_items', 'orders']);
   });
 
-  it('kb relations list shows relationships', () => {
+  it('lists the relations of the service', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'relations', 'list'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data[0]).toMatchObject({
+    expect(outputDataList(out.stdout)[0]).toMatchObject({
       from: { service: 'orders', table: 'orders' },
       to: { service: 'payments', table: 'payments' },
     });
@@ -204,14 +208,14 @@ describe('kb resolution', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'list-services'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toEqual(['orders', 'payments']);
+    expect(outputData(out.stdout, serviceNamesSchema)).toStrictEqual(['orders', 'payments']);
   });
 
   it('service alias resolves in kb commands', () => {
     const { env } = setupKbState();
     const out = runCli(['kb', 'resolve', '--service', 'legacy', '--env', 'qa'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toMatchObject({ service: 'orders', database: 'orders' });
+    expect(outputDataRecord(out.stdout)).toMatchObject({ service: 'orders', database: 'orders' });
   });
 
   it('kb resolve honors namespace when provided', () => {
@@ -234,7 +238,7 @@ describe('kb resolution', () => {
     const env = { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir };
     const out = runCli(['kb', 'resolve', '--service', 'orders', '--env', 'qa', '--namespace', 'develop'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
+    expect(outputDataRecord(out.stdout)).toMatchObject({ namespace: 'develop', database: 'orders_dev' });
   });
 
   it('init datasource names an unknown KB access_method and the known ones', () => {
@@ -254,7 +258,7 @@ describe('kb resolution', () => {
     const out = runCli(['init', 'datasource', '--env', 'qa', '--service', 'orders'], env);
 
     // assert
-    expect(JSON.parse(out.stdout).error).toEqual({
+    expect(outputError(out.stdout)).toStrictEqual({
       code: 'BAD_INPUT',
       message: "BAD_INPUT: Unknown access method 'qa-portforward' in the KB entry for env=qa service=orders. Known: kubectl-portforward, native, tsh.",
     });

@@ -1,21 +1,189 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "node",
+    "vitest"
+  ],
+  "jsPlugins": [
+    "./lint/no-comments.mjs"
+  ],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
-    "perf": "error"
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error",
+    "restriction": "error"
   },
   "rules": {
+    "oxc/no-async-await": "off",
+    "oxc/no-optional-chaining": "off",
+    "oxc/no-rest-spread-properties": "off",
+    "import/no-nodejs-modules": "off",
+    "import/no-relative-parent-imports": "off",
+    "import/no-named-export": "off",
+    "import/prefer-default-export": "off",
+    "import/group-exports": "off",
+    "import/exports-last": "off",
+    "node/no-sync": "off",
+    "node/no-process-env": "off",
+    "node/no-top-level-await": "off",
+    "unicorn/no-null": "off",
+    "unicorn/no-process-exit": "off",
+    "no-undefined": "off",
+    "no-ternary": "off",
+    "sort-keys": "off",
     "no-await-in-loop": "off",
-    "no-underscore-dangle": "off",
-    "oxc/no-map-spread": "off"
+    "promise/avoid-new": "off",
+    "typescript/prefer-readonly-parameter-types": "off",
+    "unicorn/prefer-import-meta-properties": "off",
+    "vitest/prefer-to-be-truthy": "off",
+    "vitest/prefer-to-be-falsy": "off",
+    "vitest/prefer-called-times": "off",
+    "one-var": [
+      "error",
+      "never"
+    ],
+    "func-style": [
+      "error",
+      "declaration",
+      {
+        "allowArrowFunctions": true
+      }
+    ],
+    "sort-imports": [
+      "error",
+      {
+        "ignoreDeclarationSort": true
+      }
+    ],
+    "no-duplicate-imports": [
+      "error",
+      {
+        "allowSeparateTypeImports": true
+      }
+    ],
+    "no-void": [
+      "error",
+      {
+        "allowAsStatement": true
+      }
+    ],
+    "no-magic-numbers": [
+      "error",
+      {
+        "ignore": [
+          -1,
+          0,
+          1,
+          2
+        ],
+        "ignoreArrayIndexes": true,
+        "ignoreDefaultValues": true,
+        "ignoreEnums": true,
+        "ignoreNumericLiteralTypes": true,
+        "ignoreReadonlyClassProperties": true,
+        "ignoreTypeIndexes": true
+      }
+    ],
+    "id-length": [
+      "error",
+      {
+        "min": 2,
+        "exceptions": [
+          "_"
+        ],
+        "properties": "never"
+      }
+    ],
+    "typescript/consistent-type-definitions": [
+      "error",
+      "type"
+    ],
+    "no-redeclare": "off",
+    "vitest/require-hook": "off",
+    "require-await": "off",
+    "typescript/require-await": "off",
+    "house/no-comments": "error",
+    "capitalized-comments": [
+      "error",
+      "always",
+      {
+        "ignorePattern": "^(arrange|act|assert)$"
+      }
+    ]
   },
   "overrides": [
     {
-      "files": ["test/**"],
+      "files": [
+        "test/**"
+      ],
       "rules": {
-        "unicorn/consistent-function-scoping": "off"
+        "no-magic-numbers": "off",
+        "max-lines-per-function": "off",
+        "max-statements": "off",
+        "vitest/prefer-expect-assertions": "off",
+        "vitest/require-test-timeout": "off",
+        "vitest/no-hooks": "off",
+        "vitest/no-importing-vitest-globals": "off",
+        "vitest/max-expects": [
+          "error",
+          {
+            "max": 8
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/*.mjs"
+      ],
+      "rules": {
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/strict-boolean-expressions": "off"
+      }
+    },
+    {
+      "files": [
+        "vitest.config.ts",
+        "tsup.config.ts",
+        "lint/no-comments.mjs"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
+        "src/core/json.ts",
+        "src/daemon/methods/query-wire-request.ts",
+        "src/plugins-builtins/teleport-mysql/tsh-databases.ts"
+      ],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off"
+      }
+    },
+    {
+      "files": [
+        "src/daemon/methods/types.ts"
+      ],
+      "rules": {
+        "typescript/no-invalid-void-type": "off"
       }
     }
+  ],
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    ".claude"
   ]
 }

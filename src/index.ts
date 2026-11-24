@@ -13,16 +13,9 @@ import {
   queryCommand,
   schemaCommand,
 } from './api/cli.js';
+import { credsTopologyHint } from './commands/creds-topology-hint.js';
 import { removedCliHint } from './core/removed-cli.js';
 import { builtinPlugins } from './plugins-builtins/index.js';
-
-function credsTopologyHint(message: string, argv: string[]): string | undefined {
-  const lower = message.toLowerCase();
-  const misuse = /unknown option/.test(lower) && /(--host|--port|--database|--target)/.test(lower) && argv.includes('creds') && argv.includes('set');
-  return misuse
-    ? `${message}. Connection topology (--host, --port, --database, --target) belongs on the datasource profile ('taproot datasource add'), not on credentials.`
-    : undefined;
-}
 
 void buildCli({
   name: 'taproot',

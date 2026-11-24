@@ -1,4 +1,5 @@
-import type { QueryPhaseTimings, SchemaContext } from '../types/core.js';
+import type { QueryPhaseTimings, QueryResult } from '../types/plugin.js';
+import type { SchemaContext } from '../types/schema-context.js';
 
 export const RpcMethod = {
   DaemonStatus: 'daemon.status',
@@ -11,21 +12,21 @@ export type RpcMethod = (typeof RpcMethod)[keyof typeof RpcMethod];
 
 export const DAEMON_VERSION_MISMATCH = 'DAEMON_VERSION_MISMATCH';
 
-export interface RpcRequest {
+export type RpcRequest = {
   protocolVersion: number;
   clientVersion: string;
   requestId: string;
   method: string;
   params: Record<string, unknown>;
-}
+};
 
-export interface RpcError {
+type RpcError = {
   code: string;
   message: string;
-  details?: Record<string, unknown>;
-}
+  details?: unknown;
+};
 
-export interface RpcResponse {
+export type RpcResponse = {
   protocolVersion: number;
   requestId: string;
   ok: boolean;
@@ -34,33 +35,10 @@ export interface RpcResponse {
   meta: {
     sessionId?: string;
     schemaContext?: SchemaContext;
+    resolved?: QueryResult['resolved'];
     timings?: {
       durationMs: number;
     };
     phases?: QueryPhaseTimings;
   };
-}
-
-export type SessionState = 'recovering' | 'ready' | 'closed';
-
-export interface SessionRecord {
-  sessionId: string;
-  fingerprint: string;
-  datasourceName: string;
-  env?: string;
-  namespace?: string;
-  service?: string;
-  kind?: string;
-  state: SessionState;
-  createdAt: string;
-  lastUsedAt: string;
-  idleTtlMs: number;
-  hardTtlMs: number;
-  leaseCount: number;
-}
-
-export interface SessionCheckpoint {
-  schemaVersion: number;
-  updatedAt: string;
-  sessions: SessionRecord[];
-}
+};

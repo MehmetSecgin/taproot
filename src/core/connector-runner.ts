@@ -1,119 +1,139 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { RUNTIME_CONSTANTS } from './constants.js';
-import { DoctorStatus } from '../types/core.js';
-import type { DatasourceProfile, DoctorCheck, PluginRegistry } from '../types/core.js';
-import { str } from './strings.js';
+import { errorText } from './error-text.js';
+import { DoctorStatus } from '../types/plugin.js';
+import type { DatasourceProfile } from '../types/datasource.js';
+import type { DoctorCheck, DoctorCheckCode, PluginRegistry } from '../types/plugin.js';
+import type { CredentialStore } from '../store/credentials.js';
+import { textUnlessFalsy } from './text-presence.js';
 
-async function withConnectorTimeout(name: string, mode: string, timeoutMs: number, run: () => Promise<DoctorCheck[]>): Promise<DoctorCheck[]> {
-  let timer: NodeJS.Timeout | undefined;
+type ConnectorMode = 'doctor' | 'connect';
+
+type ConnectorRunInput = {
+  datasource: DatasourceProfile;
+  credentialStore: Pick<CredentialStore, 'get'>;
+  pluginRegistry: PluginRegistry;
+  mode: ConnectorMode;
+};
+
+type TimedConnectorCheck = {
+  connectorName: string;
+  mode: ConnectorMode;
+  timeoutMs: number;
+  runCheck: () => Promise<DoctorCheck[]>;
+};
+
+const MAX_FAILURE_DETAIL_LENGTH = 400;
+
+const inFlightConnects = new Map<string, Promise<DoctorCheck[]>>();
+const recentConnectSuccesses = new Map<string, { checks: DoctorCheck[]; reusableUntil: number }>();
+
+function failureText(reason: unknown): string {
+  const text = errorText(reason);
+  return text === '' ? String(reason) : text;
+}
+
+function connectorFailureCheck(connectorName: string, message: string, code: DoctorCheckCode): DoctorCheck {
+  return {
+    check: `connector:${connectorName}`,
+    status: DoctorStatus.Fail,
+    detail: message.slice(0, MAX_FAILURE_DETAIL_LENGTH),
+    code,
+  };
+}
+
+function connectorWarnCheck(connectorName: string, detail: string, code: DoctorCheckCode): DoctorCheck {
+  return { check: `connector:${connectorName}`, status: DoctorStatus.Warn, detail, code };
+}
+
+async function failAfterTimeout(check: TimedConnectorCheck, signal: AbortSignal): Promise<never> {
+  await delay(check.timeoutMs, null, { signal });
+  throw new Error(`connector_timeout: ${check.connectorName} ${check.mode} exceeded ${check.timeoutMs}ms`);
+}
+
+async function runWithConnectorTimeout(check: TimedConnectorCheck): Promise<DoctorCheck[]> {
+  const cancelTimeout = new AbortController();
   try {
-    return await Promise.race<DoctorCheck[]>([
-      run(),
-      new Promise<DoctorCheck[]>((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new Error(`connector_timeout: ${name} ${mode} exceeded ${timeoutMs}ms`));
-        }, timeoutMs);
-      }),
-    ]);
+    return await Promise.race<DoctorCheck[]>([check.runCheck(), failAfterTimeout(check, cancelTimeout.signal)]);
   } catch (error) {
-    const message = (error as Error).message || String(error);
-    return [
-      {
-        check: `connector:${name}`,
-        status: DoctorStatus.Fail,
-        detail: message.slice(0, 400),
-        code: message.startsWith('connector_timeout') ? 'connector_timeout' : 'connector_check_failed',
-      },
-    ];
+    const message = failureText(error);
+    const code = message.startsWith('connector_timeout') ? 'connector_timeout' : 'connector_check_failed';
+    return [connectorFailureCheck(check.connectorName, message, code)];
   } finally {
-    if (timer) clearTimeout(timer);
+    cancelTimeout.abort();
   }
 }
-
-interface ConnectorRunInput {
-  datasource: DatasourceProfile;
-  credentialStore: { get: (ref: string) => Promise<Record<string, string>> };
-  pluginRegistry: PluginRegistry;
-  mode: 'doctor' | 'connect';
-}
-
-const connectsInFlight = new Map<string, Promise<DoctorCheck[]>>();
-const connectSuccesses = new Map<string, { checks: DoctorCheck[]; reusableUntil: number }>();
 
 function connectKey(datasource: DatasourceProfile): string {
   return JSON.stringify([datasource.name, datasource.connectors, datasource.connection, datasource.resolverHints]);
 }
 
-export function runDatasourceConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
-  if (input.mode === 'doctor') return runConnectors(input);
-  const key = connectKey(input.datasource);
-  const success = connectSuccesses.get(key);
-  if (success && success.reusableUntil > Date.now()) return Promise.resolve(success.checks);
-  const inFlight = connectsInFlight.get(key);
-  if (inFlight) return inFlight;
-
-  const run = runConnectors(input)
-    .then((checks) => {
-      if (checks.every((c) => c.status === DoctorStatus.Ok)) {
-        connectSuccesses.set(key, { checks, reusableUntil: Date.now() + RUNTIME_CONSTANTS.connector.connectReuseMs });
-      }
-      return checks;
-    })
-    .finally(() => connectsInFlight.delete(key));
-  connectsInFlight.set(key, run);
-  return run;
+async function runConnector(input: ConnectorRunInput, connectorName: string): Promise<DoctorCheck[]> {
+  const plugin = input.pluginRegistry.get(connectorName);
+  if (!plugin) {
+    return [connectorWarnCheck(connectorName, 'connector plugin not found', 'connector_plugin_missing')];
+  }
+  const credentialRef = textUnlessFalsy(input.datasource.resolverHints?.[`${connectorName}CredentialRef`]).trim();
+  const credentials = credentialRef === '' ? {} : await input.credentialStore.get(credentialRef);
+  const runPluginCheck = input.mode === 'doctor' ? plugin.doctor?.bind(plugin) : plugin.connect?.bind(plugin);
+  if (!runPluginCheck) {
+    return [connectorWarnCheck(connectorName, `mode '${input.mode}' not supported by plugin`, 'connector_mode_unsupported')];
+  }
+  const timeoutMs = input.mode === 'connect'
+    ? RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs
+    : RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
+  return runWithConnectorTimeout({
+    connectorName,
+    mode: input.mode,
+    timeoutMs,
+    runCheck: async () => runPluginCheck({ datasource: input.datasource, credentials }),
+  });
 }
 
-async function runConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
-  const connectors = input.datasource.connectors || [];
-  const perCheckTimeoutMs =
-    input.mode === 'connect'
-      ? RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs
-      : RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
-
-  const settled = await Promise.allSettled(
-    connectors.map(async (name): Promise<DoctorCheck[]> => {
-      const plugin = input.pluginRegistry.get(name);
-      if (!plugin) {
-        return [{ check: `connector:${name}`, status: DoctorStatus.Warn, detail: 'connector plugin not found', code: 'connector_plugin_missing' }];
-      }
-      const refKey = `${name}CredentialRef`;
-      const ref = str(input.datasource.resolverHints?.[refKey]).trim();
-      const creds = ref ? await input.credentialStore.get(ref) : {};
-      if (input.mode === 'doctor' && plugin.doctor) {
-        return await withConnectorTimeout(name, 'doctor', perCheckTimeoutMs, () =>
-          plugin.doctor!({ datasource: input.datasource, credentials: creds }),
-        );
-      }
-      if (input.mode === 'connect' && plugin.connect) {
-        return await withConnectorTimeout(name, 'connect', perCheckTimeoutMs, () =>
-          plugin.connect!({ datasource: input.datasource, credentials: creds }),
-        );
-      }
-      return [
-        {
-          check: `connector:${name}`,
-          status: DoctorStatus.Warn,
-          detail: `mode '${input.mode}' not supported by plugin`,
-          code: 'connector_mode_unsupported',
-        },
-      ];
-    }),
-  );
-
-  const checks: DoctorCheck[] = [];
-  settled.forEach((result, idx) => {
-    if (result.status === 'fulfilled') {
-      checks.push(...result.value);
-    } else {
-      const name = connectors[idx];
-      const message = (result.reason as Error)?.message || String(result.reason);
-      checks.push({
-        check: `connector:${name}`,
-        status: DoctorStatus.Fail,
-        detail: message.slice(0, 400),
-        code: 'connector_check_failed',
-      });
+async function runConnectorsUncached(input: ConnectorRunInput): Promise<DoctorCheck[]> {
+  const connectorNames = input.datasource.connectors ?? [];
+  const checksPerConnector = await Promise.all(connectorNames.map(async (connectorName) => {
+    try {
+      return await runConnector(input, connectorName);
+    } catch (error) {
+      return [connectorFailureCheck(connectorName, failureText(error), 'connector_check_failed')];
     }
-  });
-  return checks;
+  }));
+  return checksPerConnector.flat();
+}
+
+async function connectAndRemember(input: ConnectorRunInput, key: string): Promise<DoctorCheck[]> {
+  try {
+    const checks = await runConnectorsUncached(input);
+    if (checks.every((check) => check.status === DoctorStatus.Ok)) {
+      recentConnectSuccesses.set(key, { checks, reusableUntil: Date.now() + RUNTIME_CONSTANTS.connector.connectReuseMs });
+    }
+    return checks;
+  } finally {
+    inFlightConnects.delete(key);
+  }
+}
+
+function freshConnectSuccess(key: string): DoctorCheck[] | undefined {
+  const recentSuccess = recentConnectSuccesses.get(key);
+  return recentSuccess && recentSuccess.reusableUntil > Date.now() ? recentSuccess.checks : undefined;
+}
+
+export async function runDatasourceConnectors(input: ConnectorRunInput): Promise<DoctorCheck[]> {
+  if (input.mode === 'doctor') {
+    return runConnectorsUncached(input);
+  }
+  const key = connectKey(input.datasource);
+  const reusable = freshConnectSuccess(key) ?? inFlightConnects.get(key);
+  if (reusable) {
+    return reusable;
+  }
+  const connecting = connectAndRemember(input, key);
+  inFlightConnects.set(key, connecting);
+  return connecting;
+}
+
+export function connectorFailureSummary(checks: DoctorCheck[]): string | undefined {
+  const failedChecks = checks.filter((check) => check.status === DoctorStatus.Fail);
+  return failedChecks.length === 0 ? undefined : failedChecks.map((check) => check.detail).join(' | ');
 }

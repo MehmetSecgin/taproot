@@ -7,8 +7,13 @@ import { rpcCall } from '../src/daemon/client.js';
 import { startLocalDaemon } from './helpers/daemon.js';
 import type { RpcResponse } from '../src/daemon/types.js';
 import { tempStateRoot } from './helpers/state-root.js';
+import { waitMs } from '../src/core/wait.js';
 
-function rawRpc(socketPath: string, clientVersion: string): Promise<RpcResponse> {
+function isRpcResponse(value: unknown): value is RpcResponse {
+  return typeof value === 'object' && value !== null;
+}
+
+async function rawRpc(socketPath: string, clientVersion: string): Promise<RpcResponse> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath);
     let buffer = '';
@@ -17,23 +22,39 @@ function rawRpc(socketPath: string, clientVersion: string): Promise<RpcResponse>
     socket.on('connect', () => {
       socket.write(`${JSON.stringify({ protocolVersion: 1, clientVersion, requestId: 'old-cli', method: 'daemon.status', params: {} })}\n`);
     });
-    socket.on('data', (chunk) => {
+    socket.on('data', (chunk: string) => {
       buffer += chunk;
-      const idx = buffer.indexOf('\n');
-      if (idx >= 0) {
-        socket.end();
-        resolve(JSON.parse(buffer.slice(0, idx)) as RpcResponse);
+      const newlineIndex = buffer.indexOf('\n');
+      if (newlineIndex === -1) {
+        return;
+      }
+      socket.end();
+      const reply: unknown = JSON.parse(buffer.slice(0, newlineIndex));
+      if (isRpcResponse(reply)) {
+        resolve(reply);
+      } else {
+        reject(new Error('daemon reply was not a JSON object'));
       }
     });
   });
 }
 
+async function isDaemonUp(socketPath: string): Promise<boolean> {
+  try {
+    const reply = await rpcCall({ socketPath, method: 'daemon.status' });
+    return reply.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForDaemon(socketPath: string): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 5000) {
-    const ok = await rpcCall({ socketPath, method: 'daemon.status' }).then((res) => res.ok, () => false);
-    if (ok) return;
-    await new Promise((r) => setTimeout(r, 50));
+    if (await isDaemonUp(socketPath)) {
+      return;
+    }
+    await waitMs(50);
   }
   throw new Error('daemon did not start');
 }
@@ -47,7 +68,11 @@ describe('daemon version handoff', () => {
       env: { ...process.env, TAPROOT_STATE_ROOT: stateRoot },
       stdio: 'ignore',
     });
-    const oldExited = new Promise((resolve) => old.once('exit', resolve));
+    const oldExited = new Promise<void>((resolve) => {
+      old.once('exit', () => {
+        resolve();
+      });
+    });
     await waitForDaemon(socketPath);
 
     // act

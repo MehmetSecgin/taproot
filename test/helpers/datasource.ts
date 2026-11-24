@@ -1,4 +1,4 @@
-import type { DatasourceProfile } from '../../src/types/core.js';
+import type { DatasourceProfile } from '../../src/types/datasource.js';
 
 export function testDatasource(kind: 'grpc' | 'redis', port: number, resolverHints: Record<string, string>): DatasourceProfile {
   return {

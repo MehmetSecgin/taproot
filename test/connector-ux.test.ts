@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { outputCheckNamed, outputChecks } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function setupStateRoot() {
+function setupStateRoot(): { stateRoot: string; env: Record<string, string> } {
   const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'datasources.json'),
@@ -60,8 +61,7 @@ describe('connector UX', () => {
       TAPROOT_MASTER_KEY: 'test-master-key',
     });
     expect(out.status).not.toBe(0);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks).toContainEqual(
+    expect(outputChecks(out.stdout)).toContainEqual(
       expect.objectContaining({ check: 'kubectl-portforward status', code: 'connector_status_command_missing' }),
     );
   });
@@ -71,7 +71,6 @@ describe('connector UX', () => {
     expect(runCli(['creds', 'set', '--ref', 'kpf:qa:demo', '--status-command', 'false', '--connect-command', 'true'], env).status).toBe(0);
     const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).not.toBe(0);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'kubectl-portforward status')?.code).toBe('connector_status_blocked');
+    expect(outputCheckNamed(out.stdout, 'kubectl-portforward status')?.code).toBe('connector_status_blocked');
   });
 });

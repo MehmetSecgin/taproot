@@ -1,23 +1,48 @@
-function commandIndex(argv: string[], command: string): number {
+const UNKNOWN_OPTION = /unknown option '(?<option>[^']+)'/u;
+const WHITESPACE_OR_EQUALS = /[\s=]/u;
+const WHITESPACE = /\s/u;
+const MAX_COMMANDS_SHOWN = 3;
+
+type CommandLine = {
+  argv: string[];
+  programName: string;
+};
+
+type OwnedFlag = CommandLine & {
+  flag: string;
+  commands: string[];
+};
+
+function indexOfCommandWords(argv: string[], command: string): number {
   const words = command.split(' ');
   return argv.findIndex((_, start) => words.every((word, offset) => argv[start + offset] === word));
 }
 
-export function unknownOptionHint(commanderMessage: string, owners: Record<string, string[]>, argv: string[], programName: string): string | undefined {
-  const raw = commanderMessage.match(/unknown option '([^']+)'/)?.[1];
-  if (!raw) return undefined;
-  const flag = raw.split(/[\s=]/)[0];
-  const commands = owners[flag];
-  if (!commands) return undefined;
-  if (/\s/.test(raw)) {
-    return `option '${flag}' and its value arrived as one argument; pass them as separate words. zsh does not split an unquoted variable, so write the flag and value out or use an array.`;
+function ownedFlagHint({ flag, commands, argv, programName }: OwnedFlag): string | undefined {
+  if (commands.includes('')) {
+    return undefined;
   }
-  if (commands.includes('')) return undefined;
-  const shown = commands.slice(0, 3).map((c) => `'${programName} ${c}'`).join(', ');
-  const flagAt = argv.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
-  const typedOwner = flagAt < 0 ? undefined : commands.find((command) => commandIndex(argv, command) > flagAt);
-  if (typedOwner) {
+  const shown = commands.slice(0, MAX_COMMANDS_SHOWN).map((command) => `'${programName} ${command}'`).join(', ');
+  const flagPosition = argv.findIndex((arg) => arg === flag || arg.startsWith(`${flag}=`));
+  const typedOwner = flagPosition === -1 ? undefined : commands.find((command) => indexOfCommandWords(argv, command) > flagPosition);
+  if (typedOwner !== undefined) {
     return `option '${flag}' belongs to ${shown}; put it after the subcommand: ${programName} ${typedOwner} ${flag} ...`;
   }
   return `'${flag}' is an option of ${shown}`;
+}
+
+export function unknownOptionHint(commanderMessage: string, commandsByFlag: Record<string, string[] | undefined>, commandLine: CommandLine): string | undefined {
+  const rawOption = UNKNOWN_OPTION.exec(commanderMessage)?.groups?.option;
+  if (rawOption === undefined) {
+    return undefined;
+  }
+  const [flag] = rawOption.split(WHITESPACE_OR_EQUALS);
+  const commands = commandsByFlag[flag];
+  if (commands === undefined) {
+    return undefined;
+  }
+  if (WHITESPACE.test(rawOption)) {
+    return `option '${flag}' and its value arrived as one argument; pass them as separate words. zsh does not split an unquoted variable, so write the flag and value out or use an array.`;
+  }
+  return ownedFlagHint({ ...commandLine, flag, commands });
 }

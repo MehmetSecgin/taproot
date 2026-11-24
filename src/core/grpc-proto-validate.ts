@@ -1,167 +1,176 @@
+import { suggestNames } from './name-match.js';
+import { isPlainRecord } from './json-shapes.js';
 import type { ProtobufRoot } from './proto-loader.js';
-import { isEnum, isType, stripLeadingDot, suggestNames, type PbEnum, type PbField, type PbType } from './grpc-introspect.js';
+import { isProtoEnum, isProtoMessage, stripLeadingDot, tryCall } from './proto-node-shapes.js';
+import type { PbEnum, PbField, PbType } from './proto-node-shapes.js';
+import { isValidScalar } from './proto-scalar-types.js';
+import { firstNonEmpty, isNonEmpty } from './text-presence.js';
 
-export interface ValidationError {
+type RequestValidationIssue = {
   field: string;
   expected: string;
   message: string;
-}
+};
+
+type ValuePosition = {
+  path: string;
+  depth: number;
+};
 
 const MAX_DEPTH = 8;
+const MAX_ECHOED_STRING_LENGTH = 24;
+const DEFAULT_MAP_KEY_TYPE = 'string';
 
-const INT_SCALARS = new Set([
-  'int32', 'int64', 'uint32', 'uint64',
-  'sint32', 'sint64', 'fixed32', 'fixed64',
-  'sfixed32', 'sfixed64',
-]);
-const FLOAT_SCALARS = new Set(['float', 'double']);
-
-function scalarOk(type: string, value: unknown): boolean {
-  if (type === 'bool') return typeof value === 'boolean';
-  if (type === 'string') return typeof value === 'string';
-  if (type === 'bytes') return typeof value === 'string' || value instanceof Uint8Array;
-  if (FLOAT_SCALARS.has(type)) return typeof value === 'number' && Number.isFinite(value);
-  if (INT_SCALARS.has(type)) {
-    if (typeof value === 'number') return Number.isFinite(value) && Math.trunc(value) === value;
-    if (typeof value === 'bigint') return true;
-    if (typeof value === 'string') return /^-?\d+$/.test(value);
-    return false;
-  }
-  return true;
+function describeJsType(value: unknown): string {
+  return Array.isArray(value) ? 'array' : typeof value;
 }
 
-function resolveType(t: PbType | undefined): void {
-  if (t && typeof t.resolve === 'function') {
-    try { t.resolve(); } catch { /* ignore */ }
+function describeActualValue(value: unknown): string {
+  return typeof value === 'string' ? `string ('${value.slice(0, MAX_ECHOED_STRING_LENGTH)}')` : describeJsType(value);
+}
+
+function didYouMeanHint(name: string, candidates: string[]): string {
+  const [suggestion] = suggestNames(name, candidates, 1);
+  return isNonEmpty(suggestion) ? ` Did you mean '${suggestion}'?` : '';
+}
+
+function childPath(path: string, name: string): string {
+  return path === '' ? name : `${path}.${name}`;
+}
+
+function checkEnumValue(rpcEnum: PbEnum, value: unknown, path: string): RequestValidationIssue | null {
+  const expected = `enum:${stripLeadingDot(rpcEnum.fullName)}`;
+  const allowedNames = Object.keys(rpcEnum.values);
+  if (typeof value === 'number') {
+    const isAllowed = Object.values(rpcEnum.values).includes(value);
+    return isAllowed ? null : { field: path, expected, message: `invalid enum value ${value} at ${path}; allowed: ${allowedNames.join(', ')}` };
+  }
+  if (typeof value === 'string') {
+    return Object.hasOwn(rpcEnum.values, value)
+      ? null
+      : { field: path, expected, message: `invalid enum value '${value}' at ${path}.${didYouMeanHint(value, allowedNames)} Allowed: ${allowedNames.join(', ')}` };
+  }
+  return { field: path, expected, message: `expected enum string or number at ${path}, got ${typeof value}` };
+}
+
+function checkMapShape(field: PbField, value: unknown, path: string): RequestValidationIssue | null {
+  if (isPlainRecord(value)) {
+    return null;
+  }
+  return {
+    field: path,
+    expected: `map<${firstNonEmpty(field.keyType) ?? DEFAULT_MAP_KEY_TYPE},${field.type}>`,
+    message: `expected map object at ${path}, got ${describeJsType(value)}`,
+  };
+}
+
+function checkRepeatedShape(field: PbField, value: unknown, path: string): RequestValidationIssue | null {
+  if (Array.isArray(value)) {
+    return null;
+  }
+  return { field: path, expected: `repeated ${field.type}`, message: `expected array at ${path}, got ${typeof value}` };
+}
+
+function firstIssue<Item>(items: Item[], check: (item: Item, index: number) => RequestValidationIssue | null): RequestValidationIssue | null {
+  for (const [index, item] of items.entries()) {
+    const issue = check(item, index);
+    if (issue !== null) {
+      return issue;
+    }
+  }
+  return null;
+}
+
+function findUnknownField(type: PbType, value: Record<string, unknown>, path: string): RequestValidationIssue | null {
+  const fieldNames = type.fieldsArray.map((field) => field.name);
+  const unknownName = Object.keys(value).find((name) => !fieldNames.includes(name));
+  if (unknownName === undefined) {
+    return null;
+  }
+  const typeName = stripLeadingDot(type.fullName);
+  return {
+    field: childPath(path, unknownName),
+    expected: `field on ${typeName}`,
+    message: `unknown field '${unknownName}' on ${typeName}.${didYouMeanHint(unknownName, fieldNames)}`,
+  };
+}
+
+class RequestValidator {
+  private readonly root: ProtobufRoot;
+
+  public constructor(root: ProtobufRoot) {
+    this.root = root;
+  }
+
+  public validate(typeName: string, payload: unknown): RequestValidationIssue | null {
+    return this.checkMessage(stripLeadingDot(typeName), payload, { path: '', depth: 0 });
+  }
+
+  private lookup(typeName: string): unknown {
+    try {
+      return this.root.lookup(typeName);
+    } catch {
+      return null;
+    }
+  }
+
+  private checkMessage(typeName: string, value: unknown, position: ValuePosition): RequestValidationIssue | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (!isPlainRecord(value)) {
+      const where = position.path === '' ? typeName : position.path;
+      return { field: where, expected: `message:${typeName}`, message: `expected object at ${where}, got ${describeJsType(value)}` };
+    }
+    const resolved = this.lookup(typeName);
+    return isProtoMessage(resolved) ? this.checkMessageFields(resolved, value, position) : null;
+  }
+
+  private checkMessageFields(type: PbType, value: Record<string, unknown>, position: ValuePosition): RequestValidationIssue | null {
+    tryCall(() => type.resolve?.());
+    const unknownFieldIssue = findUnknownField(type, value, position.path);
+    if (unknownFieldIssue !== null || position.depth >= MAX_DEPTH) {
+      return unknownFieldIssue;
+    }
+    const presentFields = type.fieldsArray.filter((field) => value[field.name] !== undefined && value[field.name] !== null);
+    return firstIssue(presentFields, (field) => this.checkField(field, value[field.name], { path: childPath(position.path, field.name), depth: position.depth }));
+  }
+
+  private checkField(field: PbField, value: unknown, position: ValuePosition): RequestValidationIssue | null {
+    if (field.map === true) {
+      return checkMapShape(field, value, position.path) ?? this.checkMapEntries(field, value, position);
+    }
+    if (field.repeated === true || field.rule === 'repeated') {
+      return checkRepeatedShape(field, value, position.path) ?? this.checkListItems(field, value, position);
+    }
+    return this.checkValue(field, value, position);
+  }
+
+  private checkMapEntries(field: PbField, value: unknown, position: ValuePosition): RequestValidationIssue | null {
+    const entries = isPlainRecord(value) ? Object.entries(value) : [];
+    return firstIssue(entries, ([key, entryValue]) => this.checkValue(field, entryValue, { ...position, path: `${position.path}.${key}` }));
+  }
+
+  private checkListItems(field: PbField, value: unknown, position: ValuePosition): RequestValidationIssue | null {
+    const items: unknown[] = Array.isArray(value) ? value : [];
+    return firstIssue(items, (item, index) => this.checkValue(field, item, { ...position, path: `${position.path}[${index}]` }));
+  }
+
+  private checkValue(field: PbField, value: unknown, position: ValuePosition): RequestValidationIssue | null {
+    const { resolvedType } = field;
+    if (isProtoEnum(resolvedType)) {
+      return checkEnumValue(resolvedType, value, position.path);
+    }
+    if (isProtoMessage(resolvedType)) {
+      return this.checkMessage(stripLeadingDot(resolvedType.fullName), value, { path: position.path, depth: position.depth + 1 });
+    }
+    if (isValidScalar(field.type, value)) {
+      return null;
+    }
+    return { field: position.path, expected: field.type, message: `expected ${field.type} at ${position.path}, got ${describeActualValue(value)}` };
   }
 }
 
-export function validateGrpcRequest(
-  root: ProtobufRoot,
-  typeName: string,
-  payload: unknown,
-): ValidationError | null {
-
-  function walkMessage(typeFq: string, value: unknown, path: string, depth: number): ValidationError | null {
-    if (value === null || value === undefined) return null;
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      return {
-        field: path || typeFq,
-        expected: `message:${typeFq}`,
-        message: `expected object at ${path || typeFq}, got ${Array.isArray(value) ? 'array' : typeof value}`,
-      };
-    }
-    let resolved: unknown = null;
-    try { resolved = root.lookup(typeFq); } catch { resolved = null; }
-    if (!isType(resolved)) return null;
-    resolveType(resolved);
-    const fields = resolved.fieldsArray;
-    const fieldNames = fields.map((f) => f.name);
-    const obj = value as Record<string, unknown>;
-    for (const k of Object.keys(obj)) {
-      if (fieldNames.includes(k)) continue;
-      const here = path ? `${path}.${k}` : k;
-      const suggestion = suggestNames(k, fieldNames, 1)[0];
-      const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
-      return {
-        field: here,
-        expected: `field on ${stripLeadingDot(resolved.fullName)}`,
-        message: `unknown field '${k}' on ${stripLeadingDot(resolved.fullName)}.${hint}`,
-      };
-    }
-    if (depth >= MAX_DEPTH) return null;
-    for (const f of fields) {
-      const fieldValue = obj[f.name];
-      if (fieldValue === undefined || fieldValue === null) continue;
-      const here = path ? `${path}.${f.name}` : f.name;
-      const err = checkField(f, fieldValue, here, depth);
-      if (err) return err;
-    }
-    return null;
-  }
-
-  function checkField(field: PbField, value: unknown, here: string, depth: number): ValidationError | null {
-    if (field.map) {
-      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        return {
-          field: here,
-          expected: `map<${field.keyType || 'string'},${field.type}>`,
-          message: `expected map object at ${here}, got ${Array.isArray(value) ? 'array' : typeof value}`,
-        };
-      }
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        const err = checkValue(field, v, `${here}.${k}`, depth);
-        if (err) return err;
-      }
-      return null;
-    }
-    if (field.repeated || field.rule === 'repeated') {
-      if (!Array.isArray(value)) {
-        return {
-          field: here,
-          expected: `repeated ${field.type}`,
-          message: `expected array at ${here}, got ${typeof value}`,
-        };
-      }
-      for (let i = 0; i < value.length; i++) {
-        const err = checkValue(field, value[i], `${here}[${i}]`, depth);
-        if (err) return err;
-      }
-      return null;
-    }
-    return checkValue(field, value, here, depth);
-  }
-
-  function checkValue(field: PbField, value: unknown, here: string, depth: number): ValidationError | null {
-    const rt = field.resolvedType;
-    if (isEnum(rt)) {
-      const en = rt as PbEnum;
-      const fq = stripLeadingDot(en.fullName);
-      const allowedNames = Object.keys(en.values);
-      if (typeof value === 'number') {
-        const allowedNumbers = Object.values(en.values);
-        if (!allowedNumbers.includes(value)) {
-          return {
-            field: here,
-            expected: `enum:${fq}`,
-            message: `invalid enum value ${value} at ${here}; allowed: ${allowedNames.join(', ')}`,
-          };
-        }
-        return null;
-      }
-      if (typeof value === 'string') {
-        if (Object.prototype.hasOwnProperty.call(en.values, value)) return null;
-        const suggestion = suggestNames(value, allowedNames, 1)[0];
-        const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
-        return {
-          field: here,
-          expected: `enum:${fq}`,
-          message: `invalid enum value '${value}' at ${here}.${hint} Allowed: ${allowedNames.join(', ')}`,
-        };
-      }
-      return {
-        field: here,
-        expected: `enum:${fq}`,
-        message: `expected enum string or number at ${here}, got ${typeof value}`,
-      };
-    }
-    if (isType(rt)) {
-      return walkMessage(stripLeadingDot((rt as PbType).fullName), value, here, depth + 1);
-    }
-    if (!scalarOk(field.type, value)) {
-      const got = typeof value === 'string'
-        ? `string ('${String(value).slice(0, 24)}')`
-        : Array.isArray(value)
-          ? 'array'
-          : typeof value;
-      return {
-        field: here,
-        expected: field.type,
-        message: `expected ${field.type} at ${here}, got ${got}`,
-      };
-    }
-    return null;
-  }
-
-  return walkMessage(stripLeadingDot(typeName), payload, '', 0);
+export function validateGrpcRequest(root: ProtobufRoot, typeName: string, payload: unknown): RequestValidationIssue | null {
+  return new RequestValidator(root).validate(typeName, payload);
 }

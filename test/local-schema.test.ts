@@ -1,16 +1,19 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { rpcCall } from '../src/daemon/client.js';
 import { DatasourceStore } from '../src/store/datasources.js';
 import { runCli } from './helpers/cli.js';
 import { startLocalDaemon } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
-import { restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
+import { restoreProcessEnv, setupQueryState } from './helpers/query-state.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-afterEach(restoreQueryEnv);
+const ErrorEnvelopeSchema = z.object({ error: z.object({ code: z.string() }) });
 
 describe('schema on the local daemon', () => {
+  afterEach(restoreProcessEnv);
+
   it('answers schema.read from the catalog of a configured datasource', async () => {
     // arrange
     const stateRoot = await setupQueryState({ kind: 'mysql' });
@@ -23,7 +26,7 @@ describe('schema on the local daemon', () => {
       const res = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['orders'] } });
 
       // assert
-      expect(res.data).toEqual({ tables: { orders: { columns: ['id'] } } });
+      expect(res.data).toStrictEqual({ tables: { orders: { columns: ['id'] } } });
     } finally {
       await daemon.stop();
     }
@@ -53,7 +56,7 @@ describe('taproot schema', () => {
       const daemon = runCli(['daemon', 'status'], env);
 
       // assert
-      expect(JSON.parse(res.stdout)).toEqual({ ok: false, error: { code: 'BAD_INPUT', message: "BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema." } });
+      expect(JSON.parse(res.stdout)).toStrictEqual({ ok: false, error: { code: 'BAD_INPUT', message: "BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema." } });
       expect(res.status).toBe(2);
       expect(daemon.status).toBe(0);
     } finally {
@@ -70,6 +73,6 @@ describe('taproot schema', () => {
 
     // assert
     expect(res.stdout.trim().split('\n')).toHaveLength(1);
-    expect(JSON.parse(res.stdout).error.code).toBe('UNKNOWN_DATASOURCE');
+    expect(ErrorEnvelopeSchema.parse(JSON.parse(res.stdout)).error.code).toBe('UNKNOWN_DATASOURCE');
   });
 });

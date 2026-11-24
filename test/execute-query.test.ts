@@ -1,42 +1,30 @@
-import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { deriveQueryTarget, executeQuery, silentQueryReport } from '../src/core/execute-query.js';
+import { describe, expect, it } from 'vitest';
+import { executeQuery, silentQueryReport } from '../src/core/execute-query.js';
+import type { QueryReport } from '../src/core/query-types.js';
 import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
-import { queryDatasourceResolver } from '../src/core/resolve-query-datasource.js';
-import type { QueryReport } from '../src/core/execute-query.js';
-import { DatasourceStore } from '../src/store/datasources.js';
-import type { DatasourceProfile, QueryResult, TapRootPlugin } from '../src/types/core.js';
-import { fakePlugin } from './helpers/fake-plugin.js';
-import { contextWith, queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
+import { storeResolver, useDefaultQueryState } from './helpers/execute-query-state.js';
+import { catalogGatedPlugin } from './helpers/execute-query-plugins.js';
+import { fakePlugin, interceptExecute } from './helpers/fake-plugin.js';
+import { contextWith, findDatasource, queryRequest, setupQueryState } from './helpers/query-state.js';
+import { createDeferred } from './helpers/deferred.js';
+import { expectSuccess } from './helpers/query-outcome.js';
 
-let stateRoot = '';
-const storeResolver = queryDatasourceResolver(undefined);
 
 function recordingReport(): { report: QueryReport; logs: string[] } {
   const logs: string[] = [];
-  return { logs, report: { log: (m) => logs.push(m) } };
-}
-
-function capturingPlugin(capture: { query?: string; creds?: Record<string, string> }): TapRootPlugin {
-  const plugin = fakePlugin();
-  const inner = plugin.execute!;
-  plugin.execute = async (request, creds): Promise<QueryResult> => {
-    capture.query = request.query;
-    capture.creds = creds;
-    return inner(request, creds);
+  return {
+    logs,
+    report: {
+      log: (message) => {
+        logs.push(message);
+      },
+    },
   };
-  return plugin;
 }
-
-beforeEach(async () => {
-  stateRoot = await setupQueryState();
-});
-
-afterEach(() => {
-  restoreQueryEnv();
-});
 
 describe('executeQuery success', () => {
+  useDefaultQueryState();
+
   it('cuts the rows of a plugin that returns more than maxRows and says so', async () => {
     // arrange
     const ctx = contextWith(fakePlugin({ rows: [[1], [2], [3]] }));
@@ -45,8 +33,8 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest({ maxRows: 2 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
 
     // assert
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data).toMatchObject({ rows: [[1], [2]], truncated: true });
+    const success = expectSuccess(outcome);
+    expect(success.data).toMatchObject({ rows: [[1], [2]], truncated: true });
   });
 
   it('leaves out truncated when the rows fit under maxRows', async () => {
@@ -57,9 +45,9 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest({ maxRows: 2 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
 
     // assert
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.rows).toEqual([[1], [2]]);
-    expect(outcome.data).not.toHaveProperty('truncated');
+    const success = expectSuccess(outcome);
+    expect(success.data.rows).toStrictEqual([[1], [2]]);
+    expect(success.data).not.toHaveProperty('truncated');
   });
 
   it('refuses a maxRows that is not a whole number of 1 or more', async () => {
@@ -82,9 +70,8 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest(), { ctx, report: recorder.report, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
 
     // assert
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.data).toMatchObject({
+    const success = expectSuccess(outcome);
+    expect(success.data).toMatchObject({
       columns: ['ok'],
       rows: [[1]],
       rowsForm: 'array',
@@ -92,16 +79,16 @@ describe('executeQuery success', () => {
       plugin: 'fake',
       classification: 'success',
     });
-    expect(outcome.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
-    expect(Object.keys(outcome.meta.phases || {})).toEqual(['resolveMs', 'connectMs', 'executeMs', 'totalMs']);
+    expect(success.meta.resolved).toMatchObject({ env: 'qa', service: 'fake', engine: 'fake' });
+    expect(Object.keys({ ...success.meta.phases })).toStrictEqual(['resolveMs', 'connectMs', 'executeMs', 'totalMs']);
   });
 
   it('omits rowsForm and returns objects when rowsObject is set', async () => {
     const ctx = contextWith(fakePlugin());
     const outcome = await executeQuery(queryRequest({ rowsObject: true }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.rows).toEqual([{ ok: 1 }]);
-    expect(outcome.data.rowsForm).toBeUndefined();
+    const success = expectSuccess(outcome);
+    expect(success.data.rows).toStrictEqual([{ ok: 1 }]);
+    expect(success.data.rowsForm).toBeUndefined();
   });
 
   it('keeps both values when two columns share a name', async () => {
@@ -112,9 +99,9 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
 
     // assert
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.columns).toEqual(['id', 'id']);
-    expect(outcome.data.rows).toEqual([[7, 9]]);
+    const success = expectSuccess(outcome);
+    expect(success.data.columns).toStrictEqual(['id', 'id']);
+    expect(success.data.rows).toStrictEqual([[7, 9]]);
   });
 
   it('keys each value by its column name when rowsObject is set', async () => {
@@ -125,15 +112,17 @@ describe('executeQuery success', () => {
     const outcome = await executeQuery(queryRequest({ rowsObject: true, jsonExtract: ['payload:order.id'] }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
 
     // assert
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.rows).toEqual([{ id: 7, name: 'Ada', payload: '{"order":{"id":3}}', 'payload.order.id': 3 }]);
+    const success = expectSuccess(outcome);
+    expect(success.data.rows).toStrictEqual([{ id: 7, name: 'Ada', payload: '{"order":{"id":3}}', 'payload.order.id': 3 }]);
   });
 
   it('wraps the query with EXPLAIN when explain is set', async () => {
-    const capture: { query?: string } = {};
-    const ctx = contextWith(capturingPlugin(capture));
+    const queries: string[] = [];
+    const ctx = contextWith(interceptExecute(fakePlugin(), (request) => {
+      queries.push(request.query);
+    }));
     await executeQuery(queryRequest({ explain: true }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(capture.query).toBe('EXPLAIN SELECT 1 AS ok');
+    expect(queries).toStrictEqual(['EXPLAIN SELECT 1 AS ok']);
   });
 
   it('applies json extract specs to the returned columns', async () => {
@@ -142,42 +131,30 @@ describe('executeQuery success', () => {
       ctx,
       report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
     });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.columns).toContain('payload.order.id');
-    expect(outcome.data.rows[0]).toEqual(['{"order":{"id":7}}', 7]);
+    const success = expectSuccess(outcome);
+    expect(success.data.columns).toContain('payload.order.id');
+    expect(success.data.rows[0]).toStrictEqual(['{"order":{"id":7}}', 7]);
   });
 
   it('reports plugin warnings once', async () => {
     const ctx = contextWith(fakePlugin({ warnings: ['slow scan'] }));
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.warnings).toEqual(['slow scan']);
+    const success = expectSuccess(outcome);
+    expect(success.data.warnings).toStrictEqual(['slow scan']);
   });
 
   it('returns without waiting for a cold catalog fetch, which then lands in the cache', async () => {
     // arrange
-    stateRoot = await setupQueryState({ kind: 'mysql' });
-    let releaseCatalog: () => void = () => {};
-    const catalogGate = new Promise<void>((resolve) => {
-      releaseCatalog = resolve;
-    });
+    await setupQueryState({ kind: 'mysql' });
+    const catalogGate = createDeferred();
     const catalogQueries: string[] = [];
-    const plugin = fakePlugin({ kind: 'mysql' });
-    const inner = plugin.execute!;
-    plugin.execute = async (request, creds): Promise<QueryResult> => {
-      if (request.query.includes('information_schema')) {
-        catalogQueries.push(request.query);
-        await catalogGate;
-      }
-      return inner(request, creds);
-    };
-    const ctx = contextWith(plugin);
+    const ctx = contextWith(catalogGatedPlugin(catalogGate.promise, catalogQueries));
 
     // act
     const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
     const cachedBeforeRelease = ctx.schemaCatalogStore.get('qa-fake');
-    releaseCatalog();
-    const landed = await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: false });
+    catalogGate.resolve();
+    const landed = await ensureDatasourceCatalog(ctx, findDatasource(ctx, 'qa-fake'), { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: false });
 
     // assert
     expect(outcome.ok).toBe(true);
@@ -185,273 +162,5 @@ describe('executeQuery success', () => {
     expect(landed.outcome).toBe('fetched');
     expect(ctx.schemaCatalogStore.get('qa-fake')).toBeDefined();
     expect(catalogQueries.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
-  });
-});
-
-describe('executeQuery session identity', () => {
-  it('passes the id from openSession to the plugin credentials', async () => {
-    const capture: { creds?: Record<string, string> } = {};
-    const ctx = contextWith(capturingPlugin(capture));
-    const outcome = await executeQuery(queryRequest(), {
-      ctx,
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-      openSession: () => 'session-123',
-    });
-    expect(capture.creds?.__sessionId).toBe('session-123');
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.meta.sessionId).toBe('session-123');
-  });
-
-  it('calls openSession with the resolved datasource', async () => {
-    const ctx = contextWith(fakePlugin());
-    const openSession = vi.fn((_datasource: DatasourceProfile) => 'session-abc');
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver, openSession });
-    expect(openSession).toHaveBeenCalledTimes(1);
-    expect(openSession.mock.calls[0][0]).toMatchObject({ name: 'qa-fake', kind: 'fake' });
-  });
-
-  it('omits the session marker when no session is opened', async () => {
-    const capture: { creds?: Record<string, string> } = {};
-    const ctx = contextWith(capturingPlugin(capture));
-    await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(capture.creds?.__sessionId).toBeUndefined();
-  });
-});
-
-describe('executeQuery failure', () => {
-  it('rejects a malformed param', async () => {
-    const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ params: ['brokenpair'] }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.code).toBe('BAD_INPUT');
-    expect(outcome.message).toContain("Invalid --param 'brokenpair'");
-  });
-
-  it('rejects an empty query', async () => {
-    const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ query: '   ' }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain('No query resolved');
-  });
-
-  it('blocks a mutating query without allowMutate', async () => {
-    const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ query: 'DELETE FROM orders' }), {
-      ctx,
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain('--allow-mutate');
-  });
-
-  it('blocks a statement outside the SQL read allowlist', async () => {
-    stateRoot = await setupQueryState({ kind: 'mysql' });
-    const ctx = contextWith(fakePlugin({ kind: 'mysql' }));
-    const outcome = await executeQuery(queryRequest({ query: 'CALL refresh_totals()' }), {
-      ctx,
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain('--allow-mutate');
-  });
-
-  it('classifies a plugin failure and keeps the schema context', async () => {
-    const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.code).toBe('ACCESS_DENIED');
-    expect(outcome.meta.schemaContext).toBeDefined();
-  });
-
-  it('adds did-you-mean column suggestions from the cached catalog', async () => {
-    // arrange
-    const ctx = contextWith(fakePlugin({ failWith: "Unknown column 'customer_ident' in 'field list'" }));
-    ctx.schemaCatalogStore.save('qa-fake', {
-      orders: { database: 'fake', columns: ['id', 'customer_id', 'created_at'], primaryKey: ['id'], indexes: [] },
-    });
-
-    // act
-    const outcome = await executeQuery(queryRequest({ query: 'SELECT customer_ident FROM orders' }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-
-    // assert
-    if (outcome.ok) throw new Error('expected failure');
-    expect(outcome.code).toBe('UNKNOWN_COLUMN');
-    expect(outcome.message).toContain('Did you mean: orders.customer_id');
-    expect(outcome.details).toMatchObject({ didYouMean: expect.arrayContaining(['orders.customer_id']) });
-  });
-
-  it('refetches the catalog at most once while an agent retries unknown columns', async () => {
-    // arrange
-    stateRoot = await setupQueryState({ kind: 'mysql' });
-    const catalogQueries: string[] = [];
-    const plugin = fakePlugin({ kind: 'mysql' });
-    const inner = plugin.execute!;
-    plugin.execute = async (request, creds): Promise<QueryResult> => {
-      if (!request.query.includes('information_schema')) throw new Error("Unknown column 'customer_ident' in 'field list'");
-      catalogQueries.push(request.query);
-      return inner(request, creds);
-    };
-    const ctx = contextWith(plugin);
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(Date.now() - 2 * 60 * 1000);
-    ctx.schemaCatalogStore.save('qa-fake', {});
-    vi.useRealTimers();
-    const joinRefetch = { sessionId: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver, afterSchemaError: true };
-
-    // act
-    for (const attempt of ['customer_ident', 'customer_idnt', 'customerid']) {
-      await executeQuery(queryRequest({ query: `SELECT ${attempt} FROM orders` }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-      await ensureDatasourceCatalog(ctx, ctx.datasourceStore.get('qa-fake')!, joinRefetch);
-    }
-
-    // assert
-    expect(catalogQueries.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
-  });
-
-  it('fails when no plugin serves the datasource kind', async () => {
-    const ctx = contextWith(fakePlugin({ kind: 'other' }));
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain('No execute-capable plugin');
-  });
-
-  it('fails when the datasource cannot be resolved', async () => {
-    const ctx = contextWith(fakePlugin());
-    const outcome = await executeQuery(queryRequest({ datasource: 'missing', env: '', service: '' }), {
-      ctx,
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.message).toContain('Datasource resolution failed');
-  });
-});
-
-describe('executeQuery datasource kind routing', () => {
-  function saveProfile(overrides: Partial<DatasourceProfile>): void {
-    new DatasourceStore(path.join(stateRoot, 'config', 'datasources.json')).save({
-      name: 'qa-svc-sql',
-      kind: 'mysql',
-      env: 'qa',
-      service: 'svc',
-      tags: [],
-      connection: { host: '127.0.0.1', port: 1, database: 'svc' },
-      credentialRef: 'qa:fake',
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      updatedAt: new Date().toISOString(),
-      ...overrides,
-    } as DatasourceProfile);
-  }
-
-  function bothKinds() {
-    const ctx = contextWith(fakePlugin({ kind: 'grpc' }));
-    ctx.pluginRegistry.set('mysql', fakePlugin({ kind: 'mysql' }));
-    return ctx;
-  }
-
-  it('sends SQL text to the sql datasource when env and service also match a grpc one', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
-    const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
-      ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.datasource).toBe('qa-svc-sql');
-  });
-
-  it('sends Service/method text to the grpc datasource when env and service also match a sql one', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
-    const outcome = await executeQuery(
-      queryRequest({ datasource: undefined, service: 'svc', query: 'taproot.test.ProfileService/getProfile' }),
-      { ctx: bothKinds(), report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver },
-    );
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.datasource).toBe('qa-svc-grpc');
-  });
-
-  it('keeps the only matching datasource even when its kind does not fit the query', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
-    const outcome = await executeQuery(queryRequest({ datasource: undefined, service: 'svc', query: 'SELECT 1 AS ok' }), {
-      ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.datasource).toBe('qa-svc-grpc');
-  });
-
-  it('honours an explicit --datasource regardless of the query text', async () => {
-    stateRoot = await setupQueryState({ name: 'qa-svc-grpc', kind: 'grpc', service: 'svc' });
-    saveProfile({ name: 'qa-svc-sql', kind: 'mysql' });
-    const outcome = await executeQuery(queryRequest({ datasource: 'qa-svc-grpc', service: 'svc', query: 'SELECT 1 AS ok' }), {
-      ctx: bothKinds(),
-      report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver,
-    });
-    if (!outcome.ok) throw new Error('expected success');
-    expect(outcome.data.datasource).toBe('qa-svc-grpc');
-  });
-});
-
-describe('executeQuery timeout', () => {
-  it('starts the query timeout after the connectors are ready', async () => {
-    // arrange
-    stateRoot = await setupQueryState({ connectors: ['slow-connector'] });
-    const ctx = contextWith(fakePlugin({ holdMs: 100 }));
-    ctx.pluginRegistry.set('slow-connector', {
-      ...fakePlugin({ kind: 'slow-connector' }),
-      connect: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        return [];
-      },
-    });
-
-    // act
-    const outcome = await executeQuery(queryRequest({ timeoutMs: 200 }), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-
-    // assert
-    expect(outcome.ok).toBe(true);
-  });
-});
-
-describe('executeQuery access denied', () => {
-  it('fails with ACCESS_DENIED without retrying', async () => {
-    const ctx = contextWith(fakePlugin({ failWith: 'access denied for user' }));
-    await ctx.credentialStore.set('qa:fake', { user: 'x' });
-    const outcome = await executeQuery(queryRequest(), { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: storeResolver });
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.code).toBe('ACCESS_DENIED');
-  });
-});
-
-describe('deriveQueryTarget', () => {
-  it('takes env, namespace and service from an explicit profile', async () => {
-    const ctx = contextWith(fakePlugin());
-    expect(deriveQueryTarget(ctx, { datasource: 'qa-fake' })).toMatchObject({ env: 'qa', service: 'fake' });
-  });
-
-  it('parses env and service out of an alias when no profile matches', async () => {
-    const ctx = contextWith(fakePlugin());
-    expect(deriveQueryTarget(ctx, { datasource: 'stg-orders' })).toMatchObject({ env: 'stg', service: 'orders' });
-  });
-
-  it('prefers explicit env and service over the alias', async () => {
-    const ctx = contextWith(fakePlugin());
-    expect(deriveQueryTarget(ctx, { datasource: 'stg-orders', env: 'qa', service: 'billing' })).toMatchObject({
-      env: 'qa',
-      service: 'billing',
-    });
-  });
-
-  it('returns empty strings when nothing identifies the target', async () => {
-    const ctx = contextWith(fakePlugin());
-    expect(deriveQueryTarget(ctx, {})).toMatchObject({ env: '', service: '' });
   });
 });

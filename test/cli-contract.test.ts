@@ -3,41 +3,46 @@ import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { outputData, outputDataRecord, outputError } from './helpers/cli-contract-envelopes.js';
+import { parseJson } from './helpers/parse-json.js';
 import { runCli } from './helpers/cli.js';
+import { writeRuntimeConfig } from './helpers/state-root.js';
 
-function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
-  const configDir = path.join(stateRoot, 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
-}
+const helpCommandSchema = z.object({ name: z.string() });
+const helpDataSchema = z.object({ commands: z.array(helpCommandSchema) });
+const packageSchema = z.object({ version: z.string() });
 
 describe('cli contract', () => {
   it('prints root help with the nine commands', () => {
     const out = runCli(['--help']);
     expect(out.status).toBe(0);
-    const names = JSON.parse(out.stdout).data.commands.map((c: { name: string }) => c.name.split(' ')[0]);
-    expect(names.filter((n: string) => n !== 'help').toSorted()).toEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query', 'schema']);
+    const { commands } = outputData(out.stdout, helpDataSchema);
+    const names = commands.map((command) => command.name.split(' ')[0]);
+    const nonHelpNames = names.filter((name) => name !== 'help').toSorted();
+    expect(nonHelpNames).toStrictEqual(['creds', 'daemon', 'datasource', 'doctor', 'grpc', 'init', 'kb', 'query', 'schema']);
   });
 
   it('prints the version as JSON', async () => {
-    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    const packageText = await readFile(new URL('../package.json', import.meta.url), 'utf8');
+    const pkg = packageSchema.parse(parseJson(packageText));
     const out = runCli(['--version']);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout)).toEqual({ version: pkg.version });
+    expect(parseJson(out.stdout)).toStrictEqual({ version: pkg.version });
   });
 
   it('rejects the removed learning commands', () => {
     const out = runCli(['learn', 'status']);
     expect(out.status).not.toBe(0);
-    expect(JSON.parse(out.stdout).error.code).toBe('CLI_ERROR');
+    expect(outputError(out.stdout).code).toBe('CLI_ERROR');
   });
 
   it('returns bad-input exit code for unknown option', () => {
     const out = runCli(['creds', 'set', '--ref', 'x', '--host', 'localhost']);
     expect(out.status).toBe(2);
-    const parsed = JSON.parse(out.stdout);
-    expect(parsed.error.message.toLowerCase()).toContain('unknown option');
-    expect(parsed.error.message).toContain('taproot datasource add');
+    const { message } = outputError(out.stdout);
+    expect(message.toLowerCase()).toContain('unknown option');
+    expect(message).toContain('taproot datasource add');
   });
 
   it('enforces prod no-guess mode unless discovery is explicit', () => {
@@ -102,6 +107,6 @@ describe('cli contract', () => {
       TAPROOT_KB_DIR: kbDir,
     });
     expect(kbOut.status).toBe(0);
-    expect(JSON.parse(kbOut.stdout).data.service).toBe('sample-service');
+    expect(outputDataRecord(kbOut.stdout).service).toBe('sample-service');
   });
 });

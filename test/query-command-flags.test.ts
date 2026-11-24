@@ -1,9 +1,18 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 import type { Executor } from '../src/cli/types.js';
-import { QUERY_FLAGS, queryCommand, queryCommandWith, type QueryFlag } from '../src/commands/query.js';
+import { QUERY_FLAGS, queryCommand, queryCommandWith } from '../src/commands/query.js';
 
-const unusedExecutor = {} as Executor;
+function failBecauseUnused(): never {
+  throw new Error('the executor is not used when a command is only defined');
+}
+
+const unusedExecutor: Executor = {
+  addOptions: failBecauseUnused,
+  query: failBecauseUnused,
+  listDatasources: failBecauseUnused,
+  readSchema: failBecauseUnused,
+};
 
 function offeredFlags(define: (program: Command, executor: Executor) => void): string[] {
   const program = new Command('demo');
@@ -17,7 +26,7 @@ describe('query command flags', () => {
     const offered = offeredFlags(queryCommandWith({ flags: ['datasource', 'sql'] }));
 
     // assert
-    expect(offered).toEqual(['--datasource', '--sql']);
+    expect(offered).toStrictEqual(['--datasource', '--sql']);
   });
 
   it('offers every flag in the stock query command', () => {
@@ -25,12 +34,15 @@ describe('query command flags', () => {
     const offered = offeredFlags(queryCommand);
 
     // assert
-    expect(offered).toEqual(QUERY_FLAGS.map((flag) => `--${flag}`));
+    expect(offered).toStrictEqual(QUERY_FLAGS.map((flag) => `--${flag}`));
   });
 
   it('refuses a flag it does not know', () => {
     // act
-    const build = () => queryCommandWith({ flags: ['datasource', 'drop-table'] as QueryFlag[] });
+    const flags = ['datasource', 'drop-table'];
+    const build = (): void => {
+      Reflect.apply(queryCommandWith, undefined, [{ flags }]);
+    };
 
     // assert
     expect(build).toThrow('unknown query flags: drop-table');

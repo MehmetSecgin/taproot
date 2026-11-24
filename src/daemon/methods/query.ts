@@ -1,100 +1,113 @@
-import type { AppContext } from '../../core/app.js';
-import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import { deriveQueryTarget, executeQuery, silentQueryReport } from '../../core/execute-query.js';
-import type { QueryExecutionRequest } from '../../core/execute-query.js';
-import { parseTimeoutMs, queryTimeoutError } from '../../core/query-timeout.js';
+import { executeQuery, silentQueryReport } from '../../core/execute-query.js';
+import type { QueryDeps, QueryExecutionRequest, QueryOutcome } from '../../core/query-types.js';
+import { queryTimeoutError } from '../../core/query-timeout.js';
 import { queryDatasourceResolver } from '../../core/resolve-query-datasource.js';
-import type { DatasourceProfile } from '../../types/core.js';
+import type { TargetDiscovery } from '../../core/resolve-datasource.js';
 import { RpcMethod } from '../types.js';
-import type { SessionRegistry } from '../session-registry.js';
-import type { DaemonMethod, Handler } from './types.js';
+import type { RpcResponse } from '../types.js';
+import type { DaemonMethod, Handler, HandlerDeps } from './types.js';
+import { leaseSession } from '../session-lease.js';
+import type { SessionLease } from '../session-lease.js';
+import { requestFromWireParams } from './query-wire-request.js';
 
 export type QueryRequestShaper = (request: QueryExecutionRequest) => QueryExecutionRequest;
 
-export interface QueryMethodOptions {
+export type QueryMethodOptions = {
   shapeRequest?: QueryRequestShaper;
-}
+};
 
-interface SessionLease {
-  sessionId: string;
-  release(): void;
-}
+type OpenSessionLease = {
+  current: SessionLease | null;
+};
 
-const resolveFromStores = queryDatasourceResolver(undefined);
+type QueryDepsInput = {
+  deps: HandlerDeps;
+  response: RpcResponse;
+  clientGone: AbortSignal;
+  openSessionLease: OpenSessionLease;
+};
 
-function completedRequest(params: Record<string, unknown>, ctx: AppContext): QueryExecutionRequest {
-  const asSent = params as unknown as QueryExecutionRequest;
-  const { env, namespace, service } = deriveQueryTarget(ctx, asSent);
-  const timeoutDefault = ctx.runtimeConfigStore.queryTimeoutMs() ?? RUNTIME_CONSTANTS.query.defaultTimeoutMs;
-  return { ...asSent, env, namespace, service, timeoutMs: parseTimeoutMs(params.timeoutMs, timeoutDefault) };
-}
+const NO_TARGET_DISCOVERY: TargetDiscovery | undefined = undefined;
 
-function leaseSession(sessions: SessionRegistry, datasource: DatasourceProfile): SessionLease {
-  const { sessionId } = sessions.open({
-    datasourceName: datasource.name,
-    env: datasource.env,
-    namespace: datasource.namespace,
-    service: datasource.service,
-    kind: datasource.kind,
-    connection: datasource.connection,
-    connectors: datasource.connectors,
-  });
-  const leaseId = sessions.acquireLease(sessionId);
-  const heartbeat = setInterval(() => sessions.heartbeatLease(sessionId, leaseId), RUNTIME_CONSTANTS.session.leaseHeartbeatIntervalMs);
+const resolveFromStores = queryDatasourceResolver(NO_TARGET_DISCOVERY);
+
+function startQueryDeadline(timeoutMs: number): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(queryTimeoutError(timeoutMs));
+  }, timeoutMs);
   return {
-    sessionId,
-    release: () => {
-      clearInterval(heartbeat);
-      sessions.releaseLease(sessionId, leaseId);
+    signal: controller.signal,
+    cancel: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
+function copyOutcomeMeta(response: RpcResponse, outcomeMeta: QueryOutcome['meta']): void {
+  const { schemaContext, phases, resolved, timings } = outcomeMeta;
+  if (schemaContext !== undefined) {
+    response.meta.schemaContext = schemaContext;
+  }
+  if (phases !== undefined) {
+    response.meta.phases = phases;
+  }
+  if (resolved !== undefined) {
+    response.meta.resolved = resolved;
+  }
+  if (timings !== undefined) {
+    response.meta.timings = timings;
+  }
+}
+
+function copyOutcomeIntoResponse(response: RpcResponse, outcome: QueryOutcome): void {
+  copyOutcomeMeta(response, outcome.meta);
+  if (outcome.ok) {
+    response.ok = true;
+    response.data = outcome.data;
+    return;
+  }
+  response.error = {
+    code: outcome.code,
+    message: outcome.message,
+    details: outcome.details,
+  };
+}
+
+function queryDeps(input: QueryDepsInput): QueryDeps {
+  const { deps, response, clientGone, openSessionLease } = input;
+  return {
+    ctx: deps.ctx,
+    report: silentQueryReport,
+    signal: clientGone,
+    openSession: (datasource) => {
+      const lease = leaseSession(deps.sessions, datasource);
+      openSessionLease.current = lease;
+      response.meta.sessionId = lease.sessionId;
+      return lease.sessionId;
+    },
+    acquireQuerySlot: async (signal) => deps.queryLimiter.acquire(signal),
+    resolveDatasource: async (resolveRequest, resolveDeps) => {
+      const resolved = await resolveFromStores(resolveRequest, resolveDeps);
+      await deps.admitDatasource(resolved.datasource, resolveRequest.timeoutMs);
+      return resolved;
     },
   };
 }
 
 function queryHandler(shapeRequest: QueryRequestShaper): Handler {
   return async ({ req, base, deps, clientGone }) => {
-    const { ctx, sessions, queryLimiter } = deps;
-    const request = shapeRequest(completedRequest(req.params, ctx));
-    const timeoutController = new AbortController();
-    const timeoutTimer = setTimeout(() => timeoutController.abort(queryTimeoutError(request.timeoutMs)), request.timeoutMs);
-    const releaseGlobal = await queryLimiter.acquire({ signal: AbortSignal.any([clientGone, timeoutController.signal]) });
-    let lease: SessionLease | undefined;
+    const request = shapeRequest(requestFromWireParams(req.params, deps.ctx));
+    const deadline = startQueryDeadline(request.timeoutMs);
+    const releaseQuerySlot = await deps.queryLimiter.acquire(AbortSignal.any([clientGone, deadline.signal]));
+    const openSessionLease: OpenSessionLease = { current: null };
     try {
-      const outcome = await executeQuery(request, {
-        ctx,
-        report: silentQueryReport,
-        signal: clientGone,
-        openSession: (datasource) => {
-          lease = leaseSession(sessions, datasource);
-          base.meta.sessionId = lease.sessionId;
-          return lease.sessionId;
-        },
-        acquireQuerySlot: (signal) => queryLimiter.acquire({ signal }),
-        resolveDatasource: async (resolveRequest, resolveDeps) => {
-          const resolved = await resolveFromStores(resolveRequest, resolveDeps);
-          await deps.admitDatasource(resolved.datasource, resolveRequest.timeoutMs);
-          return resolved;
-        },
-      });
-      const meta = outcome.meta;
-      if (meta.schemaContext) base.meta.schemaContext = meta.schemaContext;
-      if (meta.phases) (base.meta as Record<string, unknown>).phases = meta.phases;
-      if (meta.resolved) (base.meta as Record<string, unknown>).resolved = meta.resolved;
-      if (meta.timings) (base.meta as Record<string, unknown>).timings = meta.timings;
-
-      if (outcome.ok) {
-        base.ok = true;
-        base.data = outcome.data as unknown as Record<string, unknown>;
-        return;
-      }
-      base.error = {
-        code: outcome.code,
-        message: outcome.message,
-        details: outcome.details as Record<string, unknown> | undefined,
-      };
+      const outcome = await executeQuery(request, queryDeps({ deps, response: base, clientGone, openSessionLease }));
+      copyOutcomeIntoResponse(base, outcome);
     } finally {
-      clearTimeout(timeoutTimer);
-      lease?.release();
-      releaseGlobal();
+      deadline.cancel();
+      openSessionLease.current?.release();
+      releaseQuerySlot();
     }
   };
 }

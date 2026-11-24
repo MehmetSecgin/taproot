@@ -9,17 +9,22 @@ const originalKbDir = process.env.TAPROOT_KB_DIR;
 
 function stateRootWithSavedKbDir(kbDir?: string): string {
   const { stateRoot, configDir } = tempStateRoot();
-  if (kbDir) fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ kbDir }));
+  if (kbDir !== undefined) {
+    fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify({ kbDir }));
+  }
   return stateRoot;
 }
 
-describe('resolveKbDir', () => {
+describe('resolving the KB directory', () => {
   beforeEach(() => {
     delete process.env.TAPROOT_KB_DIR;
   });
   afterEach(() => {
-    if (originalKbDir === undefined) delete process.env.TAPROOT_KB_DIR;
-    else process.env.TAPROOT_KB_DIR = originalKbDir;
+    if (originalKbDir === undefined) {
+      delete process.env.TAPROOT_KB_DIR;
+    } else {
+      process.env.TAPROOT_KB_DIR = originalKbDir;
+    }
   });
 
   it('uses the explicit argument over the env var and the saved value', () => {

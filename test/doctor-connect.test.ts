@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { outputChecks } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -39,10 +40,10 @@ describe('doctor --connect', () => {
     const out = runCli(['doctor', '--datasource', 'qa-demo', '--connect'], env);
 
     // assert
-    const checks: Array<{ check: string; status: string }> = JSON.parse(out.stdout).data.checks;
-    expect(checks.slice(0, 2)).toEqual([
-      expect.objectContaining({ check: 'kubectl-portforward connect', status: 'ok' }),
-      expect.objectContaining({ check: 'kubectl-portforward status', status: 'ok' }),
+    const checks = outputChecks(out.stdout);
+    expect(checks.slice(0, 2)).toMatchObject([
+      { check: 'kubectl-portforward connect', status: 'ok' },
+      { check: 'kubectl-portforward status', status: 'ok' },
     ]);
   });
 });

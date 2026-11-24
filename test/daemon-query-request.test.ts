@@ -4,16 +4,16 @@ import { executeQuery } from '../src/core/execute-query.js';
 import { rpcCall } from '../src/daemon/client.js';
 import { startLocalDaemon } from './helpers/daemon.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
-import { queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
+import { queryRequest, restoreProcessEnv, setupQueryState } from './helpers/query-state.js';
 
-vi.mock('../src/core/execute-query.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/core/execute-query.js')>();
-  return { ...actual, executeQuery: vi.fn(actual.executeQuery) };
+vi.mock(import('../src/core/execute-query.js'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, executeQuery: vi.fn<typeof actual.executeQuery>(actual.executeQuery) };
 });
 
-afterEach(restoreQueryEnv);
-
 describe('daemon query request', () => {
+  afterEach(restoreProcessEnv);
+
   it('passes every request field through to the query and opens the session on the resolved datasource', async () => {
     // arrange
     const stateRoot = await setupQueryState();
@@ -29,12 +29,12 @@ describe('daemon query request', () => {
       });
 
       // assert
-      expect(res.ok).toBe(true);
-      expect(res.meta?.sessionId).toMatch(/^sess_/);
+      expect(res).toMatchObject({ ok: true });
+      expect(res.meta?.sessionId).toMatch(/^sess_/u);
       expect(vi.mocked(executeQuery).mock.calls[0][0]).toMatchObject({
         datasource: 'qa-fake',
         rowsObject: true,
-        timeoutMs: 5_000,
+        timeoutMs: 5000,
         fieldTheDaemonDoesNotKnow: 'kept',
       });
     } finally {

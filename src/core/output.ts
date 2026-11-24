@@ -1,92 +1,107 @@
-import type { CliOutputEnvelope } from '../types/core.js';
-import { str } from './strings.js';
+import { pluckPath } from './dot-path.js';
+import { isList, isRecord } from './json-shapes.js';
+import type { QueryPhaseTimings } from '../types/plugin.js';
+import type { SchemaContext } from '../types/schema-context.js';
 
-let pluck: string | undefined;
-let lines = false;
+export type CliOutputEnvelope<Data = unknown> = {
+  ok: boolean;
+  data?: Data;
+  meta?: {
+    requestId?: string;
+    sessionId?: string;
+    schemaContext?: SchemaContext;
+    timings?: {
+      durationMs: number;
+    };
+    phases?: QueryPhaseTimings;
+  };
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+};
+
+type OutputOptions = {
+  pluckPath: string | undefined;
+  lines: boolean;
+};
+
+const outputOptions: OutputOptions = { pluckPath: undefined, lines: false };
 
 export function setPluck(path?: string): void {
-  pluck = path;
+  outputOptions.pluckPath = path;
 }
 
 export function setLines(enabled: boolean): void {
-  lines = enabled;
+  outputOptions.lines = enabled;
 }
 
-function isErrorEnvelope(data: unknown): boolean {
-  const env = data as { ok?: unknown } | null;
-  return Boolean(env && typeof env === 'object' && env.ok === false);
+function isFailureEnvelope(data: unknown): boolean {
+  return isRecord(data) && data.ok === false;
+}
+
+function nonEmptyWarnings(container: unknown): unknown[] | undefined {
+  const warnings = isRecord(container) ? container.warnings : undefined;
+  return isList(warnings) && warnings.length > 0 ? warnings : undefined;
+}
+
+function listEnvelopeLines(envelope: Record<string, unknown>, items: unknown[]): unknown[] {
+  const warnings = nonEmptyWarnings(envelope.meta);
+  return [warnings === undefined ? { ok: true } : { ok: true, warnings }, ...items];
+}
+
+function rowSetLines(rowSet: Record<string, unknown>, rows: unknown[]): unknown[] {
+  const header: Record<string, unknown> = { ok: true, columns: rowSet.columns };
+  if (rowSet.truncated === true) {
+    header.truncated = true;
+  }
+  const warnings = nonEmptyWarnings(rowSet);
+  if (warnings !== undefined) {
+    header.warnings = warnings;
+  }
+  return [header, ...rows];
+}
+
+export function envelopeToLines(value: unknown): unknown[] {
+  if (isList(value)) {
+    return value;
+  }
+  if (!isRecord(value) || value.ok !== true) {
+    return [value];
+  }
+  if (isList(value.data)) {
+    return listEnvelopeLines(value, value.data);
+  }
+  if (!isRecord(value.data) || !isList(value.data.rows)) {
+    return [value];
+  }
+  return rowSetLines(value.data, value.data.rows);
+}
+
+function applyPluck(data: unknown): unknown {
+  const path = outputOptions.pluckPath;
+  if (path === undefined || path === '' || isFailureEnvelope(data)) {
+    return data;
+  }
+  return pluckPath(data, path);
+}
+
+function toPrintedLines(value: unknown): unknown[] {
+  return outputOptions.lines && !isFailureEnvelope(value) ? envelopeToLines(value) : [value];
 }
 
 export function printJson(data: unknown): void {
-  const value = pluck && !isErrorEnvelope(data) ? pluckPath(data, pluck) : data;
-  const out = lines && !isErrorEnvelope(value) ? toLines(value) : [value];
-  process.stdout.write(out.map((line) => `${JSON.stringify(line) ?? 'null'}\n`).join(''));
+  const lines = toPrintedLines(applyPluck(data));
+  process.stdout.write(lines.map((line) => `${JSON.stringify(line) ?? 'null'}\n`).join(''));
 }
 
-export function toLines(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  const env = value as { ok?: unknown; data?: unknown; meta?: { warnings?: unknown } } | null;
-  if (!env || typeof env !== 'object' || env.ok !== true) return [value];
-  if (Array.isArray(env.data)) {
-    const warnings = env.meta?.warnings;
-    return [Array.isArray(warnings) && warnings.length ? { ok: true, warnings } : { ok: true }, ...env.data];
-  }
-  const data = env.data as { columns?: unknown; rows?: unknown; truncated?: unknown; warnings?: unknown } | undefined;
-  if (!data || !Array.isArray(data.rows)) return [value];
-  const header: Record<string, unknown> = { ok: true, columns: data.columns };
-  if (data.truncated === true) header.truncated = true;
-  if (Array.isArray(data.warnings) && data.warnings.length) header.warnings = data.warnings;
-  return [header, ...data.rows];
+type EnvelopeMeta = CliOutputEnvelope['meta'] & Record<string, unknown>;
+
+export function printSuccess(data: unknown, meta?: EnvelopeMeta): void {
+  printJson({ ok: true, data, meta });
 }
 
-export function pluckPath(obj: unknown, path: string): unknown {
-  const trimmed = str(path).trim();
-  if (!trimmed) return obj;
-  const parts = trimmed.split('.').filter(Boolean);
-  let cur: unknown = obj;
-  for (const part of parts) {
-    if (cur === null || cur === undefined) return undefined;
-    const arrayMatch = part.match(/^(\w*)\[(\d+)\]$/);
-    if (arrayMatch) {
-      const key = arrayMatch[1];
-      const idx = Number(arrayMatch[2]);
-      if (key) {
-        cur = (cur as Record<string, unknown>)[key];
-        if (cur === null || cur === undefined) return undefined;
-      }
-      if (!Array.isArray(cur)) return undefined;
-      cur = cur[idx];
-      continue;
-    }
-    if (typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[part];
-  }
-  return cur;
-}
-
-function isEmptyMap(value: unknown): boolean {
-  return !value || typeof value !== 'object' || Object.keys(value as Record<string, unknown>).length === 0;
-}
-
-export function trimQueryJsonEnvelope<T extends Record<string, unknown>>(envelope: T): T {
-  const data = envelope.data as Record<string, unknown> | undefined;
-  if (data && typeof data === 'object') {
-    if (Array.isArray(data.warnings) && data.warnings.length === 0) delete data.warnings;
-  }
-  const meta = envelope.meta as Record<string, unknown> | undefined;
-  if (meta && typeof meta === 'object') {
-    const sc = meta.schemaContext as Record<string, unknown> | undefined;
-    if (sc && isEmptyMap(sc.tables)) delete meta.schemaContext;
-  }
-  return envelope;
-}
-
-export function printEnvelope(
-  ok: boolean,
-  data: unknown,
-  error?: CliOutputEnvelope['error'],
-  meta?: CliOutputEnvelope['meta'] & Record<string, unknown>,
-): void {
-  const env: CliOutputEnvelope = { ok, data, error, meta };
-  printJson(env);
+export function printFailure(error: CliOutputEnvelope['error'], meta?: EnvelopeMeta): void {
+  printJson({ ok: false, error, meta });
 }

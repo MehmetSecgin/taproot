@@ -6,18 +6,18 @@ import type { RpcRequest, RpcResponse } from '../types.js';
 
 export type DaemonEndpoint = { socketPath: string } | { host: string; port: number };
 
-export interface HandlerDeps {
+export type HandlerDeps = {
   ctx: AppContext;
   sessions: SessionRegistry;
   queryLimiter: QueryLimiter;
   admitDatasource: DatasourceGate;
   endpoint: () => DaemonEndpoint;
   startedAt: number;
-}
+};
 
-export interface HandlerResult {
+export type HandlerResult = {
   postWrite?: 'stopSocket';
-}
+};
 
 export type Handler = (input: {
   req: RpcRequest;
@@ -26,7 +26,7 @@ export type Handler = (input: {
   clientGone: AbortSignal;
 }) => Promise<HandlerResult | void>;
 
-export interface DaemonMethod {
+export type DaemonMethod = {
   name: string;
   handle: Handler;
-}
+};

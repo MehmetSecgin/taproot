@@ -2,10 +2,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { outputCheckNamed, outputDataRecord } from './helpers/cli-contract-envelopes.js';
+import { parseJson } from './helpers/parse-json.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function setupState() {
+function setupState(): { stateRoot: string; configDir: string; env: Record<string, string> } {
   const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
   fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
@@ -57,8 +59,9 @@ describe('doctor with an unresolved env/service target', () => {
 
     // assert
     expect(out.status).not.toBe(0);
-    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'datasources.json'), 'utf8'))).toEqual([]);
-    expect(fs.existsSync(path.join(configDir, 'credentials.json.enc'))).toBe(false);
+    const savedDatasources = parseJson(fs.readFileSync(path.join(configDir, 'datasources.json'), 'utf8'));
+    expect(savedDatasources).toStrictEqual([]);
+    expect(fs.readdirSync(configDir)).not.toContain('credentials.json.enc');
   });
 
   it('reports the missing profile and that the KB can supply it', () => {
@@ -70,12 +73,11 @@ describe('doctor with an unresolved env/service target', () => {
 
     // assert
     expect(out.status).toBe(7);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(Object.keys(parsed)).toEqual(['checks', 'summary']);
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'target_datasource')).toMatchObject({
+    expect(Object.keys(outputDataRecord(out.stdout))).toStrictEqual(['checks', 'summary']);
+    expect(outputCheckNamed(out.stdout, 'target_datasource')).toMatchObject({
       status: 'fail',
     });
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
+    expect(outputCheckNamed(out.stdout, 'kb routing')).toMatchObject({
       status: 'ok',
     });
   });
@@ -89,8 +91,7 @@ describe('doctor with an unresolved env/service target', () => {
 
     // assert
     expect(out.status).toBe(7);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'kb routing')).toMatchObject({
+    expect(outputCheckNamed(out.stdout, 'kb routing')).toMatchObject({
       status: 'warn',
     });
   });

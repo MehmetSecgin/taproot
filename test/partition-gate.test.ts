@@ -1,13 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { collectRangeWarnings, enforcePartitionPredicate } from '../src/core/safety.js';
+import { describe, expect, it } from 'vitest';
+import { enforcePartitionPredicate } from '../src/core/safety.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
-import type { DatasourceKind, DatasourceProfile, SchemaContext } from '../src/types/core.js';
+import type { SchemaCatalog } from '../src/store/schema-catalog.js';
+import type { DatasourceKind, DatasourceProfile } from '../src/types/datasource.js';
+import type { SchemaContext } from '../src/types/schema-context.js';
 
-const previousAllow = process.env.TAPROOT_ALLOW_PARTITION_SCAN;
-
-afterEach(() => {
-  process.env.TAPROOT_ALLOW_PARTITION_SCAN = previousAllow;
-});
+const NO_CATALOG: SchemaCatalog | undefined = undefined;
 
 function context(partition?: SchemaContext['tables'][string]['partition']): SchemaContext {
   return {
@@ -45,7 +43,7 @@ describe('partition predicate gate', () => {
         sql: 'SELECT id FROM order_items WHERE customer_id = 1 LIMIT 1',
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
       }),
-    ).toThrow(/MISSING_PARTITION_PREDICATE/);
+    ).toThrow(/MISSING_PARTITION_PREDICATE/u);
   });
 
   it('passes when WHERE contains the partition predicate', () => {
@@ -55,7 +53,7 @@ describe('partition predicate gate', () => {
         sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2026-05-01' AND '2026-05-02'",
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it('passes when JOIN ON contains the partition predicate', () => {
@@ -65,7 +63,7 @@ describe('partition predicate gate', () => {
         sql: 'SELECT e.id FROM order_items e JOIN events ev ON ev.order_date = e.order_date AND ev.id = e.id',
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it('requires all composite RANGE COLUMNS keys', () => {
@@ -75,7 +73,7 @@ describe('partition predicate gate', () => {
         sql: "SELECT id FROM order_items WHERE order_date = '2026-05-02'",
         schemaContext: context({ kind: 'RANGE', expr: 'order_date, region_id', keys: ['order_date', 'region_id'] }),
       }),
-    ).toThrow(/region_id/);
+    ).toThrow(/region_id/u);
   });
 
   it('allows explicit bypass with warning', () => {
@@ -110,7 +108,7 @@ describe('partition predicate gate', () => {
       'DESCRIBE order_items',
       'EXPLAIN SELECT id FROM order_items WHERE customer_id = 1',
     ]) {
-      expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toEqual([]);
+      expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toStrictEqual([]);
     }
   });
 
@@ -125,7 +123,7 @@ describe('partition predicate gate', () => {
       'SHOW KEYS FROM order_items',
       'SHOW CREATE VIEW order_items',
     ]) {
-      expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toEqual([]);
+      expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toStrictEqual([]);
     }
   });
 
@@ -133,21 +131,21 @@ describe('partition predicate gate', () => {
     const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
     expect(() =>
       enforcePartitionPredicate({ datasource: mysql, sql: 'EXPLAIN ANALYZE SELECT id FROM order_items WHERE customer_id = 1', schemaContext }),
-    ).toThrow(/MISSING_PARTITION_PREDICATE/);
+    ).toThrow(/MISSING_PARTITION_PREDICATE/u);
     expect(
       enforcePartitionPredicate({
         datasource: mysql,
         sql: "EXPLAIN ANALYZE SELECT id FROM order_items WHERE order_date = '2026-01-01'",
         schemaContext,
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it('gates EXPLAIN ANALYZE behind a leading comment', () => {
     const { tables } = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
     const sql = '/* audit */ EXPLAIN ANALYZE SELECT id FROM order_items WHERE customer_id = 1';
     const schemaContext = buildSchemaContext(sql, { datasource: 'orders', fetchedAt: new Date().toISOString(), tables });
-    expect(() => enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toThrow(/MISSING_PARTITION_PREDICATE/);
+    expect(() => enforcePartitionPredicate({ datasource: mysql, sql, schemaContext })).toThrow(/MISSING_PARTITION_PREDICATE/u);
   });
 
   it('matches an upper-case WHERE column to a lower-case partition key', () => {
@@ -157,7 +155,7 @@ describe('partition predicate gate', () => {
         sql: "SELECT id FROM ORDER_ITEMS O WHERE O.ORDER_DATE > '2026-05-01'",
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it('matches a lower-case WHERE column to an upper-case partition key', () => {
@@ -167,13 +165,13 @@ describe('partition predicate gate', () => {
         sql: "SELECT id FROM order_items WHERE order_date > '2026-05-01'",
         schemaContext: context({ kind: 'RANGE', expr: 'ORDER_DATE', key: 'ORDER_DATE', keys: ['ORDER_DATE'] }),
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it('still throws for a plain SELECT on a RANGE partitioned table', () => {
     const schemaContext = context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
     expect(() => enforcePartitionPredicate({ datasource: mysql, sql: 'SELECT * FROM order_items', schemaContext })).toThrow(
-      /MISSING_PARTITION_PREDICATE/,
+      /MISSING_PARTITION_PREDICATE/u,
     );
   });
 });
@@ -181,7 +179,7 @@ describe('partition predicate gate', () => {
 describe('partition gate skip warning', () => {
   it('warns when the datasource has no cached catalog yet or its fetch failed', () => {
     const sql = 'SELECT id FROM order_items WHERE customer_id = 1';
-    expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext: buildSchemaContext(sql, undefined) })).toEqual([
+    expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext: buildSchemaContext(sql, NO_CATALOG) })).toStrictEqual([
       'partition_gate_skipped',
     ]);
   });
@@ -193,12 +191,12 @@ describe('partition gate skip warning', () => {
         sql: 'SELECT id FROM order_items AS OF TIMESTAMP NOW() - INTERVAL 5 SECOND WHERE customer_id = 1',
         schemaContext: context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] }),
       }),
-    ).toEqual(['partition_gate_skipped']);
+    ).toStrictEqual(['partition_gate_skipped']);
   });
 
   it('stays quiet for a metadata query without a catalog', () => {
     const sql = 'SHOW CREATE TABLE order_items';
-    expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext: buildSchemaContext(sql, undefined) })).toEqual([]);
+    expect(enforcePartitionPredicate({ datasource: mysql, sql, schemaContext: buildSchemaContext(sql, NO_CATALOG) })).toStrictEqual([]);
   });
 
   it('stays quiet for Redis and gRPC datasources', () => {
@@ -206,111 +204,7 @@ describe('partition gate skip warning', () => {
       ['redis', 'GET profile:1'],
       ['grpc', 'ProfileService/GetProfile {"id": 1}'],
     ] as const) {
-      expect(enforcePartitionPredicate({ datasource: datasource(kind), sql, schemaContext: { tables: {} } })).toEqual([]);
+      expect(enforcePartitionPredicate({ datasource: datasource(kind), sql, schemaContext: { tables: {} } })).toStrictEqual([]);
     }
-  });
-});
-
-describe('range guard', () => {
-  const partitioned = () => context({ kind: 'RANGE', expr: 'order_date', key: 'order_date', keys: ['order_date'] });
-
-  it('stays quiet for a narrow bounded range', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date >= '2026-05-01' AND order_date < '2026-05-08'",
-        schemaContext: partitioned(),
-      }),
-    ).toEqual([]);
-  });
-
-  it('stays quiet for single-day equality', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date = '2026-05-01'",
-        schemaContext: partitioned(),
-      }),
-    ).toEqual([]);
-  });
-
-  it('warns when the partition key has no upper bound', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date >= '2020-01-01'",
-        schemaContext: partitioned(),
-      }),
-    ).toEqual(['unbounded_range:order_items.order_date']);
-  });
-
-  it('warns when the bounded range exceeds the max', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2025-01-01' AND '2026-01-01'",
-        schemaContext: partitioned(),
-        maxRangeDays: 90,
-      }),
-    ).toEqual(['wide_range:order_items.order_date:actual=365:max=90']);
-  });
-
-  it('respects a larger explicit max', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2025-01-01' AND '2026-01-01'",
-        schemaContext: partitioned(),
-        maxRangeDays: 400,
-      }),
-    ).toEqual([]);
-  });
-
-  it('warns as unverified when the predicate uses no date literal', () => {
-    expect(
-      collectRangeWarnings({
-        sql: 'SELECT id FROM order_items WHERE order_date >= CURDATE() - INTERVAL 7 DAY',
-        schemaContext: partitioned(),
-      }),
-    ).toEqual(['range_unverified:order_items.order_date']);
-  });
-
-  it('ignores date literals bound to other columns', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date BETWEEN '2026-05-01' AND '2026-05-08' AND created_at >= '2020-01-01'",
-        schemaContext: partitioned(),
-        maxRangeDays: 90,
-      }),
-    ).toEqual([]);
-  });
-
-  it('measures the span of an IN list on the partition key', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date IN ('2025-01-01', '2026-01-01')",
-        schemaContext: partitioned(),
-        maxRangeDays: 90,
-      }),
-    ).toEqual(['wide_range:order_items.order_date:actual=365:max=90']);
-  });
-
-  it('checks the range of an upper-case WHERE column', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM ORDER_ITEMS WHERE ORDER_DATE >= '2020-01-01'",
-        schemaContext: partitioned(),
-      }),
-    ).toEqual(['unbounded_range:order_items.order_date']);
-  });
-
-  it('ignores tables that are not range partitioned', () => {
-    expect(
-      collectRangeWarnings({
-        sql: "SELECT id FROM order_items WHERE order_date >= '2020-01-01'",
-        schemaContext: context(),
-      }),
-    ).toEqual([]);
-  });
-
-  it('ignores metadata queries', () => {
-    expect(
-      collectRangeWarnings({ sql: 'SHOW CREATE TABLE order_items', schemaContext: partitioned() }),
-    ).toEqual([]);
   });
 });

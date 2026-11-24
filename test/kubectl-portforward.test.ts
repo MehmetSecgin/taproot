@@ -2,11 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { outputCheckNamed } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function connection(target: string) {
+function connection(target: string): Record<string, string> {
   return {
     env: 'qa',
     namespace: 'develop',
@@ -21,7 +24,7 @@ function connection(target: string) {
   };
 }
 
-function setupState() {
+function setupState(): { stateRoot: string; env: Record<string, string> } {
   const { stateRoot } = tempStateRoot();
   const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-kubectl-portforward-kb-'));
   fs.writeFileSync(
@@ -43,31 +46,45 @@ function setupState() {
   };
 }
 
+const savedConnectionSchema = z.object({ port: z.number() });
+const savedDatasourcesSchema = z.array(z.object({ service: z.string(), connection: savedConnectionSchema }));
+
 function savedPort(stateRoot: string, service: string): number {
-  const datasources = JSON.parse(fs.readFileSync(path.join(stateRoot, 'config', 'datasources.json'), 'utf8'));
-  return datasources.find((d: { service: string }) => d.service === service).connection.port;
+  const datasourcesFile = path.join(stateRoot, 'config', 'datasources.json');
+  const datasourcesText = fs.readFileSync(datasourcesFile, 'utf8');
+  const datasources = savedDatasourcesSchema.parse(JSON.parse(datasourcesText));
+  const saved = datasources.find((datasource) => datasource.service === service);
+  if (saved === undefined) {
+    throw new Error(`no saved datasource for service ${service}`);
+  }
+  return saved.connection.port;
 }
 
-const listeners: Array<ReturnType<typeof spawn>> = [];
-
-afterEach(() => {
-  for (const listener of listeners.splice(0)) listener.kill();
-});
+const listeners: ReturnType<typeof spawn>[] = [];
 
 async function fakeForward(port: number, forwardArgs: string): Promise<void> {
-  const script = `require('net').createServer((s) => s.destroy()).listen(${port}, '127.0.0.1', () => console.log('up'))`;
+  const script = `require('net').createServer((socket) => socket.destroy()).listen(${port}, '127.0.0.1', () => console.log('up'))`;
   const listener = spawn(process.execPath, ['-e', script, '--', ...forwardArgs.split(' ')], { stdio: ['ignore', 'pipe', 'inherit'] });
   listeners.push(listener);
-  await new Promise((resolve) => listener.stdout!.once('data', resolve));
+  await once(listener.stdout, 'data');
 }
 
 function portforwardStatus(service: string, env: Record<string, string>): string {
   const out = runCli(['doctor', '--env', 'qa', '--service', service], env);
-  const checks: Array<{ check: string; status: string }> = JSON.parse(out.stdout).data.checks;
-  return checks.find((c) => c.check === 'kubectl-portforward status')!.status;
+  const check = outputCheckNamed(out.stdout, 'kubectl-portforward status');
+  if (check === undefined) {
+    throw new Error(`doctor reported no kubectl-portforward status check for ${service}`);
+  }
+  return check.status;
 }
 
 describe('kubectl-portforward profiles', () => {
+  afterEach(() => {
+    for (const listener of listeners.splice(0)) {
+      listener.kill();
+    }
+  });
+
   it('give two services in one env different local ports', () => {
     // arrange
     const { stateRoot, env } = setupState();

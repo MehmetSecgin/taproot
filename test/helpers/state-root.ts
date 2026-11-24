@@ -8,3 +8,9 @@ export function tempStateRoot(): { stateRoot: string; configDir: string } {
   fs.mkdirSync(configDir, { recursive: true });
   return { stateRoot, configDir };
 }
+
+export function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>): void {
+  const configDir = path.join(stateRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), JSON.stringify(config));
+}

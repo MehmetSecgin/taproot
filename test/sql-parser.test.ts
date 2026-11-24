@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseExecutedStatements } from '../src/core/sql-parser.js';
 
-describe('parseExecutedStatements', () => {
+describe('statement parse cache', () => {
   it('parses a repeated query once and hands back a frozen tree', () => {
     // arrange
     const sql = 'SELECT id FROM orders WHERE created_at > NOW()';

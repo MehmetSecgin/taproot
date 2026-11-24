@@ -2,10 +2,12 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { outputData } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function setupState() {
+function setupState(): { env: Record<string, string> } {
   const { stateRoot } = tempStateRoot();
   return {
     env: {
@@ -14,6 +16,15 @@ function setupState() {
       TAPROOT_NO_KEYCHAIN: '1',
     },
   };
+}
+
+const credentialValuesSchema = z.object({ values: z.record(z.string(), z.string()) });
+const credentialEntrySchema = z.object({ ref: z.string(), keys: z.array(z.string()), source: z.string() });
+const credentialListSchema = z.array(credentialEntrySchema);
+const STORED_KEY_NAMES = new Set(['user', 'dbUser', 'password', 'token', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']);
+
+function permissionsOf(file: string): string {
+  return fs.statSync(file).mode.toString(8).slice(-3);
 }
 
 describe('credential lifecycle', () => {
@@ -39,7 +50,7 @@ describe('credential lifecycle', () => {
     runCli(['creds', 'set', '--ref', 'qa:orders', '--user', 'qa_user', '--password', 'secret123'], env);
     const out = runCli(['creds', 'show', '--ref', 'qa:orders'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.values.password).toBe('[REDACTED]');
+    expect(outputData(out.stdout, credentialValuesSchema).values.password).toBe('[REDACTED]');
   });
 
   it('creds show redacts token', () => {
@@ -70,7 +81,7 @@ describe('credential lifecycle', () => {
 
     // assert
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data.values).toEqual({ user: 'qa_user', apiKey: '[REDACTED]', region: '[REDACTED]' });
+    expect(outputData(out.stdout, credentialValuesSchema).values).toStrictEqual({ user: 'qa_user', apiKey: '[REDACTED]', region: '[REDACTED]' });
   });
 
   it('creds list enumerates refs without exposing secrets', () => {
@@ -86,16 +97,11 @@ describe('credential lifecycle', () => {
 
     const jsonOut = runCli(['creds', 'list'], env);
     expect(jsonOut.status).toBe(0);
-    const parsed = JSON.parse(jsonOut.stdout).data as Array<{ ref: string; keys: string[]; source: string }>;
-    expect(parsed.map((e) => e.ref).toSorted()).toEqual(['prod:billing', 'qa:orders']);
-    for (const entry of parsed) {
-      for (const key of entry.keys) {
-        expect(['user', 'dbUser', 'password', 'token', 'statusCommand', 'connectCommand', 'disconnectCommand', 'loginCommand']).toContain(
-          // sanity: keys are key names, not values
-          key.length > 0 ? key : 'user',
-        );
-      }
-    }
+    const entries = outputData(jsonOut.stdout, credentialListSchema);
+    expect(entries.map((entry) => entry.ref).toSorted()).toStrictEqual(['prod:billing', 'qa:orders']);
+    const keyNames = entries.flatMap((entry) => entry.keys);
+    const unexpectedKeyNames = keyNames.filter((key) => !STORED_KEY_NAMES.has(key));
+    expect(unexpectedKeyNames).toStrictEqual([]);
   });
 
   it('creds set with connector commands', () => {
@@ -121,8 +127,8 @@ describe('credential file permissions', () => {
     runCli(['creds', 'set', '--ref', 'qa:other', '--user', 'other'], env);
 
     // assert
-    expect(fs.statSync(path.join(stateRoot, 'config')).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(credentialFile).mode & 0o777).toBe(0o600);
+    expect(permissionsOf(path.join(stateRoot, 'config'))).toBe('700');
+    expect(permissionsOf(credentialFile)).toBe('600');
   });
 });
 

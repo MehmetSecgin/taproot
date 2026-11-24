@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { trimQueryJsonEnvelope } from '../src/core/output.js';
+import { trimQueryJsonEnvelope } from '../src/cli/query-present.js';
 
-describe('trimQueryJsonEnvelope', () => {
+describe('trimming a query envelope', () => {
   it('drops empty warnings array from data', () => {
     const out = trimQueryJsonEnvelope({
       ok: true,
       data: { columns: [], rows: [], warnings: [] },
       meta: {},
     });
-    expect('warnings' in (out.data as Record<string, unknown>)).toBe(false);
+    expect(out.data).not.toHaveProperty('warnings');
   });
 
   it('drops schemaContext when tables is empty', () => {
@@ -17,7 +17,7 @@ describe('trimQueryJsonEnvelope', () => {
       data: {},
       meta: { schemaContext: { tables: {} } },
     });
-    expect('schemaContext' in (out.meta as Record<string, unknown>)).toBe(false);
+    expect(out.meta).not.toHaveProperty('schemaContext');
   });
 
   it('keeps schemaContext when tables has entries', () => {
@@ -31,7 +31,7 @@ describe('trimQueryJsonEnvelope', () => {
 
   it('is a no-op when there is nothing to trim', () => {
     const out = trimQueryJsonEnvelope({ ok: true, data: { columns: ['a'], rows: [[1]] }, meta: { sessionId: 's1' } });
-    expect(out.data).toEqual({ columns: ['a'], rows: [[1]] });
-    expect(out.meta).toEqual({ sessionId: 's1' });
+    expect(out.data).toStrictEqual({ columns: ['a'], rows: [[1]] });
+    expect(out.meta).toStrictEqual({ sessionId: 's1' });
   });
 });

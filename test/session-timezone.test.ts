@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SESSION_TIME_ZONE, normalizeTimeZone, resolveSessionTimeZone } from '../src/core/session-timezone.js';
 
-describe('normalizeTimeZone', () => {
+describe('time zone normalization', () => {
   it('defaults to UTC when empty', () => {
-    expect(normalizeTimeZone(undefined)).toBe('+00:00');
+    expect(normalizeTimeZone()).toBe('+00:00');
     expect(normalizeTimeZone('')).toBe(DEFAULT_SESSION_TIME_ZONE);
   });
 
@@ -30,13 +30,13 @@ describe('normalizeTimeZone', () => {
   });
 
   it('rejects invalid offsets and injection attempts', () => {
-    expect(() => normalizeTimeZone('+99:99')).toThrow(/BAD_INPUT/);
-    expect(() => normalizeTimeZone("'; DROP TABLE x; --")).toThrow(/BAD_INPUT/);
-    expect(() => normalizeTimeZone('not a zone')).toThrow(/BAD_INPUT/);
+    expect(() => normalizeTimeZone('+99:99')).toThrow(/BAD_INPUT/u);
+    expect(() => normalizeTimeZone("'; DROP TABLE x; --")).toThrow(/BAD_INPUT/u);
+    expect(() => normalizeTimeZone('not a zone')).toThrow(/BAD_INPUT/u);
   });
 });
 
-describe('resolveSessionTimeZone', () => {
+describe('session time zone resolution', () => {
   it('prefers override over datasource hint over config default', () => {
     expect(
       resolveSessionTimeZone({ override: '+01:00', datasourceHint: '+02:00', configDefault: '+03:00' }),

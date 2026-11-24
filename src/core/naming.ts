@@ -1,16 +1,26 @@
+const CAMEL_CASE_BOUNDARY = /(?<lower>[a-z0-9])(?<upper>[A-Z])/gu;
+const WHITESPACE_RUN = /\s+/gu;
+
+function kebabCaseSeparators(text: string): string {
+  return text.replaceAll('_', '-').replaceAll(WHITESPACE_RUN, '-').toLowerCase();
+}
+
 export function normalizeService(value?: string, aliases?: Record<string, string>): string {
-  const v = (value || '').trim();
-  if (!v) return '';
-  const normalized = v.replace(/([a-z0-9])([A-Z])/g, '$1-$2').replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
-  const aliasMap = aliases || {};
-  return aliasMap[normalized] || normalized;
+  const trimmed = (value ?? '').trim();
+  if (trimmed === '') {
+    return '';
+  }
+  const normalized = kebabCaseSeparators(trimmed.replaceAll(CAMEL_CASE_BOUNDARY, '$<lower>-$<upper>'));
+  const aliasMap: Record<string, string | undefined> = aliases ?? {};
+  const alias = aliasMap[normalized];
+  return alias === undefined || alias === '' ? normalized : alias;
 }
 
 export function normalizeNamespace(value?: string): string {
-  return (value || '').trim().replace(/_/g, '-').replace(/\s+/g, '-').toLowerCase();
+  return kebabCaseSeparators((value ?? '').trim());
 }
 
 export function defaultDatasourceName(env: string, service: string, namespace?: string): string {
   const normalizedNamespace = normalizeNamespace(namespace);
-  return normalizedNamespace ? `${env}-${normalizedNamespace}-${service}` : `${env}-${service}`;
+  return normalizedNamespace === '' ? `${env}-${service}` : `${env}-${normalizedNamespace}-${service}`;
 }

@@ -1,315 +1,137 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import protoLoader from '@grpc/proto-loader';
-import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { _resetProtoCachesForTest, loadProtobufRoot, loadGrpcPackage } from '../src/core/proto-loader.js';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { loadProtobufRoot, resetProtoCacheForTest } from '../src/core/proto-loader.js';
 import {
-  describeProto,
-  listServices,
-  expandMessage,
-  resolveName,
-  suggestNames,
-  searchMethods,
   buildRequestSkeleton,
+  describeProto,
+  expandMessage,
+  listServices,
+  searchMethods,
 } from '../src/core/grpc-introspect.js';
+import { resolveName, suggestNames } from '../src/core/name-match.js';
+import type { ProtobufRoot } from '../src/core/proto-loader.js';
+import { PROFILE_SERVICE, makeTempDir, parseMessageNames, parseSkeletonCalls, writeFixtureProto } from './helpers/grpc-introspect-fixtures.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function tmpDir(name: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `taproot-${name}-`));
+async function loadFixtureRoot(name: string): Promise<ProtobufRoot> {
+  const dir = makeTempDir(name);
+  writeFixtureProto(dir);
+  const { protobufRoot } = await loadProtobufRoot(dir);
+  return protobufRoot;
 }
-
-function writeFixtureProto(root: string): void {
-  fs.mkdirSync(root, { recursive: true });
-  const proto = `syntax = "proto3";
-package taproot.test;
-
-enum Status {
-  STATUS_UNKNOWN = 0;
-  ACTIVE = 1;
-  RETIRED = 2;
-}
-
-message Address {
-  string city = 1;
-  string country = 2;
-}
-
-message Profile {
-  string name = 1;
-  repeated string nicknames = 2;
-  Address address = 3;
-  Status status = 4;
-  map<string, string> labels = 5;
-  oneof contact {
-    string email = 6;
-    string phone = 7;
-  }
-}
-
-message GetProfileRequest {
-  string id = 1;
-}
-
-message GetProfileResponse {
-  Profile profile = 1;
-}
-
-message ListProfilesRequest {}
-
-message ListProfilesResponse {
-  repeated Profile profiles = 1;
-}
-
-service ProfileService {
-  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
-  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
-}
-`;
-  fs.writeFileSync(path.join(root, 'profile.proto'), proto, 'utf8');
-}
-
-describe('proto-loader', () => {
-  beforeEach(() => _resetProtoCachesForTest());
-
-  it('loads a protobufjs root and caches by normalized path', async () => {
-    const dir = tmpDir('proto-loader');
-    writeFixtureProto(dir);
-    const a = await loadProtobufRoot(dir);
-    const b = await loadProtobufRoot(dir);
-    expect(a.protobufRoot).toBe(b.protobufRoot);
-    expect(a.files.length).toBe(1);
-  });
-
-  it('loads a grpc-js package and exposes service ctors', async () => {
-    const dir = tmpDir('grpc-loader');
-    writeFixtureProto(dir);
-    const bundle = await loadGrpcPackage(dir);
-    const pkg = bundle.grpcPackage as Record<string, any>;
-    expect(typeof pkg.taproot?.test?.ProfileService).toBe('function');
-  });
-
-  it('throws when no proto files found', async () => {
-    const dir = tmpDir('proto-empty');
-    await expect(loadProtobufRoot(dir)).rejects.toThrow(/no \.proto files/);
-  });
-
-  it('reports unresolved cross-repo imports with the importing file and a fix hint', async () => {
-    const dir = tmpDir('proto-missing-import');
-    fs.writeFileSync(
-      path.join(dir, 'main.proto'),
-      'syntax = "proto3";\npackage demo;\nimport "common.proto";\nimport "google/protobuf/timestamp.proto";\nmessage Req { string id = 1; }\n',
-      'utf8',
-    );
-    await expect(loadProtobufRoot(dir)).rejects.toThrow(/unresolved proto import/);
-    await expect(loadProtobufRoot(dir)).rejects.toThrow(/common\.proto/);
-    // google/protobuf/* is bundled and must not be flagged
-    await expect(loadProtobufRoot(dir)).rejects.not.toThrow(/timestamp\.proto/);
-  });
-
-  it('resolves cross-module imports across multiple roots', async () => {
-    const rootA = tmpDir('proto-root-a');
-    const rootB = tmpDir('proto-root-b');
-    fs.writeFileSync(
-      path.join(rootA, 'main.proto'),
-      'syntax = "proto3";\npackage demo;\nimport "common.proto";\nmessage Req { shared.Common c = 1; }\n',
-      'utf8',
-    );
-    fs.writeFileSync(
-      path.join(rootB, 'common.proto'),
-      'syntax = "proto3";\npackage shared;\nmessage Common { string x = 1; }\n',
-      'utf8',
-    );
-    const bundle = await loadProtobufRoot(`${rootA},${rootB}`);
-    expect(bundle.files.length).toBe(2);
-  });
-
-  it('picks up an edited .proto on the next load', async () => {
-    // arrange
-    const dir = tmpDir('proto-edit');
-    const file = path.join(dir, 'address.proto');
-    fs.writeFileSync(file, 'syntax = "proto3";\npackage taproot.test;\nmessage Address { string city = 1; }\n', 'utf8');
-    await loadProtobufRoot(dir);
-    fs.writeFileSync(file, 'syntax = "proto3";\npackage taproot.test;\nmessage Address { string city = 1; string country = 2; }\n', 'utf8');
-
-    // act
-    const { protobufRoot } = await loadProtobufRoot(dir);
-
-    // assert
-    expect(Object.keys((protobufRoot.lookup('taproot.test.Address') as { fields: object }).fields)).toEqual(['city', 'country']);
-  });
-
-  it('loads same-named files from different directories', async () => {
-    // arrange
-    const dir = tmpDir('proto-same-name');
-    fs.mkdirSync(path.join(dir, 'a', 'v1'), { recursive: true });
-    fs.mkdirSync(path.join(dir, 'b', 'v1'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'a', 'v1', 'types.proto'), 'syntax = "proto3";\npackage taproot.test.a;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(dir, 'b', 'v1', 'types.proto'), 'syntax = "proto3";\npackage taproot.test.b;\nmessage Profile { string name = 1; }\n', 'utf8');
-
-    // act
-    const { files, protobufRoot } = await loadProtobufRoot(dir);
-
-    // assert
-    expect(files.length).toBe(2);
-    expect(protobufRoot.lookup('taproot.test.a.Address')).toBeTruthy();
-    expect(protobufRoot.lookup('taproot.test.b.Profile')).toBeTruthy();
-  });
-
-  it('loads an import path vendored under two roots once, from the first root', async () => {
-    // arrange
-    const rootA = tmpDir('proto-vendor-a');
-    const rootB = tmpDir('proto-vendor-b');
-    fs.mkdirSync(path.join(rootA, 'common'));
-    fs.mkdirSync(path.join(rootB, 'common'));
-    fs.writeFileSync(path.join(rootA, 'common', 'address.proto'), 'syntax = "proto3";\npackage taproot.common;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(rootB, 'common', 'address.proto'), 'syntax = "proto3";\npackage taproot.common;\nmessage Address { string city = 1; string country = 2; }\n', 'utf8');
-
-    // act
-    const { files, protobufRoot } = await loadProtobufRoot(`${rootA},${rootB}`);
-
-    // assert
-    expect(files).toEqual([path.join(rootA, 'common', 'address.proto')]);
-    expect(Object.keys((protobufRoot.lookup('taproot.common.Address') as { fields: object }).fields)).toEqual(['city']);
-  });
-
-  it('fails an import whose path matches no file instead of binding a same-named file', async () => {
-    // arrange
-    const dir = tmpDir('proto-same-basename');
-    fs.mkdirSync(path.join(dir, 'a', 'x'), { recursive: true });
-    fs.mkdirSync(path.join(dir, 'a', 'y'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'a', 'x', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.x;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(dir, 'a', 'y', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.y;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(dir, 'profile.proto'), 'syntax = "proto3";\npackage taproot.test;\nimport "z/common.proto";\nmessage Profile { string name = 1; }\n', 'utf8');
-
-    // act
-    const load = loadProtobufRoot(dir);
-
-    // assert
-    await expect(load).rejects.toThrow(/unresolved proto import[\s\S]*"z\/common\.proto"/);
-  });
-
-  it('binds an import to the one file whose path ends with the import path', async () => {
-    // arrange
-    const dir = tmpDir('proto-import-suffix');
-    fs.mkdirSync(path.join(dir, 'a', 'x'), { recursive: true });
-    fs.mkdirSync(path.join(dir, 'a', 'y'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'a', 'x', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.x;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(dir, 'a', 'y', 'common.proto'), 'syntax = "proto3";\npackage taproot.test.y;\nmessage Address { string city = 1; }\n', 'utf8');
-    fs.writeFileSync(path.join(dir, 'profile.proto'), 'syntax = "proto3";\npackage taproot.test;\nimport "y/common.proto";\nmessage Profile { taproot.test.y.Address address = 1; }\n', 'utf8');
-
-    // act
-    const { protobufRoot } = await loadProtobufRoot(dir);
-
-    // assert
-    expect(protobufRoot.lookup('taproot.test.Profile')).toBeTruthy();
-  });
-
-  it('loads a file once when one root contains another', async () => {
-    // arrange
-    const dir = tmpDir('proto-nested-roots');
-    fs.mkdirSync(path.join(dir, 'profiles'));
-    writeFixtureProto(path.join(dir, 'profiles'));
-
-    // act
-    const { files } = await loadProtobufRoot(`${dir},${path.join(dir, 'profiles')}`);
-
-    // assert
-    expect(files.length).toBe(1);
-  });
-
-  it('builds the grpc package from the parsed root without parsing the files again', async () => {
-    // arrange
-    const dir = tmpDir('grpc-single-parse');
-    writeFixtureProto(dir);
-    const loadSync = vi.spyOn(protoLoader, 'loadSync');
-    const load = vi.spyOn(protoLoader, 'load');
-
-    // act
-    const bundle = await loadGrpcPackage(dir);
-
-    // assert
-    expect(bundle.protobufRoot).toBe((await loadProtobufRoot(dir)).protobufRoot);
-    expect(loadSync).not.toHaveBeenCalled();
-    expect(load).not.toHaveBeenCalled();
-    expect(typeof (bundle.grpcPackage as Record<string, any>).taproot?.test?.ProfileService).toBe('function');
-  });
-});
 
 describe('grpc-introspect', () => {
-  beforeEach(() => _resetProtoCachesForTest());
-
-  it('lists services and methods', async () => {
-    const dir = tmpDir('introspect-list');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
-    const services = listServices(protobufRoot);
-    expect(services).toHaveLength(1);
-    expect(services[0].name).toBe('taproot.test.ProfileService');
-    const methodNames = services[0].methods.map((m) => m.name).toSorted();
-    expect(methodNames).toEqual(['GetProfile', 'ListProfiles']);
-    const get = services[0].methods.find((m) => m.name === 'GetProfile')!;
-    expect(get.requestType).toBe('taproot.test.GetProfileRequest');
-    expect(get.responseType).toBe('taproot.test.GetProfileResponse');
-    expect(get.requestStream).toBeUndefined();
+  beforeEach(() => {
+    resetProtoCacheForTest();
   });
 
-  it('expands message shapes with nested types, enums, repeated, map, oneof', async () => {
-    const dir = tmpDir('introspect-expand');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
+  it('lists every service with its methods', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-list');
+
+    // act
+    const services = listServices(protobufRoot);
+
+    // assert
+    expect(services).toHaveLength(1);
+    expect(services[0].name).toBe(PROFILE_SERVICE);
+    expect(services[0].methods.map((method) => method.name).toSorted()).toStrictEqual(['GetProfile', 'ListProfiles']);
+  });
+
+  it('describes a unary method by its request and response types', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-method');
+
+    // act
+    const getProfile = listServices(protobufRoot)[0].methods.find((method) => method.name === 'GetProfile');
+
+    // assert
+    expect(getProfile).toMatchObject({
+      requestType: 'taproot.test.GetProfileRequest',
+      responseType: 'taproot.test.GetProfileResponse',
+    });
+    expect(getProfile?.requestStream).toBeUndefined();
+  });
+
+  it('expands the messages and enums reachable from a message', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-expand');
+
+    // act
     const { messages, enums } = expandMessage(protobufRoot, 'taproot.test.GetProfileResponse');
-    expect(messages['taproot.test.GetProfileResponse']).toBeTruthy();
-    expect(messages['taproot.test.Profile']).toBeTruthy();
-    expect(messages['taproot.test.Address']).toBeTruthy();
-    expect(enums['taproot.test.Status']).toEqual({
+
+    // assert
+    expect(Object.keys(messages).toSorted()).toStrictEqual(['taproot.test.Address', 'taproot.test.GetProfileResponse', 'taproot.test.Profile']);
+    expect(enums['taproot.test.Status']).toStrictEqual({
       name: 'taproot.test.Status',
       values: { STATUS_UNKNOWN: 0, ACTIVE: 1, RETIRED: 2 },
     });
-    const profile = messages['taproot.test.Profile'];
-    const fieldByName = Object.fromEntries(profile.fields.map((f) => [f.name, f]));
-    expect(fieldByName.nicknames.repeated).toBe(true);
+  });
+
+  it('expands message fields with repeated, enum, map and oneof markers', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-fields');
+
+    // act
+    const { messages } = expandMessage(protobufRoot, 'taproot.test.GetProfileResponse');
+
+    // assert
+    const fieldByName = Object.fromEntries(messages['taproot.test.Profile'].fields.map((field) => [field.name, field]));
+    expect(fieldByName.nicknames).toMatchObject({ repeated: true });
     expect(fieldByName.address.type).toBe('message:taproot.test.Address');
     expect(fieldByName.status.type).toBe('enum:taproot.test.Status');
-    expect(fieldByName.labels.type).toBe('map<string,string>');
-    expect(fieldByName.labels.repeated).toBe(true);
+    expect(fieldByName.labels).toMatchObject({ type: 'map<string,string>', repeated: true });
     expect(fieldByName.email.oneof).toBe('contact');
     expect(fieldByName.phone.oneof).toBe('contact');
   });
 
-  it('describeProto filters by service and method', async () => {
-    const dir = tmpDir('introspect-filter');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
-    const all = describeProto(protobufRoot);
-    expect(all.services).toHaveLength(1);
-    expect(Object.keys(all.messages).length).toBeGreaterThan(0);
+  it('describeProto describes every service and message when unfiltered', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-unfiltered');
 
-    const onlyGet = describeProto(protobufRoot, {
-      service: 'taproot.test.ProfileService',
-      method: 'GetProfile',
-    });
-    expect(onlyGet.messages['taproot.test.GetProfileRequest']).toBeTruthy();
+    // act
+    const descriptor = describeProto(protobufRoot);
+
+    // assert
+    expect(descriptor.services).toHaveLength(1);
+    expect(Object.keys(descriptor.messages).length).toBeGreaterThan(0);
+  });
+
+  it('describeProto filters by service and method', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-filter');
+
+    // act
+    const onlyGet = describeProto(protobufRoot, { service: PROFILE_SERVICE, method: 'GetProfile' });
+
+    // assert
+    expect(onlyGet.messages['taproot.test.GetProfileRequest']).toBeDefined();
     expect(onlyGet.messages['taproot.test.ListProfilesResponse']).toBeUndefined();
   });
 
   it('caps message expansion at maxDepth', async () => {
-    const dir = tmpDir('introspect-depth');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-depth');
+
+    // act
     const shallow = expandMessage(protobufRoot, 'taproot.test.GetProfileResponse', { maxDepth: 1 });
-    expect(shallow.messages['taproot.test.GetProfileResponse']).toBeTruthy();
-    expect(shallow.messages['taproot.test.Profile']).toBeTruthy();
+
+    // assert
+    expect(shallow.messages['taproot.test.GetProfileResponse']).toBeDefined();
+    expect(shallow.messages['taproot.test.Profile']).toBeDefined();
     expect(shallow.messages['taproot.test.Address']).toBeUndefined();
   });
 
   it('loads and describes a proto root end-to-end', async () => {
-    const dir = tmpDir('introspect-e2e');
-    writeFixtureProto(dir);
-    const descriptor = describeProto((await loadProtobufRoot(dir)).protobufRoot, { service: 'taproot.test.ProfileService' });
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-e2e');
+
+    // act
+    const descriptor = describeProto(protobufRoot, { service: PROFILE_SERVICE });
+
+    // assert
     expect(descriptor.services[0].methods).toHaveLength(2);
-    expect(descriptor.messages['taproot.test.Profile']).toBeTruthy();
+    expect(descriptor.messages['taproot.test.Profile']).toBeDefined();
   });
 });
 
@@ -326,48 +148,60 @@ describe('grpc-introspect discovery helpers', () => {
   it('resolveName returns candidates when ambiguous and has no match', () => {
     const both = resolveName('service', services);
     expect(both.match).toBeUndefined();
-    expect(both.candidates).toEqual(services);
+    expect(both.candidates).toStrictEqual(services);
   });
 
   it('suggestNames ranks closest by edit distance', () => {
-    const out = suggestNames('ProfilService', services, 1);
-    expect(out[0]).toBe('taproot.test.ProfileService');
+    const [closest] = suggestNames('ProfilService', services, 1);
+    expect(closest).toBe('taproot.test.ProfileService');
   });
 
-  it('searchMethods finds by service/method/message substring', async () => {
-    const dir = tmpDir('introspect-search');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
+  it('finds methods whose service, method or message name contains the term', async () => {
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-search');
+
+    // act
     const byMethod = searchMethods(protobufRoot, 'getprofile');
-    expect(byMethod.map((m) => m.method)).toEqual(['GetProfile']);
     const byMessage = searchMethods(protobufRoot, 'ListProfilesResponse');
-    expect(byMessage.map((m) => m.method)).toEqual(['ListProfiles']);
-    expect(searchMethods(protobufRoot, '').length).toBe(2);
+    const matchesForEmptyTerm = searchMethods(protobufRoot, '');
+
+    // assert
+    expect(byMethod.map((match) => match.method)).toStrictEqual(['GetProfile']);
+    expect(byMessage.map((match) => match.method)).toStrictEqual(['ListProfiles']);
+    expect(matchesForEmptyTerm).toHaveLength(2);
   });
 
   it('buildRequestSkeleton emits an editable typed example', async () => {
-    const dir = tmpDir('introspect-skeleton');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
-    const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.GetProfileRequest') as Record<string, unknown>;
-    expect(skeleton).toEqual({ id: '<string>' });
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-skeleton');
+
+    // act
+    const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.GetProfileRequest');
+
+    // assert
+    expect(skeleton).toStrictEqual({ id: '<string>' });
   });
 
   it('grpc describe --skeleton prints a ready-to-run query call', () => {
-    const dir = tmpDir('introspect-skeleton-call');
+    // arrange
+    const dir = makeTempDir('introspect-skeleton-call');
     writeFixtureProto(dir);
+
+    // act
     const out = runCli(
       ['grpc', 'describe', '--proto-root', dir, '--method', 'GetProfile', '--skeleton', '--pluck', 'data.requestSkeletons'],
       { TAPROOT_STATE_ROOT: tempStateRoot().stateRoot },
     );
-    expect(JSON.parse(out.stdout)[0].call).toBe(
+
+    // assert
+    expect(parseSkeletonCalls(out.stdout)[0].call).toBe(
       `taproot query --datasource <datasource> --query "taproot.test.ProfileService/GetProfile" --request-json '{"id":"<string>"}'`,
     );
   });
 
   it('grpc describe --max-depth 0 lists only the request and response messages', () => {
     // arrange
-    const dir = tmpDir('introspect-depth-zero');
+    const dir = makeTempDir('introspect-depth-zero');
     writeFixtureProto(dir);
 
     // act
@@ -377,22 +211,28 @@ describe('grpc-introspect discovery helpers', () => {
     );
 
     // assert
-    expect(Object.keys(JSON.parse(out.stdout)).toSorted()).toEqual(['taproot.test.GetProfileRequest', 'taproot.test.GetProfileResponse']);
+    expect(parseMessageNames(out.stdout).toSorted()).toStrictEqual(['taproot.test.GetProfileRequest', 'taproot.test.GetProfileResponse']);
   });
 
   it('buildRequestSkeleton expands nested messages, repeated, enum, map, oneof', async () => {
-    const dir = tmpDir('introspect-skeleton-deep');
-    writeFixtureProto(dir);
-    const { protobufRoot } = await loadProtobufRoot(dir);
-    const resp = buildRequestSkeleton(protobufRoot, 'taproot.test.ListProfilesResponse') as Record<string, unknown>;
-    const profiles = resp.profiles as Record<string, unknown>[];
-    expect(Array.isArray(profiles)).toBe(true);
-    const p = profiles[0];
-    expect(p.name).toBe('<string>');
-    expect(p.nicknames).toEqual(['<string>']);
-    expect(p.address).toEqual({ city: '<string>', country: '<string>' });
-    expect(p.status).toBe('STATUS_UNKNOWN');
-    expect(p.labels).toEqual({ '<key>': '<string>' });
-    expect(p.email).toBe('<string>');
+    // arrange
+    const protobufRoot = await loadFixtureRoot('introspect-skeleton-deep');
+
+    // act
+    const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.ListProfilesResponse');
+
+    // assert
+    expect(skeleton).toMatchObject({
+      profiles: [
+        {
+          name: '<string>',
+          nicknames: ['<string>'],
+          address: { city: '<string>', country: '<string>' },
+          status: 'STATUS_UNKNOWN',
+          labels: { '<key>': '<string>' },
+          email: '<string>',
+        },
+      ],
+    });
   });
 });

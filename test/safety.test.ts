@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { classifySql, enforceMutationPolicy } from '../src/core/safety.js';
+import { enforceMutationPolicy } from '../src/core/safety.js';
+import { classifySql } from '../src/core/sql-statement-effect.js';
 
-describe('safety', () => {
+describe('sql safety classification', () => {
   it('classifies mutate vs read', () => {
     expect(classifySql('SELECT 1')).toBe('read');
     expect(classifySql('SHOW CREATE TABLE sample_table')).toBe('read');
@@ -70,7 +71,7 @@ describe('safety', () => {
   });
 
   it('leaves non-SQL commands to their plugin', () => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql: 'GET profile:1',
         allowMutate: false,
@@ -82,12 +83,12 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: '',
         },
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
   });
 
   it('blocks mutate without allow flag', () => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql: 'DELETE FROM x',
         allowMutate: false,
@@ -99,8 +100,8 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
         },
-      }),
-    ).toThrow(/allow-mutate/);
+      });
+    }).toThrow(/allow-mutate/u);
   });
 
   it.each([
@@ -108,7 +109,7 @@ describe('safety', () => {
     ['-- check\nSHOW TABLES; SHOW DATABASES', false],
     ['SELECT 1; DELETE FROM x', true],
   ])('asks for one statement per query instead of --allow-mutate for %s', (sql, allowMutate) => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql,
         allowMutate,
@@ -120,12 +121,12 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
         },
-      }),
-    ).toThrow(/^BAD_INPUT: send one SQL statement per query/);
+      });
+    }).toThrow(/^BAD_INPUT: send one SQL statement per query/u);
   });
 
   it('asks for --allow-mutate on several writes in one query', () => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql: 'DELETE FROM a; DELETE FROM b',
         allowMutate: false,
@@ -137,12 +138,12 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
         },
-      }),
-    ).toThrow(/allow-mutate/);
+      });
+    }).toThrow(/allow-mutate/u);
   });
 
   it('lets a stored procedure body with semicolons through with --allow-mutate', () => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql: 'CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END',
         allowMutate: true,
@@ -154,12 +155,12 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: true, allowedCapabilities: ['executeRead', 'executeMutate'] },
           updatedAt: '',
         },
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
   });
 
   it('blocks mutate when datasource policy disallows', () => {
-    expect(() =>
+    expect(() => {
       enforceMutationPolicy({
         sql: 'UPDATE x SET a=1',
         allowMutate: true,
@@ -171,7 +172,7 @@ describe('safety', () => {
           policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
           updatedAt: '',
         },
-      }),
-    ).toThrow(/policy disallows mutate/);
+      });
+    }).toThrow(/policy disallows mutate/u);
   });
 });

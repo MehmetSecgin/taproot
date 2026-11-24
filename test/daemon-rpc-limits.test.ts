@@ -1,65 +1,54 @@
 import net from 'node:net';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
-import { rpcCall } from '../src/daemon/client.js';
-import { startLocalDaemon } from './helpers/daemon.js';
 import { TAPROOT_VERSION } from '../src/core/version.js';
-import { CredentialStore } from '../src/store/credentials.js';
-import type { TapRootPlugin } from '../src/types/core.js';
+import { rpcCall } from '../src/daemon/client.js';
+import type { QueryResult, TapRootPlugin } from '../src/types/plugin.js';
+import { startDaemonWithFakeDatasources } from './helpers/fake-datasource-daemon.js';
+import { restoreProcessEnv } from './helpers/query-state.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
-import { DatasourceStore } from '../src/store/datasources.js';
-import { tempStateRoot } from './helpers/state-root.js';
+import { waitMs } from '../src/core/wait.js';
 
-const previousEnv = {
-  TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
-  TAPROOT_MASTER_KEY: process.env.TAPROOT_MASTER_KEY,
-  NODE_ENV: process.env.NODE_ENV,
+type FakeQuery = {
+  socketPath: string;
+  datasourceIndex: number;
+  queryTimeoutMs?: number;
+  replyTimeoutMs: number;
 };
 
-async function setupDaemon(datasourceCount: number, plugin: TapRootPlugin) {
-  const { stateRoot, configDir } = tempStateRoot();
-  process.env.TAPROOT_STATE_ROOT = stateRoot;
-  process.env.TAPROOT_MASTER_KEY = 'test-master-key';
-  process.env.NODE_ENV = 'test';
+function rangeOf(count: number): number[] {
+  return Array.from({ length: count }, (_ignored, index) => index);
+}
 
-  const dsStore = new DatasourceStore(path.join(configDir, 'datasources.json'));
-  for (let i = 0; i < datasourceCount; i += 1) {
-    dsStore.save({
-      name: `qa-fake-${i}`,
-      kind: 'fake',
-      env: 'qa',
-      service: `fake-${i}`,
-      tags: [],
-      connection: { host: '127.0.0.1', port: 1, database: 'fake' },
-      credentialRef: 'qa:fake',
-      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-      updatedAt: new Date().toISOString(),
-    });
-  }
-  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
-  await creds.set('qa:fake', { user: 'x', password: 'x' });
-
-  const socketPath = path.join(stateRoot, 'run', 'taprootd-test.sock');
-  const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [plugin] });
-  return { daemon, socketPath };
+async function queryFakeDatasource(query: FakeQuery): ReturnType<typeof rpcCall> {
+  return rpcCall({
+    socketPath: query.socketPath,
+    method: 'query.execute',
+    params: {
+      datasource: `qa-fake-${query.datasourceIndex}`,
+      query: 'SELECT 1 AS ok',
+      ...(query.queryTimeoutMs === undefined ? {} : { timeoutMs: query.queryTimeoutMs }),
+    },
+    timeoutMs: query.replyTimeoutMs,
+  });
 }
 
 function abortWatchingPlugin(seen: { executing: boolean; abortReason?: unknown }): TapRootPlugin {
   const plugin = fakePlugin();
-  plugin.execute = (request) => {
+  plugin.execute = async (request): Promise<QueryResult> => {
     seen.executing = true;
-    return new Promise((_, reject) => {
+    return new Promise((_resolve, reject) => {
       request.signal?.addEventListener('abort', () => {
-        seen.abortReason = request.signal?.reason;
-        reject(request.signal?.reason);
+        const reason: unknown = request.signal?.reason;
+        seen.abortReason = reason;
+        reject(reason instanceof Error ? reason : new Error(String(reason)));
       });
     });
   };
   return plugin;
 }
 
-function sendQueryAndHangUp(socketPath: string, seen: { executing: boolean }): Promise<void> {
+async function sendQueryAndHangUp(socketPath: string, seen: { executing: boolean }): Promise<void> {
   const socket = net.createConnection(socketPath);
   socket.write(
     `${JSON.stringify({
@@ -70,36 +59,23 @@ function sendQueryAndHangUp(socketPath: string, seen: { executing: boolean }): P
       params: { datasource: 'qa-fake-0', query: 'SELECT 1 AS ok' },
     })}\n`,
   );
-  return vi.waitFor(() => expect(seen.executing).toBe(true)).then(() => {
-    socket.destroy();
+  await vi.waitFor(() => {
+    expect(seen.executing).toBe(true);
   });
+  socket.destroy();
 }
 
-afterEach(() => {
-  process.env.TAPROOT_STATE_ROOT = previousEnv.TAPROOT_STATE_ROOT;
-  process.env.TAPROOT_MASTER_KEY = previousEnv.TAPROOT_MASTER_KEY;
-  process.env.NODE_ENV = previousEnv.NODE_ENV;
-});
-
 describe('daemon rpc limits', () => {
+  afterEach(restoreProcessEnv);
+
   it('returns OVERLOADED when queue limit is exceeded', async () => {
     const total =
       RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + RUNTIME_CONSTANTS.daemon.maxQueuedQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total, fakePlugin({ holdMs: 900 }));
+    const { daemon, socketPath } = await startDaemonWithFakeDatasources(total, fakePlugin({ holdMs: 900 }));
     try {
-      const calls = Array.from({ length: total }, (_, i) =>
-        rpcCall({
-          socketPath,
-          method: 'query.execute',
-          params: {
-            datasource: `qa-fake-${i}`,
-            query: 'SELECT 1 AS ok',
-          },
-          timeoutMs: 15_000,
-        }),
-      );
-      const out = await Promise.all(calls);
-      const overloaded = out.filter((r) => !r.ok && r.error?.code === 'OVERLOADED');
+      const calls = rangeOf(total).map(async (datasourceIndex) => queryFakeDatasource({ socketPath, datasourceIndex, replyTimeoutMs: 15_000 }));
+      const replies = await Promise.all(calls);
+      const overloaded = replies.filter((reply) => reply.error?.code === 'OVERLOADED');
       expect(overloaded.length).toBeGreaterThan(0);
       expect(overloaded[0].error?.message).toContain('queue');
     } finally {
@@ -108,28 +84,18 @@ describe('daemon rpc limits', () => {
   }, 15_000);
 
   it('runs 8 parallel queries on one datasource without rejecting any', async () => {
-    const { daemon, socketPath } = await setupDaemon(1, fakePlugin({ holdMs: 500 }));
+    const { daemon, socketPath } = await startDaemonWithFakeDatasources(1, fakePlugin({ holdMs: 500 }));
     try {
-      const calls = Array.from({ length: 8 }, () =>
-        rpcCall({
-          socketPath,
-          method: 'query.execute',
-          params: {
-            datasource: 'qa-fake-0',
-            query: 'SELECT 1 AS ok',
-          },
-          timeoutMs: 10_000,
-        }),
-      );
-      const out = await Promise.all(calls);
-      expect(out.map((r) => r.ok)).toEqual(Array(8).fill(true));
+      const calls = rangeOf(8).map(async () => queryFakeDatasource({ socketPath, datasourceIndex: 0, replyTimeoutMs: 10_000 }));
+      const replies = await Promise.all(calls);
+      expect(replies.map((reply) => reply.ok)).toStrictEqual(rangeOf(8).map(() => true));
     } finally {
       await daemon.stop();
     }
   });
 
   it('reports limiter stats and limits in daemon.status', async () => {
-    const { daemon, socketPath } = await setupDaemon(1, fakePlugin());
+    const { daemon, socketPath } = await startDaemonWithFakeDatasources(1, fakePlugin());
     try {
       const res = await rpcCall({ socketPath, method: 'daemon.status' });
       expect(res.ok).toBe(true);
@@ -145,32 +111,19 @@ describe('daemon rpc limits', () => {
 
   it('counts queue wait time against timeoutMs', async () => {
     const total = RUNTIME_CONSTANTS.daemon.maxConcurrentQueries + 1;
-    const { daemon, socketPath } = await setupDaemon(total, fakePlugin({ holdMs: 900 }));
+    const { daemon, socketPath } = await startDaemonWithFakeDatasources(total, fakePlugin({ holdMs: 900 }));
     try {
-      const blockers = Array.from({ length: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries }, (_, i) =>
-        rpcCall({
-          socketPath,
-          method: 'query.execute',
-          params: {
-            datasource: `qa-fake-${i}`,
-            query: 'SELECT 1 AS ok',
-            timeoutMs: 5_000,
-          },
-          timeoutMs: 10_000,
-        }),
+      const blockers = rangeOf(RUNTIME_CONSTANTS.daemon.maxConcurrentQueries).map(async (datasourceIndex) =>
+        queryFakeDatasource({ socketPath, datasourceIndex, queryTimeoutMs: 5000, replyTimeoutMs: 10_000 }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitMs(100);
 
       const startedAt = Date.now();
-      const queued = await rpcCall({
+      const queued = await queryFakeDatasource({
         socketPath,
-        method: 'query.execute',
-        params: {
-          datasource: `qa-fake-${RUNTIME_CONSTANTS.daemon.maxConcurrentQueries}`,
-          query: 'SELECT 1 AS ok',
-          timeoutMs: 200,
-        },
-        timeoutMs: 10_000,
+        datasourceIndex: RUNTIME_CONSTANTS.daemon.maxConcurrentQueries,
+        queryTimeoutMs: 200,
+        replyTimeoutMs: 10_000,
       });
       const elapsedMs = Date.now() - startedAt;
 
@@ -187,13 +140,15 @@ describe('daemon rpc limits', () => {
   it('aborts the in-flight query and frees its slot when the client disconnects', async () => {
     // arrange
     const seen: { executing: boolean; abortReason?: unknown } = { executing: false };
-    const { daemon, socketPath } = await setupDaemon(1, abortWatchingPlugin(seen));
+    const { daemon, socketPath } = await startDaemonWithFakeDatasources(1, abortWatchingPlugin(seen));
     try {
       // act
       await sendQueryAndHangUp(socketPath, seen);
 
       // assert
-      await vi.waitFor(() => expect(String(seen.abortReason)).toContain('client disconnected'));
+      await vi.waitFor(() => {
+        expect(String(seen.abortReason)).toContain('client disconnected');
+      });
       const status = await rpcCall({ socketPath, method: 'daemon.status' });
       expect(status.data?.queryLimiter).toMatchObject({ inFlight: 0 });
     } finally {

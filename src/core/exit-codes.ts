@@ -1,13 +1,57 @@
-import { classifyError, exitCodeForClass, EXIT_CODES } from './error-classification.js';
-import { str } from './strings.js';
+import { classifyError, isErrorClass } from './error-classification.js';
+import { errorText } from './error-text.js';
+import type { ErrorClass } from './error-classification.js';
 
-export { EXIT_CODES, exitCodeForClass } from './error-classification.js';
+export const EXIT_CODES = {
+  OK: 0,
+  GENERAL_ERROR: 1,
+  BAD_INPUT: 2,
+  CONNECTIVITY: 3,
+  AUTH: 4,
+  ACCESS_DENIED: 5,
+  UNKNOWN_TARGET: 6,
+  NOT_READY: 7,
+} as const;
+
+const EXIT_CODE_BY_ERROR_CLASS: Record<ErrorClass, number> = {
+  BAD_INPUT: EXIT_CODES.BAD_INPUT,
+  MISSING_PARTITION_PREDICATE: EXIT_CODES.BAD_INPUT,
+  QUERY_TIMEOUT: EXIT_CODES.GENERAL_ERROR,
+  RESOURCE_LIMIT: EXIT_CODES.GENERAL_ERROR,
+  DATASOURCE_REFUSED: EXIT_CODES.ACCESS_DENIED,
+  DATABASE_CONFINED: EXIT_CODES.ACCESS_DENIED,
+  DETERMINISTIC_REQUIRED: EXIT_CODES.BAD_INPUT,
+  KB_MISSING: EXIT_CODES.NOT_READY,
+  UNKNOWN_DATASOURCE: EXIT_CODES.BAD_INPUT,
+  AMBIGUOUS_DATASOURCE: EXIT_CODES.BAD_INPUT,
+  AMBIGUOUS_DB_USER: EXIT_CODES.BAD_INPUT,
+  UNKNOWN_COLUMN: EXIT_CODES.BAD_INPUT,
+  AMBIGUOUS_COLUMN: EXIT_CODES.BAD_INPUT,
+  UNKNOWN_TABLE: EXIT_CODES.BAD_INPUT,
+  SQL_SYNTAX: EXIT_CODES.BAD_INPUT,
+  OVERLOADED: EXIT_CODES.GENERAL_ERROR,
+  ACCESS_DENIED: EXIT_CODES.ACCESS_DENIED,
+  UNKNOWN_DATABASE: EXIT_CODES.GENERAL_ERROR,
+  MISSING_TOOL: EXIT_CODES.NOT_READY,
+  UNKNOWN_TARGET: EXIT_CODES.UNKNOWN_TARGET,
+  GENERIC: EXIT_CODES.GENERAL_ERROR,
+  MISCONFIGURED_DATASOURCE: EXIT_CODES.BAD_INPUT,
+  CONNECTIVITY: EXIT_CODES.CONNECTIVITY,
+  AUTH_EXPIRED: EXIT_CODES.AUTH,
+};
+
+const COMMANDER_USAGE_MESSAGE = /unknown option|required option|too many arguments|missing required argument|invalid argument/u;
+
+export function exitCodeForClass(errorClass: string): number {
+  return isErrorClass(errorClass) ? EXIT_CODE_BY_ERROR_CLASS[errorClass] : EXIT_CODES.GENERAL_ERROR;
+}
 
 export function classifyExitCode(input: unknown): number {
-  const message = str((input as Error)?.message || input).trim();
-  if (!message) return EXIT_CODES.GENERAL_ERROR;
-  const lower = message.toLowerCase();
-  if (/unknown option|required option|too many arguments|missing required argument|invalid argument/.test(lower)) {
+  const message = errorText(input).trim();
+  if (message === '') {
+    return EXIT_CODES.GENERAL_ERROR;
+  }
+  if (COMMANDER_USAGE_MESSAGE.test(message.toLowerCase())) {
     return EXIT_CODES.BAD_INPUT;
   }
   return exitCodeForClass(classifyError(message));

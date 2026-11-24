@@ -1,21 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { AppContext } from '../core/app.js';
-import { discoverKubernetesTargets } from '../core/discovery.js';
+import { discoverKubernetesTargets } from '../core/kubernetes-target-discovery.js';
 import { executeQuery } from '../core/execute-query.js';
-import type { QueryExecutionRequest } from '../core/execute-query.js';
+import type { QueryExecutionRequest } from '../core/query-types.js';
 import { queryDatasourceResolver } from '../core/resolve-query-datasource.js';
-import { outcomeReply, type QueryReply } from './query-present.js';
-
-export function verboseLog(ctx: AppContext): (msg: string) => void {
-  return (msg) => {
-    if (ctx.verbose) process.stderr.write(`${JSON.stringify({ verbose: msg })}\n`);
-  };
-}
+import { outcomeReply } from './query-reply.js';
+import type { QueryReply } from './query-reply.js';
+import { createVerboseLog } from './verbose-log.js';
 
 export async function runDirectQuery(request: QueryExecutionRequest, ctx: AppContext): Promise<QueryReply> {
   const outcome = await executeQuery(request, {
     ctx,
-    report: { log: verboseLog(ctx) },
+    report: { log: createVerboseLog(ctx) },
     signal: undefined,
     acquireQuerySlot: undefined,
     resolveDatasource: queryDatasourceResolver(discoverKubernetesTargets),
