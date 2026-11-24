@@ -8,6 +8,7 @@ import { rpcCall } from '../daemon/client.js';
 import { defaultSocketPath } from '../daemon/socket-path.js';
 import { RpcMethod } from '../daemon/types.js';
 import { nonEmptyOr, textUnlessFalsy } from './text-presence.js';
+import { errorText } from './error-text.js';
 
 type ReadinessState = 'ready' | 'missing_kb' | 'missing_config' | 'missing_datasource' | 'missing_creds';
 
@@ -26,10 +27,6 @@ const READINESS_BLOCKERS: { checkName: string; state: ReadinessState }[] = [
   { checkName: 'datasources', state: 'missing_datasource' },
   { checkName: 'credentials', state: 'missing_creds' },
 ];
-
-function errorMessageOrEmpty(error: unknown): string {
-  return error instanceof Error ? error.message : '';
-}
 
 function configCheck(ctx: AppContext, createdConfig: boolean): DoctorCheck {
   const exists = fs.existsSync(ctx.paths.runtimeConfigFile);
@@ -70,7 +67,7 @@ async function daemonCheck(ctx: AppContext): Promise<DoctorCheck> {
     return {
       check: 'daemon',
       status: DoctorStatus.Warn,
-      detail: nonEmptyOr(errorMessageOrEmpty(error), 'daemon unavailable'),
+      detail: nonEmptyOr(errorText(error), 'daemon unavailable'),
     };
   }
 }
@@ -111,7 +108,7 @@ async function credentialRefsCheck(ctx: AppContext, datasources: DatasourceProfi
   try {
     return unsetCredentialRefsCheck(await findUnsetCredentialRefs(ctx, datasourceNamesByCredentialRef(datasources)));
   } catch (error) {
-    return { check: 'credential_refs', status: DoctorStatus.Fail, detail: errorMessageOrEmpty(error) };
+    return { check: 'credential_refs', status: DoctorStatus.Fail, detail: errorText(error) };
   }
 }
 
@@ -152,7 +149,7 @@ function loadDatasources(ctx: AppContext): { datasources: DatasourceProfile[]; c
   try {
     return summarizeDatasources(ctx.datasourceStore.load());
   } catch (error) {
-    return { datasources: [], checks: [{ check: 'datasources', status: DoctorStatus.Fail, detail: errorMessageOrEmpty(error) }] };
+    return { datasources: [], checks: [{ check: 'datasources', status: DoctorStatus.Fail, detail: errorText(error) }] };
   }
 }
 

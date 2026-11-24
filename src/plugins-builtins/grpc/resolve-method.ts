@@ -2,7 +2,7 @@ import { matchName, resolveName } from '../../core/name-match.js';
 import type { GrpcMethodShape, GrpcServiceShape } from '../../core/grpc-introspect.js';
 import { textUnlessFalsy } from '../../core/text-presence.js';
 
-export type ServiceMethodRef = { service: string; method: string };
+type ServiceMethodRef = { service: string; method: string };
 
 const MAX_NAME_SUGGESTIONS = 5;
 

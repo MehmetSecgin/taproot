@@ -3,6 +3,7 @@ import { badInput } from '../../core/taproot-error.js';
 import type { GrpcMethodShape } from '../../core/grpc-introspect.js';
 import type { QueryRequest } from '../../types/plugin.js';
 import { isPlainRecord, isRecord } from '../../core/json-shapes.js';
+import { errorText } from '../../core/error-text.js';
 
 type RequestPayload = Record<string, unknown> | unknown[];
 
@@ -20,7 +21,7 @@ function parseRequestJson(raw: string): RequestPayload {
   try {
     return decodeRequestJson(raw);
   } catch (error) {
-    throw new Error(`invalid --request-json: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(`invalid --request-json: ${errorText(error)}`, { cause: error });
   }
 }
 

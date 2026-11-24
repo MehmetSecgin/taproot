@@ -6,8 +6,9 @@ import { TAPROOT_VERSION } from '../core/version.js';
 import type { Handler, HandlerDeps, HandlerResult } from './methods/types.js';
 import { RpcMethod } from './types.js';
 import type { RpcRequest, RpcResponse } from './types.js';
-import { isRecord } from '../core/json-shapes.js';
+import { parseRequestLine } from './request-line.js';
 import { propertyOf } from '../core/object-property.js';
+import { errorText } from '../core/error-text.js';
 
 const BYTES_PER_KIBIBYTE = 1024;
 const MAX_REQUEST_LINE_CHARS = BYTES_PER_KIBIBYTE * BYTES_PER_KIBIBYTE;
@@ -23,7 +24,7 @@ export type ConnectionServing = {
   deps: HandlerDeps;
   activity: ConnectionActivity;
   log: (event: Record<string, unknown>) => void;
-  stopAcceptingConnections: () => void;
+  startClosingServer: () => void;
 };
 
 type AnswerInput = {
@@ -38,26 +39,6 @@ type Answer = {
   postWrite: HandlerResult['postWrite'];
 };
 
-function hasText(value: unknown): boolean {
-  return typeof value === 'string' && value !== '';
-}
-
-function isRpcRequestEnvelope(value: unknown): value is RpcRequest {
-  return isRecord(value) && hasText(value.requestId) && hasText(value.method) && isRecord(value.params);
-}
-
-function parseRequestLine(line: string): RpcRequest {
-  const parsed: unknown = JSON.parse(line);
-  const protocolVersion = isRecord(parsed) ? parsed.protocolVersion : undefined;
-  if (protocolVersion !== RUNTIME_CONSTANTS.protocolVersion) {
-    throw new Error(`Unsupported protocolVersion=${String(protocolVersion)}`);
-  }
-  if (!isRpcRequestEnvelope(parsed)) {
-    throw new Error('Invalid RPC request envelope');
-  }
-  return parsed;
-}
-
 function writeRpcResponse(socket: net.Socket, response: RpcResponse): void {
   socket.write(`${JSON.stringify(response)}\n`);
 }
@@ -70,7 +51,7 @@ function parseOrReplyBadRequest(socket: net.Socket, line: string): RpcRequest | 
       protocolVersion: RUNTIME_CONSTANTS.protocolVersion,
       requestId: 'unknown',
       ok: false,
-      error: { code: 'BAD_REQUEST', message: error instanceof Error ? error.message : String(error) },
+      error: { code: 'BAD_REQUEST', message: errorText(error) },
       meta: {},
     });
     return undefined;
@@ -78,8 +59,7 @@ function parseOrReplyBadRequest(socket: net.Socket, line: string): RpcRequest | 
 }
 
 function describeThrown(error: unknown): { message: string; details: unknown } {
-  const message = error instanceof Error ? error.message : String(error);
-  return { message, details: propertyOf(error, 'details') };
+  return { message: errorText(error), details: propertyOf(error, 'details') };
 }
 
 function splitCompleteLines(buffer: string): { lines: string[]; remainder: string } {
@@ -166,25 +146,25 @@ function endConnectionAndCleanUp(socket: net.Socket): void {
   void runRegisteredCleanup();
 }
 
-async function answerTrackingActivity(connection: ConnectionHandle, request: RpcRequest, serving: ConnectionServing): Promise<Answer> {
-  serving.activity.activeRequests += 1;
-  return answerRpc({ request, handler: handlerFor(request, serving), deps: serving.deps, clientGone: connection.clientGone });
-}
-
-async function serveRequest(connection: ConnectionHandle, request: RpcRequest, serving: ConnectionServing): Promise<void> {
-  const { response, postWrite } = await answerTrackingActivity(connection, request, serving);
+async function answerAndReply(connection: ConnectionHandle, request: RpcRequest, serving: ConnectionServing): Promise<void> {
+  const { response, postWrite } = await answerRpc({ request, handler: handlerFor(request, serving), deps: serving.deps, clientGone: connection.clientGone });
   const stopsDaemon = postWrite === 'stopSocket';
   if (!response.ok) {
     serving.log(requestFailedEvent(request, response, connection.socket));
   }
   if (stopsDaemon) {
-    serving.stopAcceptingConnections();
+    serving.startClosingServer();
   }
   writeRpcResponse(connection.socket, response);
-  recordFinishedRequest(serving.activity);
   if (stopsDaemon) {
     endConnectionAndCleanUp(connection.socket);
   }
+}
+
+async function serveRequest(connection: ConnectionHandle, request: RpcRequest, serving: ConnectionServing): Promise<void> {
+  serving.activity.activeRequests += 1;
+  await answerAndReply(connection, request, serving);
+  recordFinishedRequest(serving.activity);
 }
 
 export function serveConnection(socket: net.Socket, serving: ConnectionServing): void {

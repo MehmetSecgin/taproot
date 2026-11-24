@@ -10,7 +10,7 @@ export type EnvironmentPolicy = {
   targetPreference: string[];
 };
 
-export type RuntimeConfig = {
+type RuntimeConfig = {
   kbDir?: string;
   defaults?: {
     query?: {

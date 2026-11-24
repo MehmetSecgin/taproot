@@ -1,7 +1,7 @@
 import type { AppContext } from '../core/app.js';
 import { registerCleanup } from '../core/process-cleanup.js';
 import type { DatasourceCheck } from './datasource-check.js';
-import { claimSocket } from './listener.js';
+import { claimSocket } from './socket-claim.js';
 import type { DaemonEndpoint, DaemonMethod } from './methods/types.js';
 import { openServing } from './serving.js';
 import type { ServingDaemon } from './serving.js';

@@ -8,7 +8,7 @@ import type { QueryRequest } from '../../types/plugin.js';
 import { requestMessages, resolveRequestPayload } from './request-payload.js';
 import { parseServiceMethodRef, resolveMethod } from './resolve-method.js';
 
-export type PreparedCall = {
+type PreparedCall = {
   bundle: GrpcBundle;
   protoRoot: string;
   service: string;

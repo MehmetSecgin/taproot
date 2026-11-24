@@ -2,12 +2,12 @@ import { classifyExecutorDoctorCode } from '../../core/executor-errors.js';
 import { DoctorStatus } from '../../types/plugin.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/plugin.js';
 import { loadMysql } from '../_shared/mysql-connection-lease.js';
-import { errorMessage } from '../_shared/error-message.js';
 import { isNonEmpty } from '../../core/text-presence.js';
 import { proxyConnectionOptions } from './connection-options.js';
 import type { ProxyTarget } from './connection-options.js';
 import { resolveDbUser } from './db-user.js';
 import { closeTeleportMysqlSessionProxies, ensureProxy } from './proxy-pool.js';
+import { errorText } from '../../core/error-text.js';
 
 type DoctorInput = Parameters<NonNullable<TapRootPlugin['doctor']>>[0];
 
@@ -21,7 +21,7 @@ async function resolveDbUserForDoctor(input: DoctorInput): Promise<{ user: strin
   try {
     return { user: await resolveDbUser(input.datasource, input.credentials), failureDetail: MISSING_FIELDS_DETAIL };
   } catch (error) {
-    return { user: '', failureDetail: errorMessage(error) };
+    return { user: '', failureDetail: errorText(error) };
   }
 }
 
@@ -35,7 +35,7 @@ async function probeThroughProxy(proxyTarget: ProxyTarget, password: string | un
     await conn.end();
     return [{ check: 'teleport-mysql query', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
   } catch (error) {
-    return failedCheck('teleport-mysql query', errorMessage(error));
+    return failedCheck('teleport-mysql query', errorText(error));
   } finally {
     await closeTeleportMysqlSessionProxies(sessionId);
   }

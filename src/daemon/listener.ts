@@ -1,15 +1,13 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
-import path from 'node:path';
 import tls from 'node:tls';
 import { badInput } from '../core/taproot-error.js';
-import { rpcCall } from './client.js';
 import type { DaemonEndpoint } from './methods/types.js';
 import type { DaemonListen, DaemonLog } from './server.js';
 import { mutualTlsServerOptions, readTlsMaterial, tlsFingerprint } from './transport.js';
 import type { MutualTlsFiles } from './transport.js';
-import { DAEMON_VERSION_MISMATCH, RpcMethod } from './types.js';
+import { errorText } from '../core/error-text.js';
 
 export type Listener = {
   server: net.Server;
@@ -27,35 +25,11 @@ type CertificateReload = {
 
 const UNIX_SOCKET_MODE = 0o600;
 
-async function isDaemonAlive(socketPath: string): Promise<boolean> {
-  try {
-    const reply = await rpcCall({ socketPath, method: RpcMethod.DaemonStatus });
-    return reply.error?.code !== DAEMON_VERSION_MISMATCH;
-  } catch {
-    return false;
-  }
-}
-
-export async function claimSocket(socketPath: string): Promise<void> {
-  fs.mkdirSync(path.dirname(socketPath), { recursive: true });
-  if (!fs.existsSync(socketPath)) {
-    return;
-  }
-  if (await isDaemonAlive(socketPath)) {
-    throw new Error(`taprootd already running on ${socketPath}`);
-  }
-  fs.rmSync(socketPath, { force: true });
-}
-
 export function endpointOf(address: string | AddressInfo | null): DaemonEndpoint {
   if (address === null) {
     throw new Error('daemon server is not listening');
   }
   return typeof address === 'string' ? { socketPath: address } : { host: address.address, port: address.port };
-}
-
-function errorMessageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function reloadTlsOnChange(reload: CertificateReload): NodeJS.Timeout {
@@ -71,7 +45,7 @@ function reloadTlsOnChange(reload: CertificateReload): NodeJS.Timeout {
       servedFingerprint = fingerprint;
       reload.log({ tlsReload: 'applied' });
     } catch (error) {
-      reload.log({ tlsReload: 'failed', message: errorMessageOf(error) });
+      reload.log({ tlsReload: 'failed', message: errorText(error) });
     }
   }, reload.intervalMs);
 }

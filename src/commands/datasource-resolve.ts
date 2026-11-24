@@ -2,7 +2,7 @@ import type { AppContext } from '../core/app.js';
 import { saveKbDatasource } from '../core/bootstrap.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { emptyToUndefined } from '../core/text-presence.js';
-import { describeTarget } from './describe-target.js';
+import { describeTarget } from '../core/describe-target.js';
 
 export type DatasourceResolveOptions = { env: string; namespace?: string; service: string };
 

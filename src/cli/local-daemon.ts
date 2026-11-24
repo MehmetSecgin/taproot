@@ -7,13 +7,14 @@ import type { RpcResponse } from '../daemon/types.js';
 import { queryRpcTimeoutMs, schemaRpcTimeoutMs } from './rpc-timeouts.js';
 import type { VerboseLog } from './verbose-log.js';
 import { nonEmptyOr } from '../core/text-presence.js';
+import { errorText } from '../core/error-text.js';
 
 const DAEMON_UNREACHABLE_PATTERN = /(?:ENOENT|ECONNREFUSED|EINVAL|ENAMETOOLONG|EPIPE|socket hang up)/iu;
 
 type DaemonCall = { method: string; params: Record<string, unknown>; timeoutMs: number };
 
 function unreachableReason(error: unknown): string | undefined {
-  const message = error instanceof Error ? error.message : '';
+  const message = errorText(error);
   return DAEMON_UNREACHABLE_PATTERN.test(message) ? message : undefined;
 }
 

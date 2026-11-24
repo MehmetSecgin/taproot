@@ -12,6 +12,7 @@ import { recordEvents, useTlsDaemons } from './helpers/tls-daemon-fixture.js';
 
 const MAX_REQUEST_LINE_CHARS = 1024 * 1024;
 const MismatchReplySchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+const RawReplySchema = z.object({ requestId: z.unknown(), ok: z.boolean(), error: z.object({ code: z.string(), message: z.string() }).optional() });
 
 function requestLine(overrides: Record<string, unknown> = {}): string {
   return `${JSON.stringify({ protocolVersion: RUNTIME_CONSTANTS.protocolVersion, clientVersion: TAPROOT_VERSION, requestId: 'r1', method: 'query.execute', params: { datasource: 'qa-fake', query: 'SELECT 1' }, ...overrides })}\n`;
@@ -92,6 +93,28 @@ describe('daemon over mutual TLS', () => {
     // assert
     expect(mismatch.error).toStrictEqual({ code: 'DAEMON_VERSION_MISMATCH', message: `this daemon runs ${TAPROOT_VERSION} and the client runs 0.0.0; run the same version on both sides.` });
     expect(next.ok).toBe(true);
+  });
+
+  it('answers a line that is not a request object as a bad request', async () => {
+    // arrange
+    const server = await tls.startDaemon();
+
+    // act
+    const reply = await rawReply(server, tls.pki.client, '[]\n');
+
+    // assert
+    expect(RawReplySchema.parse(JSON.parse(reply))).toStrictEqual({ requestId: 'unknown', ok: false, error: { code: 'BAD_REQUEST', message: 'Unsupported protocolVersion=undefined' } });
+  });
+
+  it('runs a request whose requestId is a number and echoes it back', async () => {
+    // arrange
+    const server = await tls.startDaemon();
+
+    // act
+    const reply = await rawReply(server, tls.pki.client, requestLine({ requestId: 5 }));
+
+    // assert
+    expect(RawReplySchema.parse(JSON.parse(reply))).toMatchObject({ requestId: 5, ok: true });
   });
 
   it('refuses a client certificate from another CA', async () => {

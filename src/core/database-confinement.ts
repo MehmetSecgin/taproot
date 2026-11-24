@@ -3,6 +3,7 @@ import type { DatasourceProfile } from '../types/datasource.js';
 import { databaseConfined, misconfiguredDatasource } from './taproot-error.js';
 import { reachedSchemas } from './reached-schemas.js';
 import { maskComments, maskCommentsAndLiterals } from './sql-parser.js';
+import { isNonEmpty } from './text-presence.js';
 
 type ConfinementInput = { sql: string; datasource: DatasourceProfile };
 
@@ -34,7 +35,7 @@ function isConfined(datasource: DatasourceProfile): boolean {
 
 function confinedDatabase(datasource: DatasourceProfile): string {
   const { database } = datasource.connection;
-  if (database !== undefined && database !== '') {
+  if (isNonEmpty(database)) {
     return database;
   }
   throw misconfiguredDatasource(`TAPROOT_CONFINE_TO_DATABASE confines datasource '${datasource.name}' to its database, but it names none. Set one with datasource add --database <schema>.`);

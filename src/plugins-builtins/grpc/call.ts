@@ -58,7 +58,7 @@ export type GrpcCallOptions = {
 
 const CALL_EVENTS_THAT_UNBLOCK_WRITES = ['drain', 'status', 'error', 'close'] as const;
 
-export function requestsStream(method: GrpcMethodShape): boolean {
+function requestsStream(method: GrpcMethodShape): boolean {
   return method.requestStream === true;
 }
 

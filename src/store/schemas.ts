@@ -4,7 +4,7 @@ import type { Capability, DatasourceProfile } from '../types/datasource.js';
 
 const StoredCapabilitySchema = z.string().pipe(z.custom<Capability>(() => true));
 
-export const DatasourcePolicySchema = z.object({
+const DatasourcePolicySchema = z.object({
   allowRead: z.boolean().default(true),
   allowMutate: z.boolean().default(false),
   allowedCapabilities: z.array(StoredCapabilitySchema).default(['executeRead']),
@@ -12,7 +12,7 @@ export const DatasourcePolicySchema = z.object({
   strictKeyspace: z.boolean().optional(),
 });
 
-export const DatasourceProfileSchema = z.object({
+const DatasourceProfileSchema = z.object({
   name: z.string().min(1),
   kind: z.string().min(1),
   env: z.string().optional(),
@@ -50,7 +50,7 @@ export function parseDatasourceProfile(raw: unknown): { ok: true; profile: Datas
   return { ok: true, profile: parsed.data };
 }
 
-export const EnvironmentPolicySchema = z.object({
+const EnvironmentPolicySchema = z.object({
   deterministicRequired: z.boolean().default(false),
   allowDiscoveryByDefault: z.boolean().default(false),
   preferredAccessMethods: z.array(z.string()).default([]),

@@ -9,7 +9,7 @@ export const DoctorStatus = {
 
 export type DoctorStatus = (typeof DoctorStatus)[keyof typeof DoctorStatus];
 
-export type PluginManifest = {
+type PluginManifest = {
   name: string;
   capabilities: Capability[];
 };

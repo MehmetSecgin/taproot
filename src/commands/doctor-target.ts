@@ -6,20 +6,20 @@ import { printSuccess } from '../core/output.js';
 import type { DatasourceProfile } from '../types/datasource.js';
 import { DoctorStatus } from '../types/plugin.js';
 import type { DoctorCheck } from '../types/plugin.js';
-import { describeTarget } from './describe-target.js';
+import { describeTarget } from '../core/describe-target.js';
 import { summarizeChecks } from './doctor-checks.js';
 import { emptyToUndefined } from '../core/text-presence.js';
 
 export type DoctorOptions = { datasource?: string; env?: string; namespace?: string; service?: string; connect: boolean };
 
-export type UnresolvedTarget = {
+type UnresolvedTarget = {
   env: string;
   service: string;
   namespace?: string;
   kbHasConnection: boolean;
 };
 
-export type DoctorResolution = { datasource: DatasourceProfile } | { unresolved: UnresolvedTarget };
+type DoctorResolution = { datasource: DatasourceProfile } | { unresolved: UnresolvedTarget };
 
 function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
   const label = describeTarget(target);

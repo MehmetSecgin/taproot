@@ -1,8 +1,8 @@
 import { queryTimeoutError } from '../../core/query-timeout.js';
 import type { QueryRequest } from '../../types/plugin.js';
-import { errorMessage } from '../_shared/error-message.js';
 import { callStreaming, callUnary, isStreamingMethod } from './call.js';
 import type { GrpcCallOptions } from './call.js';
+import { errorText } from '../../core/error-text.js';
 
 type CallRows = {
   rows: unknown[][];
@@ -50,7 +50,7 @@ async function raceAgainstBackupTimer(call: Promise<CallRows>, deadlineMs: numbe
 
 function translateCallError(error: unknown, request: QueryRequest, deadlineMs: number): unknown {
   request.signal?.throwIfAborted();
-  return /deadline exceeded/iu.test(errorMessage(error)) ? queryTimeoutError(deadlineMs) : error;
+  return /deadline exceeded/iu.test(errorText(error)) ? queryTimeoutError(deadlineMs) : error;
 }
 
 export async function callWithDeadline(request: QueryRequest, options: GrpcCallOptions, messages: Record<string, unknown>[]): Promise<CallRows> {

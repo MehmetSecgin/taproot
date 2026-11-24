@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import type { AppContext } from '../core/app.js';
 import { printSuccess } from '../core/output.js';
 import { normalizeRelations } from '../core/relations.js';
+import { errorText } from '../core/error-text.js';
 
 function parseJson(text: string, file: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`Invalid JSON in ${file}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    throw new Error(`Invalid JSON in ${file}: ${errorText(error)}`, { cause: error });
   }
 }
 

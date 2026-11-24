@@ -18,7 +18,7 @@ const EncryptedFileSchema = z.object({
 
 export type CredentialMap = z.infer<typeof CredentialMapSchema>;
 
-export type EncryptedFile = z.infer<typeof EncryptedFileSchema>;
+type EncryptedFile = z.infer<typeof EncryptedFileSchema>;
 
 let lastDerivedKey: { saltAndSecret: string; key: Buffer } | null = null;
 

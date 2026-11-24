@@ -3,7 +3,7 @@ import { isList, isRecord } from './json-shapes.js';
 import type { QueryPhaseTimings } from '../types/plugin.js';
 import type { SchemaContext } from '../types/schema-context.js';
 
-export type CliOutputEnvelope<Data = unknown> = {
+type CliOutputEnvelope<Data = unknown> = {
   ok: boolean;
   data?: Data;
   meta?: {

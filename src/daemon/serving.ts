@@ -23,7 +23,7 @@ function connectionServing(input: StartDaemonInput, parts: { deps: HandlerDeps; 
     deps: parts.deps,
     activity: parts.activity,
     log: input.log,
-    stopAcceptingConnections: () => {
+    startClosingServer: () => {
       void parts.stopAcceptingConnections();
     },
   };

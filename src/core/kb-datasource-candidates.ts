@@ -20,7 +20,7 @@ export type KbDatasourceCandidate = {
   credentialDefaults: CredentialDefaultSpec[];
 };
 
-export type KbCandidateInputs = {
+type KbCandidateInputs = {
   env: string;
   service: string;
   datasourceName: string;

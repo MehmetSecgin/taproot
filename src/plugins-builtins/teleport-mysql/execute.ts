@@ -1,6 +1,6 @@
 import type { QueryRequest, QueryResult } from '../../types/plugin.js';
 import { executeMysqlQuery } from '../_shared/execute-mysql-query.js';
-import { isNonEmpty } from '../../core/text-presence.js';
+import { emptyToUndefined, isNonEmpty } from '../../core/text-presence.js';
 import { sessionIdOf } from '../../core/session-credentials.js';
 import { proxyConnectionOptions } from './connection-options.js';
 import type { ProxyTarget } from './connection-options.js';
@@ -33,7 +33,7 @@ async function executeThroughProxy(request: QueryRequest, proxyTarget: ProxyTarg
   try {
     const proxy = await ensureProxy({ sessionId: proxyOwnerId, ...proxyTarget }).catch(rethrowAsProxyUnavailable);
     const config = proxyConnectionOptions(proxy, proxyTarget, credentials.password);
-    return await executeMysqlQuery({ plugin: 'teleport-mysql', request, config, sessionId: callerSessionId });
+    return await executeMysqlQuery({ plugin: 'teleport-mysql', request, config, sessionId: emptyToUndefined(callerSessionId) });
   } finally {
     if (callerSessionId === '') {
       await closeTeleportMysqlSessionProxies(proxyOwnerId);

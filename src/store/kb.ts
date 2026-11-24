@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { kbMissing } from '../core/taproot-error.js';
 import { readJsonFile, writeJsonFile } from '../core/json.js';
+import { isList, isRecord } from '../core/json-shapes.js';
 import { normalizeRelations } from '../core/relations.js';
 import type { KbRelation } from '../core/relations.js';
 import { isNonEmpty, textUnlessFalsy } from '../core/text-presence.js';
@@ -11,10 +12,6 @@ type KbRow = Record<string, unknown>;
 type KbTableRow = { service?: unknown; env?: unknown; database?: unknown; tables?: string[] };
 
 const ACTIVE_CONNECTION_STATUS = 'active';
-
-function isKbRow(value: unknown): value is KbRow {
-  return typeof value === 'object' && value !== null;
-}
 
 function isStatusMissing(status: unknown): boolean {
   return status === undefined || status === null || status === '' || status === 0 || status === false;
@@ -59,7 +56,15 @@ export class KbStore {
   }
 
   public typedRelations(): KbRelation[] {
-    return normalizeRelations(readJsonFile<unknown[]>(this.file('relations.json'), []));
+    const file = this.file('relations.json');
+    const stored: unknown = readJsonFile<unknown>(file, []);
+    if (stored === null) {
+      return [];
+    }
+    if (!isList(stored)) {
+      throw new TypeError(`${file} must hold a JSON array of relation objects.`);
+    }
+    return normalizeRelations(stored);
   }
 
   public promoteRelations(candidates: KbRelation[]): { added: number; total: number } {
@@ -92,7 +97,7 @@ export class KbStore {
       return null;
     }
     const connections: unknown[] = Array.isArray(kbService.connections) ? kbService.connections : [];
-    const active = connections.filter((candidate) => isKbRow(candidate)).filter((connection) => isActiveConnectionIn(connection, env, namespace));
+    const active = connections.filter((candidate) => isRecord(candidate)).filter((connection) => isActiveConnectionIn(connection, env, namespace));
     return active.toSorted(newestVerifiedFirst).at(0) ?? null;
   }
 

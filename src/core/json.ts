@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { deepFreeze } from './deep-freeze.js';
+import { errorText } from './error-text.js';
 
 const OWNER_ONLY_FILE_MODE = 0o600;
 
@@ -31,7 +32,7 @@ function parseFrozenJson(file: string, text: string): unknown {
   try {
     return deepFreeze<unknown>(JSON.parse(text));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorText(error);
     throw new Error(`${file} is not valid JSON (${reason}). Fix or remove it; TapRoot does not overwrite it while it is unreadable.`, { cause: error });
   }
 }

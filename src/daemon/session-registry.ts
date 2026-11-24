@@ -11,7 +11,7 @@ const CHECKPOINT_SCHEMA_VERSION = 1;
 
 type SessionState = 'recovering' | 'ready' | 'closed';
 
-export type SessionRecord = {
+type SessionRecord = {
   sessionId: string;
   fingerprint: string;
   datasourceName: string;

@@ -5,6 +5,7 @@ import type { ProxyIdentity, ProxyRuntime } from './proxy-process.js';
 const proxiesByKey = new Map<string, Promise<ProxyRuntime>>();
 const proxyKeysBySession = new Map<string, Set<string>>();
 let cleanupRegistered = false;
+const FAILED_START = undefined;
 
 function proxyKeyOf({ sessionId, target, user, database }: ProxyIdentity): string {
   return `${sessionId}|${target}|${user}|${database}`;
@@ -35,16 +36,11 @@ function forgetProxy(sessionId: string, key: string, proxy: Promise<ProxyRuntime
   unindexSessionProxy(sessionId, key);
 }
 
-async function startedProxyOf(starting: Promise<ProxyRuntime> | undefined): Promise<ProxyRuntime | undefined> {
-  const [outcome] = await Promise.allSettled([starting]);
-  return outcome?.status === 'fulfilled' ? outcome.value : undefined;
-}
-
 async function closeSessionProxy(sessionId: string, key: string): Promise<void> {
   const starting = proxiesByKey.get(key);
   proxiesByKey.delete(key);
   unindexSessionProxy(sessionId, key);
-  const proxy = await startedProxyOf(starting);
+  const proxy = await starting?.catch(() => FAILED_START);
   if (proxy !== undefined) {
     await stopProxy(proxy);
   }

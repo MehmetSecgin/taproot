@@ -28,7 +28,7 @@ export function installExitSignalHandlers(): void {
   }
 }
 
-export function removeExitSignalHandlers(): void {
+function removeExitSignalHandlers(): void {
   for (const signal of EXIT_SIGNALS) {
     process.off(signal, cleanUpAndExit);
   }

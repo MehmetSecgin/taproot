@@ -4,7 +4,7 @@ import path from 'node:path';
 import { readJsonFile } from './json.js';
 import { firstNonEmpty, textUnlessFalsy } from './text-presence.js';
 
-export type Paths = {
+type Paths = {
   stateRoot: string;
   configDir: string;
   runtimeConfigFile: string;

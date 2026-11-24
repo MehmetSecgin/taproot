@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { parseTimeoutMs, queryBudgetMs, queryTimeoutError, withQueryTimeout } from '../src/core/query-timeout.js';
 
+async function resultAfterAMinute(): Promise<string> {
+  return delay(60_000, 'late', { ref: false });
+}
+
 describe('query timeout helpers', () => {
   it('uses the fallback timeout when omitted', () => {
     expect(parseTimeoutMs(undefined, 5000)).toBe(5000);
@@ -57,6 +61,22 @@ describe('query timeout helpers', () => {
     // assert
     await expect(pending).rejects.toThrow('client disconnected');
     expect(runSignals.map((signal) => signal.aborted)).toStrictEqual([true]);
+  });
+
+  it('rejects with the same error whether the caller aborted before or during the run', async () => {
+    // arrange
+    const before = new AbortController();
+    before.abort('client gone');
+    const during = new AbortController();
+
+    // act
+    const abortedBefore = withQueryTimeout({ timeoutMs: 5000, signal: before.signal, run: resultAfterAMinute });
+    const abortedDuring = withQueryTimeout({ timeoutMs: 5000, signal: during.signal, run: resultAfterAMinute });
+    during.abort('client gone');
+
+    // assert
+    await expect(abortedBefore).rejects.toStrictEqual(new Error('client gone'));
+    await expect(abortedDuring).rejects.toStrictEqual(new Error('client gone'));
   });
 
   it('lets the client wait for queue wait, connector preflight and execution', () => {

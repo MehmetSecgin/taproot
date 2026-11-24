@@ -5,6 +5,7 @@ import { DoctorStatus } from '../types/plugin.js';
 import type { DoctorCheck } from '../types/plugin.js';
 import { isDoctorCapable } from './doctor-plugin.js';
 import type { DoctorCapablePlugin } from './doctor-plugin.js';
+import { errorText } from '../core/error-text.js';
 
 function probeFailed(name: string, detail: string): Error {
   const rerun = `taproot doctor --datasource ${name} --connect`;
@@ -37,12 +38,8 @@ async function runProbeChecks(ctx: AppContext, saved: DatasourceProfile, plugin:
   return [...connectorChecks, ...pluginChecks];
 }
 
-function probeErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message !== '' ? error.message : String(error);
-}
-
 function isProbeVerdict(error: unknown): boolean {
-  const message = probeErrorMessage(error);
+  const message = errorText(error);
   return message.startsWith('PROBE_FAILED') || message.startsWith('PROBE_UNSUPPORTED');
 }
 
@@ -60,6 +57,6 @@ export async function probeSavedProfile(ctx: AppContext, saved: DatasourceProfil
     if (isProbeVerdict(error)) {
       throw error;
     }
-    throw probeFailed(saved.name, probeErrorMessage(error));
+    throw probeFailed(saved.name, errorText(error));
   }
 }

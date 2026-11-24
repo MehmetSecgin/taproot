@@ -76,7 +76,7 @@ function parseRedisCliQuotedString(quoted: string): Buffer | null {
   return Buffer.from(bytes);
 }
 
-export function splitStdoutLines(stdout: string): string[] {
+function splitStdoutLines(stdout: string): string[] {
   const lines = stdout.replaceAll('\r', '').split('\n');
   while (lines.at(-1) === '') {
     lines.pop();

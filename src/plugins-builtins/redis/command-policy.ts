@@ -77,7 +77,7 @@ export type GateOptions = {
   strictKeyspace: boolean;
 };
 
-export type AllowedCommand = {
+type AllowedCommand = {
   verb: string;
   tier: CommandTier;
 };

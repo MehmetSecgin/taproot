@@ -1,7 +1,7 @@
 import { EXPLAIN_KEYWORDS } from './sql-keywords.js';
 import { explainAnalyzeTarget, hasSecondStatement, isExplainAnalyze, maskCommentsAndLiterals, parseExecutedStatements } from './sql-parser.js';
 
-export type StatementEffect = 'read' | 'mutate';
+type StatementEffect = 'read' | 'mutate';
 
 const COMMAND_MUTATE_RE = /\b(?:insert|update|delete|alter|drop|truncate|create|replace|grant|revoke|rename)\b/iu;
 const LEADING_KEYWORD_RE = /^[\s(]*(?<keyword>[a-z]+)/iu;

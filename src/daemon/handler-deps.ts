@@ -9,7 +9,7 @@ import type { HandlerDeps } from './methods/types.js';
 import { QueryLimiter } from './query-limiter.js';
 import { SessionRegistry } from './session-registry.js';
 
-export type HandlerDepsInput = {
+type HandlerDepsInput = {
   ctx: AppContext;
   checkDatasource: DatasourceCheck | undefined;
   checkDatasourceTtlMs?: number;

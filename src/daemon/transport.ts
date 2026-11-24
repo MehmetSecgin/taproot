@@ -14,7 +14,7 @@ export type HostPort = {
   port: number;
 };
 
-export type TlsMaterial = {
+type TlsMaterial = {
   ca: Buffer;
   cert: Buffer;
   key: Buffer;

@@ -2,7 +2,7 @@ import type { Connection } from 'mysql2/promise';
 import type { QueryResult } from '../../types/plugin.js';
 import { rawConnectionOf } from './raw-connection.js';
 
-export type RowStreamOptions = {
+type RowStreamOptions = {
   timeoutMs: number | undefined;
   maxRows: number | undefined;
   signal: AbortSignal | undefined;

@@ -2,7 +2,7 @@ import type { AppContext } from '../core/app.js';
 import { reconcileDatasource } from '../core/bootstrap.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
 import { printSuccess } from '../core/output.js';
-import { describeTarget } from './describe-target.js';
+import { describeTarget } from '../core/describe-target.js';
 import { emptyToUndefined } from '../core/text-presence.js';
 
 export type InitDatasourceOptions = { env: string; namespace?: string; service: string };

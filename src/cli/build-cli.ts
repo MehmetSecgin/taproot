@@ -8,6 +8,7 @@ import { commanderErrorCode, commanderErrorMessage, printCaughtError } from './c
 import type { CommanderHint } from './cli-errors.js';
 import type { CliCommand, Executor } from './types.js';
 import { emptyToUndefined } from '../core/text-presence.js';
+import { errorText } from '../core/error-text.js';
 
 
 type CliDefinition<ExecutorType extends Executor> = {
@@ -68,7 +69,7 @@ function exitWithCaughtError(program: Command, caught: unknown): void {
 
 function exitWithCommanderError(run: CliRun, commanderError: unknown): void {
   applyOutputOptions(run.program);
-  const rawMessage = commanderError instanceof Error ? commanderError.message : '';
+  const rawMessage = errorText(commanderError);
   const message = commanderErrorMessage(
     { program: run.program, cliName: run.cliName, hint: run.hint },
     rawMessage,

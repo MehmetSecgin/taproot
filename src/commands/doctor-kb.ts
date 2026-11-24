@@ -8,7 +8,7 @@ import type { DoctorCheck } from '../types/plugin.js';
 import { summarizeChecks } from './doctor-checks.js';
 import type { DoctorTarget } from './doctor-checks.js';
 
-export type KbComparison = { blockingConflicts: string[]; warnings: string[] };
+type KbComparison = { blockingConflicts: string[]; warnings: string[] };
 
 function kbConnectionFor(ctx: AppContext, datasource: DatasourceProfile): Record<string, unknown> | null {
   if ((datasource.env ?? '') === '' || (datasource.service ?? '') === '') {

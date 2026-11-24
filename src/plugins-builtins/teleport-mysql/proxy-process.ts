@@ -150,7 +150,7 @@ async function terminate(proc: ChildProcess): Promise<void> {
 }
 
 export async function stopProxy(proxy: ProxyRuntime): Promise<void> {
-  await Promise.allSettled([terminate(proxy.process)]);
+  await terminate(proxy.process);
 }
 
 export async function startProxy(identity: ProxyIdentity, onExit: () => void): Promise<ProxyRuntime> {

@@ -2,7 +2,7 @@ import type { AppContext } from './app.js';
 import type { DatasourceProfile } from '../types/datasource.js';
 import type { QueryRequest, TapRootPlugin } from '../types/plugin.js';
 
-export type PluginSelection = { pluginName: string; execute: NonNullable<TapRootPlugin['execute']> } | { refusal: string };
+type PluginSelection = { pluginName: string; execute: NonNullable<TapRootPlugin['execute']> } | { refusal: string };
 
 export function selectPlugin(ctx: AppContext, datasource: DatasourceProfile, capability: QueryRequest['capability']): PluginSelection {
   const plugin = ctx.pluginRegistry.get(datasource.kind);

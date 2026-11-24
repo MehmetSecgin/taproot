@@ -4,27 +4,20 @@ import { parseDatasourceProfile } from './schemas.js';
 import { isNonEmpty, textUnlessFalsy } from '../core/text-presence.js';
 import { ambiguousDatasource } from '../core/taproot-error.js';
 import { isRecord } from '../core/json-shapes.js';
+import { describeTarget } from '../core/describe-target.js';
 
-export type ServiceQuery = {
+type ServiceQuery = {
   env: string;
   namespace: string | undefined;
   service: string;
   preferKinds: readonly string[];
 };
 
-type AmbiguousMatch = {
-  candidates: DatasourceProfile[];
-  env: string;
-  service: string;
-  namespace: string | undefined;
-};
-
-function ambiguousMatchError(match: AmbiguousMatch): Error {
-  const names = match.candidates.map((candidate) => candidate.name);
-  const target = `env=${match.env}${isNonEmpty(match.namespace) ? ` namespace=${match.namespace}` : ''} service=${match.service}`;
+function ambiguousMatchError(candidates: DatasourceProfile[], query: ServiceQuery): Error {
+  const names = candidates.map((candidate) => candidate.name);
   const pickByName = 'use --datasource <name> on query and doctor';
-  const fix = isNonEmpty(match.namespace) ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
-  return ambiguousDatasource(`${names.length} datasources match ${target}: ${names.join(', ')}. ${fix}`);
+  const fix = isNonEmpty(query.namespace) ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
+  return ambiguousDatasource(`${names.length} datasources match ${describeTarget(query)}: ${names.join(', ')}. ${fix}`);
 }
 
 function rowName(row: unknown): string {
@@ -42,7 +35,7 @@ function findUniqueProfile(profiles: DatasourceProfile[], query: ServiceQuery): 
   const ofPreferredKind = matching.filter((profile) => query.preferKinds.includes(profile.kind));
   const candidates = ofPreferredKind.length > 0 ? ofPreferredKind : matching;
   if (candidates.length > 1) {
-    throw ambiguousMatchError({ candidates, env, service, namespace });
+    throw ambiguousMatchError(candidates, query);
   }
   return candidates[0];
 }

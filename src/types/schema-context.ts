@@ -20,7 +20,7 @@ export type TableContext = {
   partition?: SchemaPartition;
 };
 
-export type SchemaCatalogSummary = {
+type SchemaCatalogSummary = {
   tables: number;
   fetchedAt: string;
 };

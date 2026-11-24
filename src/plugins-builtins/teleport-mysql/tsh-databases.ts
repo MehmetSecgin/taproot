@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { firstNonEmpty, nonEmptyOr } from '../../core/text-presence.js';
+import { errorText } from '../../core/error-text.js';
 
-export type TshDatabase = {
+type TshDatabase = {
   metadata?: { name?: string };
   name?: string;
   users?: { allowed?: string[] };
@@ -52,7 +53,7 @@ export async function fetchTshDatabases(options: { tshPath?: string } = {}): Pro
     const databases = parseDatabaseList(run.stdout);
     return { ok: true, databases, detail: `tsh returned ${databases.length} databases` };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorText(error);
     return { ok: false, databases: [], detail: `failed to parse tsh output: ${reason}` };
   }
 }

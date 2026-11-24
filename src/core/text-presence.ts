@@ -16,6 +16,10 @@ export function nonEmptyOr(value: string | undefined, fallback: string): string 
   return isNonEmpty(value) ? value : fallback;
 }
 
+export function isTruthy(value: unknown): boolean {
+  return !FALSY_VALUES.has(value);
+}
+
 export function textUnlessFalsy(value: unknown): string {
-  return FALSY_VALUES.has(value) ? '' : String(value);
+  return isTruthy(value) ? String(value) : '';
 }

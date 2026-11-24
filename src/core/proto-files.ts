@@ -11,7 +11,7 @@ type UnresolvedImport = {
   importedBy: string;
 };
 
-export type ImportLookup = {
+type ImportLookup = {
   importer: string;
   roots: string[];
   files: string[];

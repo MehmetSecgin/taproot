@@ -7,6 +7,7 @@ import { withQueryTimeout } from './query-timeout.js';
 import { buildCatalogTables } from './schema-catalog-build.js';
 import { readCatalogRows } from './schema-catalog-read.js';
 import type { CatalogReadTarget } from './schema-catalog-read.js';
+import { errorText } from './error-text.js';
 
 export type QuerySlot = (signal: AbortSignal) => Promise<() => void>;
 
@@ -63,7 +64,7 @@ function saveFetchedCatalog(ctx: AppContext, datasource: DatasourceProfile, tabl
 }
 
 function recordFetchFailure(datasource: DatasourceProfile, error: unknown, tableCount: number): CatalogEnsureResult {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorText(error);
   recentCatalogFailures.set(datasource.name, { failedAt: Date.now(), error: message });
   return { outcome: 'failed', tableCount, error: message };
 }

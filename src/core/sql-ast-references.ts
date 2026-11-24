@@ -1,5 +1,6 @@
 import { parseExecutedStatements } from './sql-parser.js';
 import { textUnlessFalsy } from './text-presence.js';
+import { isRecord } from './json-shapes.js';
 
 export type PredicateColumnRefs = {
   byTable: Map<string, Set<string>>;
@@ -13,10 +14,6 @@ type TableScan = {
   tables: Set<string>;
   aliasToTable: Map<string, string>;
 };
-
-function isAstNode(node: unknown): node is AstNode {
-  return typeof node === 'object' && node !== null;
-}
 
 function unquotedLowercase(value: string): string {
   return textUnlessFalsy(value).replaceAll('`', '').trim().toLowerCase();
@@ -35,12 +32,12 @@ function columnName(node: unknown): string {
   if (typeof node === 'string') {
     return unquotedLowercase(node);
   }
-  const value = isAstNode(node) && isAstNode(node.expr) ? node.expr.value : undefined;
+  const value = isRecord(node) && isRecord(node.expr) ? node.expr.value : undefined;
   return typeof value === 'string' ? unquotedLowercase(value) : '';
 }
 
 function astTableName(node: unknown): string {
-  if (!isAstNode(node)) {
+  if (!isRecord(node)) {
     return '';
   }
   const database = normalizedTextField(node, 'db');
@@ -52,7 +49,7 @@ function astTableName(node: unknown): string {
 }
 
 function astAlias(node: unknown): string {
-  return isAstNode(node) ? normalizedTextField(node, 'as') : '';
+  return isRecord(node) ? normalizedTextField(node, 'as') : '';
 }
 
 function visitChildren(node: AstNode, visit: (child: unknown) => void): void {
@@ -68,13 +65,13 @@ function visitChildren(node: AstNode, visit: (child: unknown) => void): void {
 }
 
 function collectCteNames(node: unknown, cteNames: Set<string>): void {
-  if (!isAstNode(node)) {
+  if (!isRecord(node)) {
     return;
   }
   const withItems: unknown[] = Array.isArray(node.with) ? node.with : [];
   for (const item of withItems) {
-    const nameNode = isAstNode(item) ? item.name : undefined;
-    const cteName = isAstNode(nameNode) ? nameNode.value : undefined;
+    const nameNode = isRecord(item) ? item.name : undefined;
+    const cteName = isRecord(nameNode) ? nameNode.value : undefined;
     if (typeof cteName === 'string') {
       cteNames.add(bareTableName(cteName));
     }
@@ -106,7 +103,7 @@ function addShowTable(scan: TableScan, node: AstNode): void {
 }
 
 function collectTablesFromNode(node: unknown, scan: TableScan): void {
-  if (!isAstNode(node)) {
+  if (!isRecord(node)) {
     return;
   }
   const fromItems: unknown[] = Array.isArray(node.from) ? node.from : [];
@@ -158,7 +155,7 @@ function addColumnRef(node: AstNode, aliasToTable: Map<string, string>, refs: Pr
 }
 
 function collectColumnRefs(expression: unknown, aliasToTable: Map<string, string>, refs: PredicateColumnRefs): void {
-  if (!isAstNode(expression)) {
+  if (!isRecord(expression)) {
     return;
   }
   if (expression.type === 'column_ref') {
@@ -171,7 +168,7 @@ function collectColumnRefs(expression: unknown, aliasToTable: Map<string, string
 }
 
 function collectPredicateColumnsFromNode(node: unknown, aliasToTable: Map<string, string>, refs: PredicateColumnRefs): void {
-  if (!isAstNode(node)) {
+  if (!isRecord(node)) {
     return;
   }
   collectColumnRefs(node.where, aliasToTable, refs);

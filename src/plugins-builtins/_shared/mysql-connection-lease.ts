@@ -20,7 +20,7 @@ export type MysqlLeaseRequest = {
   timeoutMs: number | undefined;
 };
 
-export type MysqlLease = {
+type MysqlLease = {
   conn: Connection;
   release: () => Promise<void>;
 };

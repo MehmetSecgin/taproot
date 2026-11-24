@@ -1,6 +1,6 @@
 import { textUnlessFalsy } from './text-presence.js';
 
-export type NameResolution = {
+type NameResolution = {
   match?: string;
   candidates: string[];
 };

@@ -2,7 +2,7 @@ import { levenshtein, suggestNames } from './name-match.js';
 import { firstNonEmpty, nonEmptyOr, textUnlessFalsy } from './text-presence.js';
 import type { DatasourceProfile } from '../types/datasource.js';
 
-export type ResolutionAsk = {
+type ResolutionAsk = {
   datasourceName?: string;
   env?: string;
   namespace?: string;

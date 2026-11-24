@@ -18,7 +18,7 @@ export type PreparedQuery = {
   jsonExtractSpecs: JsonExtractSpec[];
 };
 
-type ParsedQueryInputs = Pick<PreparedQuery, 'query' | 'params' | 'jsonExtractSpecs'>;
+type ParsedQueryInputs = Pick<PreparedQuery, 'params' | 'jsonExtractSpecs'>;
 
 function isWholeNumberOfOneOrMore(value: number): boolean {
   return Number.isInteger(value) && value >= 1;
@@ -33,7 +33,7 @@ function parseQueryInputs(request: QueryExecutionRequest, query: string): Parsed
   if (request.maxRows !== undefined && !isWholeNumberOfOneOrMore(request.maxRows)) {
     throw badInput(`maxRows must be a whole number of 1 or more, got ${JSON.stringify(request.maxRows)}.`);
   }
-  return { query, params, jsonExtractSpecs };
+  return { params, jsonExtractSpecs };
 }
 
 type ResolvedDatasourceStep = Pick<PreparedQuery, 'datasource' | 'resolutionSource' | 'warnings' | 'resolveMs'>;
@@ -58,5 +58,5 @@ export async function prepareQuery(request: QueryExecutionRequest, deps: QueryDe
     return inputs;
   }
   deps.report.log('query resolved');
-  return { value: { ...resolution.value, sessionId, ...inputs.value } };
+  return { value: { ...resolution.value, sessionId, query, ...inputs.value } };
 }

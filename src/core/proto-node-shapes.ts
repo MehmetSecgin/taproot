@@ -39,7 +39,7 @@ export type PbMethod = {
   resolve?: () => void;
 };
 
-export type PbService = {
+type PbService = {
   fullName: string;
   name: string;
   methodsArray: PbMethod[];

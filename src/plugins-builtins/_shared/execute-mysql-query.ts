@@ -5,11 +5,11 @@ import { enrichResourceLimitError, enrichSqlSyntaxError } from '../../core/sql-h
 import { nowIso } from '../../core/time.js';
 import type { QueryRequest, QueryResult } from '../../types/plugin.js';
 import { leaseMysqlConnection } from './mysql-connection-lease.js';
-import { errorMessage } from './error-message.js';
+import { errorText } from '../../core/error-text.js';
 import { destroyConnectionAndSocket, streamRowsUntilAborted } from './mysql-row-stream.js';
 
 function translateQueryError(conn: Connection, error: unknown, request: QueryRequest): unknown {
-  const message = errorMessage(error);
+  const message = errorText(error);
   if (request.timeoutMs !== undefined && request.timeoutMs !== 0 && /timeout/iu.test(message)) {
     destroyConnectionAndSocket(conn);
     return queryTimeoutError(request.timeoutMs);
@@ -18,7 +18,7 @@ function translateQueryError(conn: Connection, error: unknown, request: QueryReq
   return enriched === message ? error : new Error(enriched);
 }
 
-export type MysqlExecution = {
+type MysqlExecution = {
   plugin: string;
   request: QueryRequest;
   config: ConnectionOptions;

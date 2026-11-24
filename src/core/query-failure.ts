@@ -9,11 +9,11 @@ import type { QuerySlot } from './schema-refresh.js';
 import { textUnlessFalsy } from './text-presence.js';
 import type { DatasourceProfile } from '../types/datasource.js';
 
-export type QueryFailure = Extract<QueryOutcome, { ok: false }>;
+type QueryFailure = Extract<QueryOutcome, { ok: false }>;
 
 export type Attempt<Value> = { value: Value } | { failed: QueryFailure };
 
-export type SchemaHintRequest = {
+type SchemaHintRequest = {
   ctx: AppContext;
   datasource: DatasourceProfile;
   schemaContext: SchemaContext;

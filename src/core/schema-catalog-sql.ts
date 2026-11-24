@@ -1,4 +1,4 @@
-export type CatalogQueries = {
+type CatalogQueries = {
   columns: string;
   indexes: string;
   partitions: string;

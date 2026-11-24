@@ -15,7 +15,7 @@ describe('kbStore relations', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  function seed(relations: unknown[]): void {
+  function seed(relations: unknown): void {
     fs.writeFileSync(path.join(dir, 'relations.json'), JSON.stringify(relations));
   }
 
@@ -33,5 +33,25 @@ describe('kbStore relations', () => {
 
   it('typedRelations returns empty when relations.json is absent', () => {
     expect(new KbStore(dir).typedRelations()).toStrictEqual([]);
+  });
+
+  it('typedRelations returns empty when relations.json holds null', () => {
+    // arrange
+    seed(null);
+
+    // act
+    const relations = new KbStore(dir).typedRelations();
+
+    // assert
+    expect(relations).toStrictEqual([]);
+  });
+
+  it('typedRelations refuses a relations.json that is not an array, so promoting cannot overwrite it', () => {
+    // arrange
+    seed({ relations: [] });
+    const store = new KbStore(dir);
+
+    // assert
+    expect(() => store.typedRelations()).toThrow('must hold a JSON array of relation objects.');
   });
 });

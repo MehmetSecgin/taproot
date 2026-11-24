@@ -11,11 +11,11 @@ type QueryEvents = {
   end: () => void;
 };
 
-export type StreamingQuery = {
+type StreamingQuery = {
   on: <Event extends keyof QueryEvents>(event: Event, listener: QueryEvents[Event]) => StreamingQuery;
 };
 
-export type RawConnection = {
+type RawConnection = {
   query: (options: { sql: string; rowsAsArray: boolean; timeout: number | undefined }) => StreamingQuery;
   stream: { destroy: () => void; unref?: () => void };
 };

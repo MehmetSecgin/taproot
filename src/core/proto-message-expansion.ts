@@ -11,7 +11,7 @@ export type Expansion = {
 
 export type QueuedMessage = { name: string; depth: number };
 
-export type ExpansionContext = {
+type ExpansionContext = {
   root: ProtobufRoot;
   maxDepth: number;
   expansion: Expansion;

@@ -6,9 +6,9 @@ import { classifyExecutorDoctorCode } from '../../core/executor-errors.js';
 import { DEFAULT_SESSION_TIME_ZONE } from '../../core/session-timezone.js';
 import { closeAllMysqlPools, closeMysqlSessionPools, loadMysql } from '../_shared/mysql-connection-lease.js';
 import { connectionHost, connectionPort } from '../_shared/connection-endpoint.js';
-import { errorMessage } from '../_shared/error-message.js';
 import { executeMysqlQuery } from '../_shared/execute-mysql-query.js';
 import { sessionIdOf } from '../../core/session-credentials.js';
+import { errorText } from '../../core/error-text.js';
 
 function mysqlConnectionOptions(datasource: QueryRequest['datasource'], credentials: Record<string, string>): ConnectionOptions {
   const { connection } = datasource;
@@ -32,7 +32,7 @@ async function probeConnection(input: Parameters<NonNullable<TapRootPlugin['doct
     await conn.end();
     return [{ check: 'mysql connect', status: DoctorStatus.Ok, detail: 'connection and read query succeeded' }];
   } catch (error) {
-    const detail = errorMessage(error);
+    const detail = errorText(error);
     return [{ check: 'mysql connect', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
   }
 }

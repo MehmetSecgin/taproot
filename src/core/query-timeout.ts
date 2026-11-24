@@ -62,7 +62,9 @@ export async function withQueryTimeout<Result>(input: {
   }, input.timeoutMs);
   const runSignal = input.signal === undefined ? timeout.signal : AbortSignal.any([input.signal, timeout.signal]);
   try {
-    runSignal.throwIfAborted();
+    if (runSignal.aborted) {
+      throw abortReasonAsError(runSignal);
+    }
     return await Promise.race([input.run(runSignal), rejectOnAbort(runSignal)]);
   } finally {
     clearTimeout(timer);

@@ -4,6 +4,7 @@ import { classifyError } from '../core/error-classification.js';
 import { TaprootError } from '../core/taproot-error.js';
 import { withQueryTimeout } from '../core/query-timeout.js';
 import type { DatasourceProfile } from '../types/datasource.js';
+import { errorText } from '../core/error-text.js';
 
 export type DatasourceCheck = (input: {
   ctx: AppContext;
@@ -31,7 +32,7 @@ function asDatasourceRefusal(error: unknown): unknown {
   if (isAlreadyClassified(error)) {
     return error;
   }
-  return new TaprootError('DATASOURCE_REFUSED', error instanceof Error ? error.message : String(error));
+  return new TaprootError('DATASOURCE_REFUSED', errorText(error));
 }
 
 export function datasourceGate(ctx: AppContext, check: DatasourceCheck | undefined, ttlMs: number | undefined): DatasourceGate {

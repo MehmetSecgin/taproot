@@ -3,18 +3,24 @@ import { RUNTIME_CONSTANTS } from '../../core/constants.js';
 import { classifyExecutorDoctorCode } from '../../core/executor-errors.js';
 import { listServices } from '../../core/grpc-introspect.js';
 import { loadGrpcPackage, lookupServiceCtor, resolveProtoRoot } from '../../core/proto-loader.js';
+import type { ProtobufRoot } from '../../core/proto-loader.js';
 import { DoctorStatus } from '../../types/plugin.js';
 import type { DoctorCheck, TapRootPlugin } from '../../types/plugin.js';
-import { errorMessage } from '../_shared/error-message.js';
-import { firstNonEmpty } from '../../core/text-presence.js';
+import { emptyToUndefined, isNonEmpty } from '../../core/text-presence.js';
 import { buildClient } from './client-cache.js';
+import { errorText } from '../../core/error-text.js';
 
 type DoctorInput = Parameters<NonNullable<TapRootPlugin['doctor']>>[0];
+
+function probeServiceOf(input: DoctorInput, protobufRoot: ProtobufRoot): string | undefined {
+  const configured = input.datasource.resolverHints?.probeService;
+  return isNonEmpty(configured) ? configured : emptyToUndefined(listServices(protobufRoot)[0]?.name);
+}
 
 async function openChannel(input: DoctorInput, protoRoot: string): Promise<DoctorCheck[]> {
   const { datasource } = input;
   const bundle = await loadGrpcPackage(protoRoot);
-  const probe = firstNonEmpty(datasource.resolverHints?.probeService, listServices(bundle.protobufRoot)[0]?.name);
+  const probe = probeServiceOf(input, bundle.protobufRoot);
   if (probe === undefined) {
     return [{ check: 'grpc proto load', status: DoctorStatus.Warn, detail: `loaded proto root ${protoRoot} but no service found to probe`, code: 'executor_configuration_missing' }];
   }
@@ -35,7 +41,7 @@ export async function checkGrpcChannel(input: DoctorInput): Promise<DoctorCheck[
   try {
     return await openChannel(input, protoRoot);
   } catch (error) {
-    const message = errorMessage(error);
+    const message = errorText(error);
     const detail = message === '' ? 'unknown grpc doctor error' : message;
     return [{ check: 'grpc channel', status: DoctorStatus.Fail, detail, code: classifyExecutorDoctorCode(detail) }];
   }

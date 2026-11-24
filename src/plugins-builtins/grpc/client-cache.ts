@@ -3,12 +3,12 @@ import type { GrpcModule } from '../../core/proto-loader.js';
 import type { QueryRequest } from '../../types/plugin.js';
 import { connectionHost, connectionPort } from '../_shared/connection-endpoint.js';
 
-export type GrpcClient = Record<string, unknown> & {
+type GrpcClient = Record<string, unknown> & {
   waitForReady: (deadline: number, callback: (error?: Error) => void) => void;
   close: () => void;
 };
 
-export type ServiceConstructor = new (target: string, credentials: unknown) => Record<string, unknown>;
+type ServiceConstructor = new (target: string, credentials: unknown) => Record<string, unknown>;
 
 type ClientRequest = {
   grpcModule: GrpcModule;
