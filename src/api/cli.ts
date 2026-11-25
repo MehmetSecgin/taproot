@@ -1,11 +1,12 @@
-export { buildCli, type CommanderHint } from '../cli/build-cli.js';
+export { buildCli } from '../cli/build-cli.js';
+export type { CommanderHint } from '../cli/cli-errors.js';
 export { localExecutor } from '../cli/local-executor.js';
 export { remoteExecutor } from '../cli/remote-executor.js';
 export type { CliCommand, Executor, LocalExecutor } from '../cli/types.js';
 export { QUERY_FLAGS, queryCommand, queryCommandWith, type QueryFlag } from '../commands/query.js';
 export { datasourceListCommand } from '../commands/datasource-list.js';
 export { schemaCommand } from '../commands/schema.js';
-export { datasourceAdminCommand } from '../commands/datasource.js';
+export { datasourceAdminCommand } from '../commands/datasource-admin.js';
 export { doctorCommand } from '../commands/doctor.js';
 export { kbCommand } from '../commands/kb.js';
 export { credsCommand } from '../commands/creds.js';

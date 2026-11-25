@@ -1,124 +1,44 @@
-import type { DoctorCheckCode } from '../types/core.js';
-import { str } from './strings.js';
+const ERROR_CLASS_PATTERNS = {
+  BAD_INPUT: /^bad_input:/u,
+  MISSING_PARTITION_PREDICATE: /missing_partition_predicate/u,
+  QUERY_TIMEOUT: /query_timeout|query exceeded timeout|statement timeout|maximum statement execution time exceeded|query execution was interrupted(?!, identified as runaway)/u,
+  RESOURCE_LIMIT: /exceeded resource group quota limitation|runaway watch list|identified as runaway query/u,
+  MISCONFIGURED_DATASOURCE: /misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/u,
+  DATASOURCE_REFUSED: /datasource_refused/u,
+  DATABASE_CONFINED: /database_confined/u,
+  DETERMINISTIC_REQUIRED: /deterministic_required|prod requires deterministic/u,
+  KB_MISSING: /kb_missing/u,
+  UNKNOWN_DATASOURCE: /datasource resolution failed/u,
+  AMBIGUOUS_DATASOURCE: /ambiguous_datasource/u,
+  AMBIGUOUS_DB_USER: /found several allowed db users/u,
+  UNKNOWN_COLUMN: /unknown column|column \S+ does not exist/u,
+  AMBIGUOUS_COLUMN: /column \S+ in .+ is ambiguous|column reference \S+ is ambiguous/u,
+  UNKNOWN_TABLE: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/u,
+  SQL_SYNTAX: /error in your sql syntax|syntax error at or near|syntax error at end of input/u,
+  OVERLOADED: /overloaded|queue limit/u,
+  ACCESS_DENIED: /access denied|permission denied/u,
+  UNKNOWN_DATABASE: /unknown database|does not exist/u,
+  MISSING_TOOL: /missing_tool|spawn \S+ enoent|command not found/u,
+  CONNECTIVITY: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/u,
+  UNKNOWN_TARGET: /getaddrinfo|no such host|target.*not found/u,
+  AUTH_EXPIRED: /\b(?:unauthorized|unauthenticated|not logged in|noauth|wrongpass)\b|log ?in again|authentication required|unable to authenticate|(?:session|certificate|token|credentials?) (?:has |have |is )?expired|expired (?:session|certificate|token|credentials?)/u,
+  GENERIC: /.*/u,
+} as const satisfies Record<string, RegExp>;
 
-export const EXIT_CODES = {
-  OK: 0,
-  GENERAL_ERROR: 1,
-  BAD_INPUT: 2,
-  CONNECTIVITY: 3,
-  AUTH: 4,
-  ACCESS_DENIED: 5,
-  UNKNOWN_TARGET: 6,
-  NOT_READY: 7,
-} as const;
+export type ErrorClass = keyof typeof ERROR_CLASS_PATTERNS;
 
-type ErrorClassDef = {
-  exitCode: number;
-  match: RegExp;
-};
+export function isErrorClass(value: string): value is ErrorClass {
+  return Object.hasOwn(ERROR_CLASS_PATTERNS, value);
+}
 
-const ERROR_CLASSES = {
-  BAD_INPUT: { exitCode: EXIT_CODES.BAD_INPUT, match: /^bad_input:/ },
-  MISSING_PARTITION_PREDICATE: { exitCode: EXIT_CODES.BAD_INPUT, match: /missing_partition_predicate/ },
-  QUERY_TIMEOUT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /query_timeout|query exceeded timeout|statement timeout|maximum statement execution time exceeded|query execution was interrupted(?!, identified as runaway)/ },
-  RESOURCE_LIMIT: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /exceeded resource group quota limitation|runaway watch list|identified as runaway query/ },
-  MISCONFIGURED_DATASOURCE: {
-    exitCode: EXIT_CODES.BAD_INPUT,
-    match: /misconfigured_datasource|datasource .*blocks kb-backed execution|conflicts with kb/,
-  },
-  DATASOURCE_REFUSED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /datasource_refused/ },
-  DATABASE_CONFINED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /database_confined/ },
-  DETERMINISTIC_REQUIRED: { exitCode: EXIT_CODES.BAD_INPUT, match: /deterministic_required|prod requires deterministic/ },
-  KB_MISSING: { exitCode: EXIT_CODES.NOT_READY, match: /kb_missing/ },
-  UNKNOWN_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /datasource resolution failed/ },
-  AMBIGUOUS_DATASOURCE: { exitCode: EXIT_CODES.BAD_INPUT, match: /ambiguous_datasource/ },
-  AMBIGUOUS_DB_USER: { exitCode: EXIT_CODES.BAD_INPUT, match: /found several allowed db users/ },
-  UNKNOWN_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /unknown column|column \S+ does not exist/ },
-  AMBIGUOUS_COLUMN: { exitCode: EXIT_CODES.BAD_INPUT, match: /column \S+ in .+ is ambiguous|column reference \S+ is ambiguous/ },
-  UNKNOWN_TABLE: { exitCode: EXIT_CODES.BAD_INPUT, match: /table \S+ doesn't exist|unknown table|relation \S+ does not exist/ },
-  SQL_SYNTAX: { exitCode: EXIT_CODES.BAD_INPUT, match: /error in your sql syntax|syntax error at or near|syntax error at end of input/ },
-  OVERLOADED: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /overloaded|queue limit/ },
-  ACCESS_DENIED: { exitCode: EXIT_CODES.ACCESS_DENIED, match: /access denied|permission denied/ },
-  UNKNOWN_DATABASE: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /unknown database|does not exist/ },
-  MISSING_TOOL: { exitCode: EXIT_CODES.NOT_READY, match: /missing_tool|spawn \S+ enoent|command not found/ },
-  CONNECTIVITY: {
-    exitCode: EXIT_CODES.CONNECTIVITY,
-    match: /getaddrinfo (?:eai_again|enotfound [a-z0-9-]+(?:\.[a-z0-9-]+)?(?:\.svc(?:\.cluster\.local)?)?(?![\w.-]))|teleport proxy path unavailable|timeout|timed out|connection refused|econnrefused|enetunreach|ehostunreach|econnreset|eperm .*local|network/,
-  },
-  UNKNOWN_TARGET: { exitCode: EXIT_CODES.UNKNOWN_TARGET, match: /getaddrinfo|no such host|target.*not found/ },
-  AUTH_EXPIRED: {
-    exitCode: EXIT_CODES.AUTH,
-    match: /\b(?:unauthorized|unauthenticated|not logged in|noauth|wrongpass)\b|log ?in again|authentication required|unable to authenticate|(?:session|certificate|token|credentials?) (?:has |have |is )?expired|expired (?:session|certificate|token|credentials?)/,
-  },
-  GENERIC: { exitCode: EXIT_CODES.GENERAL_ERROR, match: /.*/ },
-} as const satisfies Record<string, ErrorClassDef>;
-
-export type ErrorClass = keyof typeof ERROR_CLASSES;
+const ERROR_CLASSES_BY_PRIORITY = Object.keys(ERROR_CLASS_PATTERNS).filter((name) => isErrorClass(name));
 
 export function classifyError(message: string): ErrorClass {
-  const prefix = message.match(/^([A-Z_]+):/)?.[1];
-  if (prefix && prefix in ERROR_CLASSES) return prefix as ErrorClass;
-  const text = message.toLowerCase();
-  for (const [cls, def] of Object.entries(ERROR_CLASSES) as Array<[ErrorClass, ErrorClassDef]>) {
-    if (def.match.test(text)) return cls;
+  const explicitClass = /^(?<name>[A-Z_]+):/u.exec(message)?.groups?.name;
+  if (explicitClass !== undefined && isErrorClass(explicitClass)) {
+    return explicitClass;
   }
-  return 'GENERIC';
+  const lowerCased = message.toLowerCase();
+  return ERROR_CLASSES_BY_PRIORITY.find((errorClass) => ERROR_CLASS_PATTERNS[errorClass].test(lowerCased)) ?? 'GENERIC';
 }
 
-export function exitCodeForClass(code: string): number {
-  return code in ERROR_CLASSES ? ERROR_CLASSES[code as ErrorClass].exitCode : EXIT_CODES.GENERAL_ERROR;
-}
-
-export class TaprootError extends Error {
-  readonly code: ErrorClass;
-  details?: Record<string, unknown>;
-  constructor(code: ErrorClass, message: string, details?: Record<string, unknown>) {
-    super(`${code}: ${message}`);
-    this.code = code;
-    this.name = 'TaprootError';
-    if (details) this.details = details;
-  }
-}
-
-const makeThrower = (cls: ErrorClass) => (message: string, details?: Record<string, unknown>) =>
-  new TaprootError(cls, message, details);
-
-export const badInput = makeThrower('BAD_INPUT');
-export const missingPartitionPredicate = makeThrower('MISSING_PARTITION_PREDICATE');
-export const queryTimeoutErr = makeThrower('QUERY_TIMEOUT');
-export const misconfiguredDatasource = makeThrower('MISCONFIGURED_DATASOURCE');
-export const databaseConfined = makeThrower('DATABASE_CONFINED');
-export const ambiguousDatasource = makeThrower('AMBIGUOUS_DATASOURCE');
-export const deterministicRequired = makeThrower('DETERMINISTIC_REQUIRED');
-export const kbMissing = makeThrower('KB_MISSING');
-export const overloaded = makeThrower('OVERLOADED');
-export const accessDenied = makeThrower('ACCESS_DENIED');
-export const connectivity = makeThrower('CONNECTIVITY');
-
-export function spawnErrorMessage(error: unknown): string {
-  const message = str((error as Error)?.message || error);
-  const bin = message.match(/spawn (\S+) ENOENT/)?.[1];
-  return bin ? `MISSING_TOOL: ${bin} is not installed or not on PATH; install it, then retry.` : message;
-}
-
-export function classifyExecutorDoctorCode(message: string): DoctorCheckCode | undefined {
-  const normalized = str(message).trim();
-  if (!normalized) return undefined;
-  if (/missing target\/dbuser\/database/i.test(normalized)) return 'executor_configuration_missing';
-  switch (classifyError(normalized)) {
-    case 'CONNECTIVITY':
-      return 'executor_connectivity';
-    case 'MISSING_TOOL':
-      return 'executor_missing_tool';
-    case 'ACCESS_DENIED':
-      return 'executor_access_denied';
-    case 'AUTH_EXPIRED':
-      return 'executor_auth_expired';
-    case 'UNKNOWN_TARGET':
-      return 'executor_unknown_target';
-    case 'QUERY_TIMEOUT':
-      return 'executor_query_timeout';
-    default:
-      return undefined;
-  }
-}

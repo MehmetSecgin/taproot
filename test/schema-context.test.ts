@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildSchemaContext, collectPredicateColumns, collectReferencedTables, suggestSchemaNames } from '../src/core/schema-context.js';
+import { buildSchemaContext, suggestSchemaNames } from '../src/core/schema-context.js';
+import { collectPredicateColumns, collectReferencedTables } from '../src/core/sql-ast-references.js';
 import type { SchemaCatalog } from '../src/store/schema-catalog.js';
+
+const NO_CATALOG: SchemaCatalog | undefined = undefined;
 
 function makeCatalog(): SchemaCatalog {
   return {
@@ -31,8 +34,8 @@ describe('schema context', () => {
       makeCatalog(),
     );
 
-    expect(Object.keys(out.tables).toSorted()).toEqual(['customers', 'orders']);
-    expect(out.tables.orders.indexes[0].columns).toEqual(['order_date', 'customer_id']);
+    expect(Object.keys(out.tables).toSorted()).toStrictEqual(['customers', 'orders']);
+    expect(out.tables.orders.indexes[0].columns).toStrictEqual(['order_date', 'customer_id']);
     expect(out.tables.orders.partition?.key).toBe('order_date');
   });
 
@@ -42,35 +45,34 @@ describe('schema context', () => {
       SELECT * FROM recent WHERE id IN (SELECT customer_id FROM customers)
     `);
 
-    expect(refs.toSorted()).toEqual(['customers', 'orders']);
+    expect(refs.toSorted()).toStrictEqual(['customers', 'orders']);
   });
 
   it('resolves aliases for predicate columns', () => {
     const refs = collectPredicateColumns(
       'SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date = "2026-05-02"',
     );
-    expect(refs.byTable.get('orders')?.has('order_date')).toBe(true);
-    expect(refs.byTable.get('customers')?.has('id')).toBe(true);
+    expect([refs.byTable.get('orders')?.has('order_date'), refs.byTable.get('customers')?.has('id')]).toStrictEqual([true, true]);
   });
 
   it('returns empty context for unparseable SQL', () => {
-    expect(buildSchemaContext('SELECT FROM WHERE', makeCatalog()).tables).toEqual({});
-    expect(buildSchemaContext('SELECT id FROM orders', undefined)).toEqual({ tables: {} });
+    expect(buildSchemaContext('SELECT FROM WHERE', makeCatalog()).tables).toStrictEqual({});
+    expect(buildSchemaContext('SELECT id FROM orders', NO_CATALOG)).toStrictEqual({ tables: {} });
   });
 });
 
-describe('suggestSchemaNames', () => {
+describe('schema name suggestions', () => {
   it('suggests the closest column of a referenced table for a MySQL error', () => {
     const context = buildSchemaContext('SELECT customer_ident FROM orders', makeCatalog());
-    expect(suggestSchemaNames('UNKNOWN_COLUMN', "Unknown column 'customer_ident' in 'field list'", context, makeCatalog())[0]).toBe('orders.customer_id');
+    expect(suggestSchemaNames({ code: 'UNKNOWN_COLUMN', message: "Unknown column 'customer_ident' in 'field list'" }, context, makeCatalog())[0]).toBe('orders.customer_id');
   });
 
   it('suggests catalog tables for a missing table, ignoring the database prefix', () => {
     const context = buildSchemaContext('SELECT id FROM customer', makeCatalog());
-    expect(suggestSchemaNames('UNKNOWN_TABLE', "Table 'orders.customer' doesn't exist", context, makeCatalog())[0]).toBe('customers');
+    expect(suggestSchemaNames({ code: 'UNKNOWN_TABLE', message: "Table 'orders.customer' doesn't exist" }, context, makeCatalog())[0]).toBe('customers');
   });
 
   it('suggests nothing without a cached catalog', () => {
-    expect(suggestSchemaNames('UNKNOWN_TABLE', "Table 'orders.customer' doesn't exist", { tables: {} }, undefined)).toEqual([]);
+    expect(suggestSchemaNames({ code: 'UNKNOWN_TABLE', message: "Table 'orders.customer' doesn't exist" }, { tables: {} }, NO_CATALOG)).toStrictEqual([]);
   });
 });

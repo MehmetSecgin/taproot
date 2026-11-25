@@ -2,10 +2,11 @@ import path from 'node:path';
 import { buildContext } from '../../src/core/app.js';
 import { builtinPlugins } from '../../src/plugins-builtins/index.js';
 import type { AppContext } from '../../src/core/app.js';
-import type { QueryExecutionRequest } from '../../src/core/execute-query.js';
+import type { QueryExecutionRequest } from '../../src/core/query-types.js';
 import { CredentialStore } from '../../src/store/credentials.js';
 import { DatasourceStore } from '../../src/store/datasources.js';
-import type { DatasourceProfile, TapRootPlugin } from '../../src/types/core.js';
+import type { DatasourceProfile } from '../../src/types/datasource.js';
+import type { TapRootPlugin } from '../../src/types/plugin.js';
 import { tempStateRoot } from './state-root.js';
 
 const savedEnv = {
@@ -31,13 +32,13 @@ export async function setupQueryState(overrides: Partial<DatasourceProfile> = {}
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: new Date().toISOString(),
     ...overrides,
-  } as DatasourceProfile);
+  });
   const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
   await creds.set('qa:fake', { user: 'x', password: 'x' });
   return stateRoot;
 }
 
-export function restoreQueryEnv(): void {
+export function restoreProcessEnv(): void {
   process.env.TAPROOT_STATE_ROOT = savedEnv.TAPROOT_STATE_ROOT;
   process.env.TAPROOT_MASTER_KEY = savedEnv.TAPROOT_MASTER_KEY;
   process.env.NODE_ENV = savedEnv.NODE_ENV;
@@ -64,8 +65,16 @@ export function queryRequest(overrides: Partial<QueryExecutionRequest> = {}): Qu
     allowFlush: false,
     allowKeys: false,
     skipProtoValidate: false,
-    timeoutMs: 5_000,
+    timeoutMs: 5000,
     maxRows: undefined,
     ...overrides,
   };
+}
+
+export function findDatasource(ctx: AppContext, name: string): DatasourceProfile {
+  const datasource = ctx.datasourceStore.get(name);
+  if (datasource === undefined) {
+    throw new Error(`datasource ${name} is not saved`);
+  }
+  return datasource;
 }

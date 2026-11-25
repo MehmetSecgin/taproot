@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { outputCheckNamed } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -36,8 +37,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'qa-demo'], env);
     expect(out.status).toBe(3);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'mysql connect')?.code).toBe('executor_connectivity');
+    expect(outputCheckNamed(out.stdout, 'mysql connect')?.code).toBe('executor_connectivity');
   });
 
   it('returns executor_missing_tool when tsh is not on PATH', () => {
@@ -72,8 +72,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(7);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql query')?.code).toBe(
+    expect(outputCheckNamed(out.stdout, 'teleport-mysql query')?.code).toBe(
       'executor_missing_tool',
     );
   });
@@ -107,8 +106,7 @@ describe('doctor executor codes', () => {
 
     const out = runCli(['doctor', '--datasource', 'prod-orders'], env);
     expect(out.status).toBe(1);
-    const parsed = JSON.parse(out.stdout).data;
-    expect(parsed.checks.find((check: { check: string }) => check.check === 'teleport-mysql doctor')?.code).toBe(
+    expect(outputCheckNamed(out.stdout, 'teleport-mysql doctor')?.code).toBe(
       'executor_configuration_missing',
     );
   });

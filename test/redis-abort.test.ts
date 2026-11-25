@@ -4,13 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { redisPlugin } from '../src/plugins-builtins/redis/index.js';
 import { testDatasource } from './helpers/datasource.js';
 import { stubRedisCli } from './helpers/redis-cli-stub.js';
+import { executeOf } from './helpers/mysql-row-cap-support.js';
 
-function isRunning(pid: number): boolean {
+function processStateOf(pid: number): 'running' | 'exited' {
   try {
     process.kill(pid, 0);
-    return true;
+    return 'running';
   } catch {
-    return false;
+    return 'exited';
   }
 }
 
@@ -20,7 +21,7 @@ describe('redis abort', () => {
     const binDir = stubRedisCli('echo $$ > "$(dirname "$0")/pid.txt"\nexec sleep 30\n');
     const pidFile = path.join(binDir, 'pid.txt');
     const caller = new AbortController();
-    const pending = redisPlugin.execute!(
+    const pending = executeOf(redisPlugin)(
       {
         datasource: testDatasource('redis', 6379, {}),
         query: 'GET profile:1',
@@ -31,7 +32,9 @@ describe('redis abort', () => {
       },
       { user: 'reader', password: 'x' },
     );
-    await vi.waitFor(() => expect(fs.existsSync(pidFile)).toBe(true));
+    await vi.waitFor(() => {
+      expect(fs.readdirSync(binDir)).toContain('pid.txt');
+    });
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
 
     // act
@@ -39,6 +42,8 @@ describe('redis abort', () => {
 
     // assert
     await expect(pending).rejects.toThrow('client disconnected');
-    await vi.waitFor(() => expect(isRunning(pid)).toBe(false));
+    await vi.waitFor(() => {
+      expect(processStateOf(pid)).toBe('exited');
+    });
   });
 });

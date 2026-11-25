@@ -3,21 +3,37 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { nowIso } from '../core/time.js';
 import { RUNTIME_CONSTANTS } from '../core/constants.js';
-import type { SessionCheckpoint, SessionRecord } from './types.js';
+import { isRecord } from '../core/json-shapes.js';
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>).toSorted(([a], [b]) => a.localeCompare(b));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
-}
+const SESSION_ID_LENGTH = 16;
+const LEASE_ID_LENGTH = 12;
+const CHECKPOINT_SCHEMA_VERSION = 1;
 
-function sha256(input: string): string {
-  const hash = crypto.createHash('sha256').update(input).digest('hex');
-  return `sha256:${hash}`;
-}
+type SessionState = 'recovering' | 'ready' | 'closed';
 
-export function buildFingerprint(input: {
+type SessionRecord = {
+  sessionId: string;
+  fingerprint: string;
+  datasourceName: string;
+  env?: string;
+  namespace?: string;
+  service?: string;
+  kind?: string;
+  state: SessionState;
+  createdAt: string;
+  lastUsedAt: string;
+  idleTtlMs: number;
+  hardTtlMs: number;
+  leaseCount: number;
+};
+
+type SessionCheckpoint = {
+  schemaVersion: number;
+  updatedAt: string;
+  sessions?: SessionRecord[] | null;
+};
+
+type SessionKey = {
   datasourceName: string;
   env?: string;
   namespace?: string;
@@ -25,98 +41,116 @@ export function buildFingerprint(input: {
   kind?: string;
   connection?: Record<string, unknown>;
   connectors?: string[];
-}): string {
+};
+
+type ExpirySweep = { expired: number; staleLeases: number; expiredSessionIds: string[] };
+
+function isSessionCheckpoint(value: unknown): value is SessionCheckpoint {
+  return isRecord(value) && value.schemaVersion === CHECKPOINT_SCHEMA_VERSION && (value.sessions === undefined || value.sessions === null || Array.isArray(value.sessions));
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const entries = Object.entries(value).toSorted(([keyA], [keyB]) => keyA.localeCompare(keyB));
+  return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`;
+}
+
+function sha256(input: string): string {
+  const hash = crypto.createHash('sha256').update(input).digest('hex');
+  return `sha256:${hash}`;
+}
+
+function shortId(prefix: string, length: number): string {
+  return `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, length)}`;
+}
+
+export function buildFingerprint(key: SessionKey): string {
   const payload = {
-    datasourceName: input.datasourceName,
-    env: input.env || '',
-    namespace: input.namespace || '',
-    service: input.service || '',
-    kind: input.kind || '',
-    connection: input.connection || {},
-    connectors: (input.connectors || []).toSorted(),
+    datasourceName: key.datasourceName,
+    env: key.env ?? '',
+    namespace: key.namespace ?? '',
+    service: key.service ?? '',
+    kind: key.kind ?? '',
+    connection: key.connection ?? {},
+    connectors: (key.connectors ?? []).toSorted(),
   };
   return sha256(stableStringify(payload));
 }
 
+function readCheckpointSessions(checkpointFile: string): SessionRecord[] | undefined {
+  try {
+    const checkpoint: unknown = JSON.parse(fs.readFileSync(checkpointFile, 'utf8'));
+    return isSessionCheckpoint(checkpoint) ? (checkpoint.sessions ?? []) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isExpired(session: SessionRecord, now: number): boolean {
+  const hardExpired = now - new Date(session.createdAt).getTime() >= session.hardTtlMs;
+  const idleExpired = now - new Date(session.lastUsedAt).getTime() >= session.idleTtlMs;
+  return hardExpired || idleExpired;
+}
+
+function recordLeaseActivity(session: SessionRecord, leases: Map<string, number>): void {
+  session.leaseCount = leases.size;
+  session.lastUsedAt = nowIso();
+}
+
+function removeStaleHeartbeats(leases: Map<string, number>, now: number): number {
+  let removed = 0;
+  for (const [leaseId, heartbeatAt] of leases.entries()) {
+    if (now - heartbeatAt > RUNTIME_CONSTANTS.session.leaseStaleThresholdMs) {
+      leases.delete(leaseId);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 export class SessionRegistry {
+  private readonly runDir: string;
   private readonly checkpointFile: string;
   private readonly sessionsById = new Map<string, SessionRecord>();
   private readonly sessionIdByFingerprint = new Map<string, string>();
   private readonly leaseHeartbeats = new Map<string, Map<string, number>>();
-  private persistedContent?: string;
+  private lastWrittenSessions: string | undefined = undefined;
 
-  constructor(private readonly runDir: string) {
+  public constructor(runDir: string) {
+    this.runDir = runDir;
     fs.mkdirSync(this.runDir, { recursive: true });
     this.checkpointFile = path.join(this.runDir, 'sessions.json');
     this.loadCheckpoint();
   }
 
-  private loadCheckpoint(): void {
-    if (!fs.existsSync(this.checkpointFile)) return;
-    try {
-      const raw = JSON.parse(fs.readFileSync(this.checkpointFile, 'utf8')) as SessionCheckpoint;
-      if (raw.schemaVersion !== 1) throw new Error(`Unsupported sessions checkpoint schemaVersion=${raw.schemaVersion}`);
-      for (const session of raw.sessions || []) {
-        const recovering: SessionRecord = {
-          ...session,
-          state: 'recovering',
-        };
-        this.sessionsById.set(recovering.sessionId, recovering);
-        this.sessionIdByFingerprint.set(recovering.fingerprint, recovering.sessionId);
-      }
-    } catch {
-      const backup = `${this.checkpointFile}.corrupt.${Date.now()}`;
-      fs.renameSync(this.checkpointFile, backup);
-    }
+  public list(): SessionRecord[] {
+    return [...this.sessionsById.values()].toSorted((first, second) => first.createdAt.localeCompare(second.createdAt));
   }
 
-  persist(): void {
-    const sessions = this.list();
-    const content = JSON.stringify(sessions);
-    if (content === this.persistedContent) return;
-    const payload: SessionCheckpoint = { schemaVersion: 1, updatedAt: nowIso(), sessions };
-    const tmp = `${this.checkpointFile}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
-    fs.renameSync(tmp, this.checkpointFile);
-    this.persistedContent = content;
-  }
-
-  list(): SessionRecord[] {
-    return [...this.sessionsById.values()].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-
-  get(sessionId: string): SessionRecord | undefined {
+  public get(sessionId: string): SessionRecord | undefined {
     return this.sessionsById.get(sessionId);
   }
 
-  open(input: {
-    datasourceName: string;
-    env?: string;
-    namespace?: string;
-    service?: string;
-    kind?: string;
-    connection?: Record<string, unknown>;
-    connectors?: string[];
-  }): SessionRecord {
-    const fingerprint = buildFingerprint(input);
-    const existingId = this.sessionIdByFingerprint.get(fingerprint);
-    const existing = existingId ? this.sessionsById.get(existingId) : undefined;
-    if (existing && existing.state !== 'closed') {
-      existing.lastUsedAt = nowIso();
-      if (existing.state === 'recovering') existing.state = 'ready';
-      return existing;
+  public open(key: SessionKey): SessionRecord {
+    const fingerprint = buildFingerprint(key);
+    const reused = this.reuseOpenSession(fingerprint);
+    if (reused !== undefined) {
+      return reused;
     }
-
     const now = nowIso();
-    const sessionId = `sess_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
     const created: SessionRecord = {
-      sessionId,
+      sessionId: shortId('sess', SESSION_ID_LENGTH),
       fingerprint,
-      datasourceName: input.datasourceName,
-      env: input.env,
-      namespace: input.namespace,
-      service: input.service,
-      kind: input.kind,
+      datasourceName: key.datasourceName,
+      env: key.env,
+      namespace: key.namespace,
+      service: key.service,
+      kind: key.kind,
       state: 'ready',
       createdAt: now,
       lastUsedAt: now,
@@ -130,66 +164,113 @@ export class SessionRegistry {
     return created;
   }
 
-  acquireLease(sessionId: string): string {
+  public acquireLease(sessionId: string): string {
     const session = this.sessionsById.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
-    const leaseId = `lease_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
-    const now = Date.now();
-    const leases = this.leaseHeartbeats.get(sessionId) || new Map<string, number>();
-    leases.set(leaseId, now);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    const leaseId = shortId('lease', LEASE_ID_LENGTH);
+    const leases = this.leaseHeartbeats.get(sessionId) ?? new Map<string, number>();
+    leases.set(leaseId, Date.now());
     this.leaseHeartbeats.set(sessionId, leases);
-    session.leaseCount = leases.size;
-    session.lastUsedAt = nowIso();
+    recordLeaseActivity(session, leases);
     return leaseId;
   }
 
-  heartbeatLease(sessionId: string, leaseId: string): void {
+  public heartbeatLease(sessionId: string, leaseId: string): void {
     const leases = this.leaseHeartbeats.get(sessionId);
-    if (!leases || !leases.has(leaseId)) return;
+    if (leases?.has(leaseId) !== true) {
+      return;
+    }
     leases.set(leaseId, Date.now());
   }
 
-  releaseLease(sessionId: string, leaseId: string): void {
+  public releaseLease(sessionId: string, leaseId: string): void {
     const session = this.sessionsById.get(sessionId);
-    if (!session) return;
     const leases = this.leaseHeartbeats.get(sessionId);
-    if (!leases) return;
+    if (session === undefined || leases === undefined) {
+      return;
+    }
     leases.delete(leaseId);
-    session.leaseCount = leases.size;
-    session.lastUsedAt = nowIso();
-    if (!leases.size) this.leaseHeartbeats.delete(sessionId);
+    recordLeaseActivity(session, leases);
+    if (leases.size === 0) {
+      this.leaseHeartbeats.delete(sessionId);
+    }
   }
 
-  onTick(): { expired: number; staleLeases: number; expiredSessionIds: string[] } {
+  public onTick(): ExpirySweep {
     const now = Date.now();
-    let expired = 0;
     let staleLeases = 0;
     const expiredSessionIds: string[] = [];
     for (const session of this.sessionsById.values()) {
-      const leases = this.leaseHeartbeats.get(session.sessionId);
-      if (leases) {
-        for (const [leaseId, heartbeatAt] of leases.entries()) {
-          if (now - heartbeatAt > RUNTIME_CONSTANTS.session.leaseStaleThresholdMs) {
-            leases.delete(leaseId);
-            staleLeases += 1;
-          }
-        }
-        session.leaseCount = leases.size;
-        if (!leases.size) this.leaseHeartbeats.delete(session.sessionId);
-      }
-      const createdAt = new Date(session.createdAt).getTime();
-      const lastUsedAt = new Date(session.lastUsedAt).getTime();
-      const hardExpired = now - createdAt >= session.hardTtlMs;
-      const idleExpired = now - lastUsedAt >= session.idleTtlMs;
-      if (hardExpired || idleExpired) {
-        this.sessionIdByFingerprint.delete(session.fingerprint);
-        this.sessionsById.delete(session.sessionId);
-        this.leaseHeartbeats.delete(session.sessionId);
+      staleLeases += this.dropStaleLeases(session, now);
+      if (isExpired(session, now)) {
+        this.forget(session);
         expiredSessionIds.push(session.sessionId);
-        expired += 1;
       }
     }
     this.persist();
-    return { expired, staleLeases, expiredSessionIds };
+    return { expired: expiredSessionIds.length, staleLeases, expiredSessionIds };
+  }
+
+  private loadCheckpoint(): void {
+    if (!fs.existsSync(this.checkpointFile)) {
+      return;
+    }
+    const sessions = readCheckpointSessions(this.checkpointFile);
+    if (sessions === undefined) {
+      fs.renameSync(this.checkpointFile, `${this.checkpointFile}.corrupt.${Date.now()}`);
+      return;
+    }
+    for (const session of sessions) {
+      const recovering: SessionRecord = { ...session, state: 'recovering' };
+      this.sessionsById.set(recovering.sessionId, recovering);
+      this.sessionIdByFingerprint.set(recovering.fingerprint, recovering.sessionId);
+    }
+  }
+
+  private persist(): void {
+    const sessions = this.list();
+    const content = JSON.stringify(sessions);
+    if (content === this.lastWrittenSessions) {
+      return;
+    }
+    const checkpoint: SessionCheckpoint = { schemaVersion: CHECKPOINT_SCHEMA_VERSION, updatedAt: nowIso(), sessions };
+    const temporaryFile = `${this.checkpointFile}.tmp`;
+    fs.writeFileSync(temporaryFile, `${JSON.stringify(checkpoint, null, 2)}\n`, 'utf8');
+    fs.renameSync(temporaryFile, this.checkpointFile);
+    this.lastWrittenSessions = content;
+  }
+
+  private reuseOpenSession(fingerprint: string): SessionRecord | undefined {
+    const existingId = this.sessionIdByFingerprint.get(fingerprint);
+    const existing = existingId === undefined ? undefined : this.sessionsById.get(existingId);
+    if (existing === undefined || existing.state === 'closed') {
+      return undefined;
+    }
+    existing.lastUsedAt = nowIso();
+    if (existing.state === 'recovering') {
+      existing.state = 'ready';
+    }
+    return existing;
+  }
+
+  private dropStaleLeases(session: SessionRecord, now: number): number {
+    const leases = this.leaseHeartbeats.get(session.sessionId);
+    if (leases === undefined) {
+      return 0;
+    }
+    const dropped = removeStaleHeartbeats(leases, now);
+    session.leaseCount = leases.size;
+    if (leases.size === 0) {
+      this.leaseHeartbeats.delete(session.sessionId);
+    }
+    return dropped;
+  }
+
+  private forget(session: SessionRecord): void {
+    this.sessionIdByFingerprint.delete(session.fingerprint);
+    this.sessionsById.delete(session.sessionId);
+    this.leaseHeartbeats.delete(session.sessionId);
   }
 }

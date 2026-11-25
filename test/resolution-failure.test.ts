@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { describeResolutionFailure } from '../src/core/resolve-datasource.js';
-import type { DatasourceProfile } from '../src/types/core.js';
+import { describeResolutionFailure } from '../src/core/datasource-resolution-failure.js';
+import type { DatasourceProfile } from '../src/types/datasource.js';
 
-function profile(name: string, env: string, service: string, namespace?: string): DatasourceProfile {
+function profile(name: string, { env, service, namespace }: { env: string; service: string; namespace?: string }): DatasourceProfile {
   return {
     name,
     kind: 'mysql',
@@ -14,15 +14,15 @@ function profile(name: string, env: string, service: string, namespace?: string)
     credentialRef: 'x',
     policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
     updatedAt: '2026-01-01T00:00:00.000Z',
-  } as DatasourceProfile;
+  };
 }
 
-const profiles = [profile('qa-orders', 'qa', 'orders'), profile('stg-orders', 'stg', 'orders'), profile('prod-orders', 'prod', 'orders'), profile('qa-billing', 'qa', 'billing')];
+const profiles = [profile('qa-orders', { env: 'qa', service: 'orders' }), profile('stg-orders', { env: 'stg', service: 'orders' }), profile('prod-orders', { env: 'prod', service: 'orders' }), profile('qa-billing', { env: 'qa', service: 'billing' })];
 
-describe('describeResolutionFailure', () => {
+describe('datasource resolution failure message', () => {
   it('names the sibling profiles and the missing env when a datasource name is asked', () => {
     // act
-    const message = describeResolutionFailure(profiles, { rawDs: 'preprod-orders' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'preprod-orders' });
     // assert
     expect(message).toBe(
       "Datasource resolution failed: no profile for datasource 'preprod-orders'. Profiles for service 'orders': prod-orders, qa-orders, stg-orders (envs: prod, qa, stg). No profile in env 'preprod'; add one with datasource add.",
@@ -36,68 +36,68 @@ describe('describeResolutionFailure', () => {
   });
 
   it('skips the missing-env sentence when the env has a profile for that service', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'qa-orders-x', env: 'qa' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'qa-orders-x', env: 'qa' });
     expect(message).toContain("Profiles for service 'orders'");
     expect(message).not.toContain('No profile in env');
   });
 
   it('reads the env from the name parts before the service and ignores trailing parts', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'qa-orders-x' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'qa-orders-x' });
     expect(message).toContain("Profiles for service 'orders'");
     expect(message).not.toContain('No profile in env');
   });
 
   it('does not match a service that is only part of a name segment', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'stg-ordersync' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'stg-ordersync' });
     expect(message).toContain('list profiles with datasource list');
   });
 
   it('treats an env-namespace prefix as covered by a profile in that namespace', () => {
-    const withNs = [...profiles, profile('qa-develop-db', 'qa', 'orders', 'develop')];
-    const message = describeResolutionFailure(withNs, { rawDs: 'qa-develop-orders' });
+    const withNs = [...profiles, profile('qa-develop-db', { env: 'qa', service: 'orders', namespace: 'develop' })];
+    const message = describeResolutionFailure(withNs, { datasourceName: 'qa-develop-orders' });
     expect(message).toContain('(envs: prod, qa, qa/develop, stg)');
     expect(message).not.toContain('No profile in env');
   });
 
   it('names the namespace when the env has profiles but not in that namespace', () => {
-    const withNs = [...profiles, profile('qa-develop-db', 'qa', 'orders', 'develop')];
+    const withNs = [...profiles, profile('qa-develop-db', { env: 'qa', service: 'orders', namespace: 'develop' })];
     const message = describeResolutionFailure(withNs, { env: 'qa', namespace: 'test', service: 'orders' });
     expect(message).toContain("No profile in env 'qa' namespace 'test'");
   });
 
   it('suggests the closest profile names when nothing matches', () => {
     // act
-    const message = describeResolutionFailure(profiles, { rawDs: 'qa-ordres' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'qa-ordres' });
     // assert
     expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-ordres'. Did you mean qa-orders? Use --datasource or --env+--service; list profiles with datasource list.");
   });
 
   it('names the first token when extra words are glued into the datasource value', () => {
     // act
-    const message = describeResolutionFailure(profiles, { rawDs: 'qa-orders 1234 56' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'qa-orders 1234 56' });
     // assert
     expect(message).toBe("Datasource resolution failed: no profile for datasource 'qa-orders 1234 56'. Datasource value contains spaces; did you mean 'qa-orders'?");
   });
 
   it('skips the spaces hint when the first token is not a profile', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'nope 1234' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'nope 1234' });
     expect(message).not.toContain('contains spaces');
   });
 
   it('suggests nothing for a name unlike every profile', () => {
-    const message = describeResolutionFailure(profiles, { rawDs: 'nope' });
+    const message = describeResolutionFailure(profiles, { datasourceName: 'nope' });
     expect(message).not.toContain('Did you mean');
   });
 
   it('suggests profiles that contain a partial name, closest env first', () => {
-    const message = describeResolutionFailure([profile('prod-billing', 'prod', 'billing'), ...profiles], { rawDs: 'billin' });
+    const message = describeResolutionFailure([profile('prod-billing', { env: 'prod', service: 'billing' }), ...profiles], { datasourceName: 'billin' });
     expect(message).toContain('Did you mean qa-billing, prod-billing?');
   });
 
   it('lists prod profiles after non-prod ones unless the name asks for prod', () => {
-    const names = [profile('prod-billing', 'prod', 'billing'), profile('stg-billing', 'stg', 'billing')];
-    expect(describeResolutionFailure(names, { rawDs: 'billin' })).toContain('Did you mean stg-billing, prod-billing?');
-    expect(describeResolutionFailure(names, { rawDs: 'prod-billng' })).toContain('Did you mean prod-billing?');
+    const names = [profile('prod-billing', { env: 'prod', service: 'billing' }), profile('stg-billing', { env: 'stg', service: 'billing' })];
+    expect(describeResolutionFailure(names, { datasourceName: 'billin' })).toContain('Did you mean stg-billing, prod-billing?');
+    expect(describeResolutionFailure(names, { datasourceName: 'prod-billng' })).toContain('Did you mean prod-billing?');
   });
 
   it('points at the list command without suggestions when no name is asked', () => {

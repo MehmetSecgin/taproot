@@ -5,9 +5,9 @@ import { CredentialStore } from '../store/credentials.js';
 import { KbStore } from '../store/kb.js';
 import { SchemaCatalogStore } from '../store/schema-catalog.js';
 import { RuntimeConfigStore } from '../store/runtime-config.js';
-import type { EnvironmentPolicy, PluginRegistry, TapRootPlugin } from '../types/core.js';
+import type { PluginRegistry, TapRootPlugin } from '../types/plugin.js';
 
-export interface AppContext {
+export type AppContext = {
   paths: ReturnType<typeof resolvePaths>;
   datasourceStore: DatasourceStore;
   credentialStore: CredentialStore;
@@ -16,7 +16,7 @@ export interface AppContext {
   runtimeConfigStore: RuntimeConfigStore;
   pluginRegistry: PluginRegistry;
   verbose: boolean;
-}
+};
 
 export function buildContext(opts: {
   kbDir?: string;
@@ -41,8 +41,4 @@ export function buildContext(opts: {
     pluginRegistry: new Map(opts.plugins.map((plugin) => [plugin.manifest.name, plugin])),
     verbose: Boolean(opts.verbose),
   };
-}
-
-export function environmentPolicy(ctx: Pick<AppContext, 'runtimeConfigStore'>, env?: string): EnvironmentPolicy {
-  return ctx.runtimeConfigStore.environmentPolicy(env);
 }

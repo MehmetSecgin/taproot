@@ -1,81 +1,104 @@
-import { badInput } from './error-classification.js';
-import { pluckPath } from './output.js';
-import { str } from './strings.js';
+import { badInput } from './taproot-error.js';
+import { pluckPath } from './dot-path.js';
 
-export interface JsonExtractSpec {
+export type JsonExtractSpec = {
   column: string;
   path: string;
-  alias: string;
+  outputColumn: string;
+};
+
+type ExtractedTable = {
+  columns: string[];
+  rows: unknown[][];
+};
+
+function invalidSpecError(rawSpec: string): Error {
+  return badInput(`invalid --json-extract '${rawSpec}'. Expected '<column>:<dotpath>' (e.g. payload:order.id).`);
 }
 
-export function parseJsonExtractSpecs(values: string[] | undefined): JsonExtractSpec[] {
+function splitColumnAndPath(rawSpec: string, text: string): JsonExtractSpec {
+  const separator = text.indexOf(':');
+  const column = separator > 0 ? text.slice(0, separator).trim() : '';
+  const path = separator > 0 ? text.slice(separator + 1).trim() : '';
+  if (column === '' || path === '') {
+    throw invalidSpecError(rawSpec);
+  }
+  return { column, path, outputColumn: `${column}.${path}` };
+}
+
+function parseJsonExtractSpec(rawSpec: string): JsonExtractSpec | undefined {
+  const text = rawSpec.trim();
+  return text === '' ? undefined : splitColumnAndPath(rawSpec, text);
+}
+
+export function parseJsonExtractSpecs(values?: string[]): JsonExtractSpec[] {
   const specs: JsonExtractSpec[] = [];
-  for (const raw of values || []) {
-    const text = str(raw).trim();
-    if (!text) continue;
-    const sep = text.indexOf(':');
-    if (sep <= 0) {
-      throw badInput(`invalid --json-extract '${raw}'. Expected '<column>:<dotpath>' (e.g. payload:order.id).`);
+  for (const rawSpec of values ?? []) {
+    const spec = parseJsonExtractSpec(rawSpec);
+    if (spec !== undefined) {
+      specs.push(spec);
     }
-    const column = text.slice(0, sep).trim();
-    const path = text.slice(sep + 1).trim();
-    if (!column || !path) {
-      throw badInput(`invalid --json-extract '${raw}'. Expected '<column>:<dotpath>' (e.g. payload:order.id).`);
-    }
-    specs.push({ column, path, alias: `${column}.${path}` });
   }
   return specs;
 }
 
-function extractFromCell(cell: unknown, path: string): unknown {
-  if (cell === null || cell === undefined) return null;
-  let parsed: unknown = cell;
-  if (typeof cell === 'string') {
-    const trimmed = cell.trim();
-    if (!trimmed) return null;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      return null;
-    }
-  } else if (Buffer.isBuffer(cell)) {
-    try {
-      parsed = JSON.parse(cell.toString('utf8'));
-    } catch {
-      return null;
-    }
+function parseJsonCell(cell: unknown): unknown {
+  if (typeof cell !== 'string' && !Buffer.isBuffer(cell)) {
+    return cell;
   }
-  const value = pluckPath(parsed, path);
-  return value === undefined ? null : value;
+  const text = typeof cell === 'string' ? cell.trim() : cell.toString('utf8');
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
-export function applyJsonExtract(
-  columns: string[],
-  rows: unknown[][],
-  specs: JsonExtractSpec[],
-): { columns: string[]; rows: unknown[][] } {
-  if (!specs.length) return { columns, rows };
+function extractFromCell(cell: unknown, path: string): unknown {
+  if (cell === null || cell === undefined) {
+    return null;
+  }
+  return pluckPath(parseJsonCell(cell), path) ?? null;
+}
+
+function assertSourceColumnsPresent(columns: string[], specs: JsonExtractSpec[]): void {
   const missing = specs.filter((spec) => !columns.includes(spec.column));
-  if (missing.length) {
+  if (missing.length > 0) {
     throw badInput(
       `--json-extract references column(s) not present in the result: ${missing
         .map((spec) => spec.column)
         .join(', ')}. Available columns: ${columns.join(', ') || '(none)'}.`,
     );
   }
-  const nextColumns = [...columns];
+}
+
+function withOutputColumns(columns: string[], specs: JsonExtractSpec[]): string[] {
+  const allColumns = [...columns];
   for (const spec of specs) {
-    if (!nextColumns.includes(spec.alias)) nextColumns.push(spec.alias);
+    if (!allColumns.includes(spec.outputColumn)) {
+      allColumns.push(spec.outputColumn);
+    }
   }
+  return allColumns;
+}
+
+export function applyJsonExtract(columns: string[], rows: unknown[][], specs: JsonExtractSpec[]): ExtractedTable {
+  if (specs.length === 0) {
+    return { columns, rows };
+  }
+  assertSourceColumnsPresent(columns, specs);
+  const allColumns = withOutputColumns(columns, specs);
   const extractions = specs.map((spec) => ({
     source: columns.indexOf(spec.column),
-    target: nextColumns.indexOf(spec.alias),
+    target: allColumns.indexOf(spec.outputColumn),
     path: spec.path,
   }));
-  const nextRows = rows.map((row) => {
-    const out = [...row];
-    for (const { source, target, path } of extractions) out[target] = extractFromCell(row[source], path);
-    return out;
+  const extractedRows = rows.map((row) => {
+    const extendedRow = [...row];
+    for (const { source, target, path } of extractions) {
+      extendedRow[target] = extractFromCell(row[source], path);
+    }
+    return extendedRow;
   });
-  return { columns: nextColumns, rows: nextRows };
+  return { columns: allColumns, rows: extractedRows };
 }

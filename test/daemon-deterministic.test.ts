@@ -5,7 +5,7 @@ import { rpcCall } from '../src/daemon/client.js';
 import { startLocalDaemon } from './helpers/daemon.js';
 import { CredentialStore } from '../src/store/credentials.js';
 import { fakePlugin } from './helpers/fake-plugin.js';
-import { tempStateRoot } from './helpers/state-root.js';
+import { tempStateRoot, writeRuntimeConfig } from './helpers/state-root.js';
 
 const previousEnv = {
   TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
@@ -13,17 +13,13 @@ const previousEnv = {
   NODE_ENV: process.env.NODE_ENV,
 };
 
-function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>): void {
-  fs.writeFileSync(path.join(stateRoot, 'config', 'deterministic-config.json'), JSON.stringify(config));
-}
-
-afterEach(() => {
-  process.env.TAPROOT_STATE_ROOT = previousEnv.TAPROOT_STATE_ROOT;
-  process.env.TAPROOT_MASTER_KEY = previousEnv.TAPROOT_MASTER_KEY;
-  process.env.NODE_ENV = previousEnv.NODE_ENV;
-});
-
 describe('daemon deterministic resolution', () => {
+  afterEach(() => {
+    process.env.TAPROOT_STATE_ROOT = previousEnv.TAPROOT_STATE_ROOT;
+    process.env.TAPROOT_MASTER_KEY = previousEnv.TAPROOT_MASTER_KEY;
+    process.env.NODE_ENV = previousEnv.NODE_ENV;
+  });
+
   it('returns DETERMINISTIC_REQUIRED in prod when datasource is unresolved', async () => {
     const { stateRoot } = tempStateRoot();
     writeRuntimeConfig(stateRoot, {
@@ -122,7 +118,7 @@ describe('daemon deterministic resolution', () => {
           query: 'SELECT 1 AS ok',
           timeoutMs: 25,
         },
-        timeoutMs: 5_000,
+        timeoutMs: 5000,
       });
       expect(res.ok).toBe(false);
       expect(res.error?.code).toBe('QUERY_TIMEOUT');

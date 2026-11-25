@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { DatasourceProfile, DoctorCheck, TapRootPlugin } from '../src/types/core.js';
+import type { Mock } from 'vitest';
+import type { DatasourceProfile } from '../src/types/datasource.js';
+import type { DoctorCheck, TapRootPlugin } from '../src/types/plugin.js';
 
 process.env.TAPROOT_CONNECTOR_CONNECT_MS = '300';
 const { runDatasourceConnectors } = await import('../src/core/connector-runner.js');
 const { RUNTIME_CONSTANTS } = await import('../src/core/constants.js');
 const { kubectlPortforwardPlugin } = await import('../src/plugins-builtins/kubectl-portforward/index.js');
+
+type ConnectorInput = Parameters<typeof runDatasourceConnectors>[0];
 
 function datasource(name: string, connectors: string[] = ['fake']): DatasourceProfile {
   return {
@@ -18,10 +22,12 @@ function datasource(name: string, connectors: string[] = ['fake']): DatasourcePr
   };
 }
 
-function fakeConnector(statuses: DoctorCheck['status'][]) {
-  const connect = vi.fn(async (): Promise<DoctorCheck[]> => [
-    { check: 'fake connect', status: statuses[Math.min(connect.mock.calls.length - 1, statuses.length - 1)], detail: 'ok' },
-  ]);
+function fakeConnector(statuses: DoctorCheck['status'][]): { connect: Mock<() => Promise<DoctorCheck[]>>; pluginRegistry: Map<string, TapRootPlugin> } {
+  let callCount = 0;
+  const connect = vi.fn<() => Promise<DoctorCheck[]>>(async () => {
+    callCount += 1;
+    return [{ check: 'fake connect', status: statuses[Math.min(callCount - 1, statuses.length - 1)], detail: 'ok' }];
+  });
   const plugin: TapRootPlugin = {
     manifest: { name: 'fake', capabilities: ['doctor'] },
     connect,
@@ -29,8 +35,8 @@ function fakeConnector(statuses: DoctorCheck['status'][]) {
   return { connect, pluginRegistry: new Map([['fake', plugin]]) };
 }
 
-function connectInput(profile: DatasourceProfile, pluginRegistry: Map<string, TapRootPlugin>) {
-  return { datasource: profile, credentialStore: { get: async () => ({}) }, pluginRegistry, mode: 'connect' as const };
+function connectInput(profile: DatasourceProfile, pluginRegistry: Map<string, TapRootPlugin>): ConnectorInput {
+  return { datasource: profile, credentialStore: { get: async (): Promise<Record<string, string>> => ({}) }, pluginRegistry, mode: 'connect' };
 }
 
 describe('connector preflight reuse', () => {
@@ -48,8 +54,8 @@ describe('connector preflight reuse', () => {
     const checks = await runDatasourceConnectors(input);
 
     // assert
-    expect(connect).toHaveBeenCalledTimes(1);
-    expect(checks).toEqual([{ check: 'fake connect', status: 'ok', detail: 'ok' }]);
+    expect(connect).toHaveBeenCalledOnce();
+    expect(checks).toStrictEqual([{ check: 'fake connect', status: 'ok', detail: 'ok' }]);
   });
 
   it('runs connect once for parallel queries', async () => {
@@ -61,7 +67,7 @@ describe('connector preflight reuse', () => {
     const results = await Promise.all([runDatasourceConnectors(input), runDatasourceConnectors(input), runDatasourceConnectors(input)]);
 
     // assert
-    expect(connect).toHaveBeenCalledTimes(1);
+    expect(connect).toHaveBeenCalledOnce();
     expect(results.every((checks) => checks[0].status === 'ok')).toBe(true);
   });
 
@@ -113,7 +119,7 @@ describe('connector preflight reuse', () => {
 
   it('runs doctor checks on every call', async () => {
     // arrange
-    const doctor = vi.fn(async (): Promise<DoctorCheck[]> => [{ check: 'fake status', status: 'ok', detail: 'ok' }]);
+    const doctor = vi.fn<() => Promise<DoctorCheck[]>>(async () => [{ check: 'fake status', status: 'ok', detail: 'ok' }]);
     const plugin: TapRootPlugin = { manifest: { name: 'fake', capabilities: ['doctor'] }, doctor };
     const input = { ...connectInput(datasource('doctor'), new Map([['fake', plugin]])), mode: 'doctor' as const };
 
@@ -135,13 +141,14 @@ describe('kubectl-portforward connect', () => {
     }, 10);
 
     // act
-    const checks = await kubectlPortforwardPlugin.connect!({
+    const { connect } = kubectlPortforwardPlugin;
+    const checks = await connect?.({
       datasource: datasource('hung-forward', ['kubectl-portforward']),
       credentials: { connectCommand: 'sleep 5' },
     });
 
     // assert
-    expect(checks).toEqual([
+    expect(checks).toStrictEqual([
       { check: 'kubectl-portforward connect', status: 'fail', detail: 'command timed out after 300ms', code: 'connector_connect_blocked' },
     ]);
     expect(timerFired).toBe(true);

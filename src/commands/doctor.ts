@@ -1,48 +1,43 @@
-import { Command } from 'commander';
+import type { Command } from 'commander';
 import type { LocalExecutor } from '../cli/types.js';
-import { criticalDatasourceKbConflicts, datasourceKbConflicts } from '../core/conflicts.js';
-import { runDatasourceConnectors } from '../core/connector-runner.js';
-import { classifyError } from '../core/error-classification.js';
-import { EXIT_CODES, exitCodeForClass } from '../core/exit-codes.js';
-import { normalizeNamespace, normalizeService } from '../core/naming.js';
-import { printEnvelope } from '../core/output.js';
+import { createVerboseLog } from '../cli/verbose-log.js';
+import type { AppContext } from '../core/app.js';
 import { ensureStarterRuntime } from '../core/runtime-init.js';
-import { verboseLog } from '../cli/query-direct.js';
-import { DoctorStatus } from '../types/core.js';
-import type { DoctorCheck } from '../types/core.js';
+import type { DatasourceProfile } from '../types/datasource.js';
+import { reportDoctorChecks, runDoctorChecks } from './doctor-checks.js';
+import { compareWithKb, reportKbRoutingBlocked } from './doctor-kb.js';
+import { isDoctorCapable } from './doctor-plugin.js';
+import type { DoctorCapablePlugin } from './doctor-plugin.js';
+import { reportUnresolvedTarget, resolveDoctorDatasource } from './doctor-target.js';
+import type { DoctorOptions } from './doctor-target.js';
 
-interface UnresolvedTarget {
-  env: string;
-  service: string;
-  namespace?: string;
-  kbAvailable: boolean;
+function requireDoctorPlugin(ctx: AppContext, datasource: DatasourceProfile): DoctorCapablePlugin {
+  const plugin = ctx.pluginRegistry.get(datasource.kind);
+  if (!isDoctorCapable(plugin)) {
+    throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
+  }
+  return plugin;
 }
 
-function unresolvedTargetLabel(target: UnresolvedTarget): string {
-  return `env=${target.env}${target.namespace ? ` namespace=${target.namespace}` : ''} service=${target.service}`;
+async function doctorDatasource(ctx: AppContext, datasource: DatasourceProfile, connect: boolean): Promise<void> {
+  const target = { datasource, plugin: requireDoctorPlugin(ctx, datasource) };
+  const kbComparison = compareWithKb(ctx, datasource);
+  if (kbComparison.blockingConflicts.length > 0) {
+    reportKbRoutingBlocked(target, kbComparison.blockingConflicts);
+    return;
+  }
+  const checks = await runDoctorChecks(ctx, target, connect);
+  reportDoctorChecks(target, kbComparison.warnings, checks);
 }
 
-function unresolvedTargetChecks(target: UnresolvedTarget): DoctorCheck[] {
-  const label = unresolvedTargetLabel(target);
-  return [
-    {
-      check: 'target_datasource',
-      status: DoctorStatus.Fail,
-      detail: `No datasource profile for ${label}; doctor reports state and does not create one`,
-    },
-    {
-      check: 'kb routing',
-      status: target.kbAvailable ? DoctorStatus.Ok : DoctorStatus.Warn,
-      detail: target.kbAvailable
-        ? `KB has a connection for ${label}, so the profile can be created from it`
-        : `KB has no connection for ${label}, so the profile has to be described by hand`,
-    },
-    {
-      check: 'doctor blocked',
-      status: DoctorStatus.Warn,
-      detail: 'plugin/connectivity checks skipped until the datasource profile exists',
-    },
-  ];
+async function runDoctor(ctx: AppContext, opts: DoctorOptions): Promise<void> {
+  ensureStarterRuntime(ctx);
+  const resolution = resolveDoctorDatasource(ctx, opts);
+  if ('unresolved' in resolution) {
+    reportUnresolvedTarget(resolution.unresolved, createVerboseLog(ctx));
+    return;
+  }
+  await doctorDatasource(ctx, resolution.datasource, opts.connect);
 }
 
 export function doctorCommand(program: Command, executor: LocalExecutor): void {
@@ -54,92 +49,7 @@ export function doctorCommand(program: Command, executor: LocalExecutor): void {
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
     .option('--service <service>', 'service name; pair with --env')
     .option('--connect', 'run connector connect steps during doctor', false)
-    .action(async (opts) => {
-      const ctx = executor.context();
-      ensureStarterRuntime(ctx);
-      const logVerbose = verboseLog(ctx);
-      let datasource = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-      const warnings: string[] = [];
-      if (!datasource && opts.env && opts.service) {
-        const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-        const namespace = normalizeNamespace(opts.namespace);
-        datasource = ctx.datasourceStore.resolveByEnvService(opts.env, service, namespace || undefined);
-        if (!datasource) {
-          const target: UnresolvedTarget = {
-            env: opts.env,
-            service,
-            namespace: namespace || undefined,
-            kbAvailable: Boolean(ctx.kbStore.resolveConnection(service, opts.env, namespace || undefined)),
-          };
-          logVerbose(`no datasource profile for ${unresolvedTargetLabel(target)}`);
-          const checks = unresolvedTargetChecks(target);
-          printEnvelope(true, {
-            checks,
-            summary: { ok: target.kbAvailable ? 1 : 0, warn: target.kbAvailable ? 1 : 2, fail: 1, total: checks.length },
-          });
-          process.exitCode = EXIT_CODES.NOT_READY;
-          return;
-        }
-      }
-      if (!datasource) {
-        throw new Error('Could not resolve datasource. Use --datasource or --env+--service.');
-      }
-      const plugin = ctx.pluginRegistry.get(datasource.kind);
-      if (!plugin || !plugin.doctor) {
-        throw new Error(`No doctor-capable plugin for datasource kind '${datasource.kind}'.`);
-      }
-      if (datasource.env && datasource.service) {
-        const kb = ctx.kbStore.resolveConnection(datasource.service, datasource.env, datasource.namespace);
-        if (kb) {
-          const critical = criticalDatasourceKbConflicts(datasource, kb);
-          if (critical.length) {
-            const checks: DoctorCheck[] = [
-              {
-                check: 'kb routing consistency',
-                status: DoctorStatus.Fail,
-                detail: `MISCONFIGURED_DATASOURCE: ${critical.join('; ')}`,
-              },
-            ];
-            checks.push({
-              check: 'doctor blocked',
-              status: DoctorStatus.Warn,
-              detail: 'plugin/connectivity checks skipped until datasource routing matches KB',
-            });
-            printEnvelope(true, {
-              datasource: datasource.name,
-              plugin: plugin.manifest.name,
-              checks,
-              summary: { ok: 0, warn: 1, fail: 1, total: checks.length },
-            });
-            process.exitCode = exitCodeForClass('MISCONFIGURED_DATASOURCE');
-            return;
-          }
-          const conflicts = datasourceKbConflicts(datasource, kb);
-          if (conflicts.length) warnings.push(`datasource overrides KB (${conflicts.join('; ')})`);
-        }
-      }
-      const creds = await ctx.credentialStore.get(datasource.credentialRef);
-      const connectorInput = { datasource, credentialStore: ctx.credentialStore, pluginRegistry: ctx.pluginRegistry };
-      const checks = opts.connect ? await runDatasourceConnectors({ ...connectorInput, mode: 'connect' }) : [];
-      checks.push(...(await runDatasourceConnectors({ ...connectorInput, mode: 'doctor' })));
-      checks.push(...(await plugin.doctor({ datasource, credentials: creds })));
-
-      const failCount = checks.filter((c) => c.status === DoctorStatus.Fail).length;
-      const warnCount = checks.filter((c) => c.status === DoctorStatus.Warn).length;
-      const okCount = checks.filter((c) => c.status === DoctorStatus.Ok).length;
-
-      printEnvelope(true, {
-        datasource: datasource.name,
-        plugin: plugin.manifest.name,
-        ...(warnings.length ? { warnings } : {}),
-        checks,
-        summary: { ok: okCount, warn: warnCount, fail: failCount, total: checks.length },
-      });
-
-      if (checks.some((c) => c.status === DoctorStatus.Fail)) {
-        const firstFailure = checks.find((c) => c.status === DoctorStatus.Fail);
-        const code = classifyError(firstFailure?.detail || '');
-        process.exitCode = exitCodeForClass(code);
-      }
+    .action(async (opts: DoctorOptions) => {
+      await runDoctor(executor.context(), opts);
     });
 }

@@ -1,183 +1,103 @@
-import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { executeQuery, silentQueryReport } from '../src/core/execute-query.js';
-import type { QueryExecutionRequest } from '../src/core/execute-query.js';
-import { rpcCall } from '../src/daemon/client.js';
-import { queryDatasourceResolver } from '../src/core/resolve-query-datasource.js';
-import { startLocalDaemon } from './helpers/daemon.js';
-import { contextWith } from './helpers/query-state.js';
-import { CredentialStore } from '../src/store/credentials.js';
-import { DatasourceStore } from '../src/store/datasources.js';
-import type { QueryResult, TapRootPlugin } from '../src/types/core.js';
-import { fakePlugin } from './helpers/fake-plugin.js';
-import { tempStateRoot } from './helpers/state-root.js';
-
-function queryRecordingPlugin(seen: string[]): TapRootPlugin {
-  const plugin = fakePlugin();
-  const inner = plugin.execute!;
-  plugin.execute = async (request, creds): Promise<QueryResult> => {
-    seen.push(request.query);
-    return inner(request, creds);
-  };
-  return plugin;
-}
-
-const previousEnv = {
-  TAPROOT_STATE_ROOT: process.env.TAPROOT_STATE_ROOT,
-  TAPROOT_MASTER_KEY: process.env.TAPROOT_MASTER_KEY,
-  NODE_ENV: process.env.NODE_ENV,
-};
-
-let stateRoot = '';
-
-function baseRequest(overrides: Partial<QueryExecutionRequest> = {}): QueryExecutionRequest {
-  return {
-    datasource: 'qa-fake',
-    env: 'qa',
-    namespace: '',
-    service: 'fake',
-    query: 'SELECT 1 AS ok',
-    params: [],
-    allowDiscovery: false,
-    allowMutate: false,
-    allowPartitionScan: false,
-    explain: false,
-    rowsObject: false,
-    jsonExtract: [],
-    allowFlush: false,
-    allowKeys: false,
-    skipProtoValidate: false,
-    timeoutMs: 5_000,
-    maxRows: undefined,
-    ...overrides,
-  };
-}
-
-async function runBothPaths(request: QueryExecutionRequest, makePlugin: () => TapRootPlugin = () => fakePlugin()) {
-  const ctx = contextWith(makePlugin());
-  const direct = await executeQuery(request, { ctx, report: silentQueryReport, signal: undefined, acquireQuerySlot: undefined, resolveDatasource: queryDatasourceResolver(undefined) });
-
-  const socketPath = path.join(stateRoot, 'run', 'taprootd-parity.sock');
-  const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [makePlugin()] });
-  try {
-    const rpc = await rpcCall({ socketPath, method: 'query.execute', params: { ...request }, timeoutMs: 10_000 });
-    return { direct, rpc };
-  } finally {
-    await daemon.stop();
-  }
-}
-
-beforeEach(async () => {
-  stateRoot = tempStateRoot().stateRoot;
-  process.env.TAPROOT_STATE_ROOT = stateRoot;
-  process.env.TAPROOT_MASTER_KEY = 'test-master-key';
-  process.env.NODE_ENV = 'test';
-  const configDir = path.join(stateRoot, 'config');
-  const dsStore = new DatasourceStore(path.join(configDir, 'datasources.json'));
-  dsStore.save({
-    name: 'qa-fake',
-    kind: 'fake',
-    env: 'qa',
-    service: 'fake',
-    tags: [],
-    connection: { host: '127.0.0.1', port: 1, database: 'fake' },
-    credentialRef: 'qa:fake',
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-    updatedAt: new Date().toISOString(),
-  });
-  const creds = new CredentialStore(path.join(configDir, 'credentials.json.enc'), true);
-  await creds.set('qa:fake', { user: 'x', password: 'x' });
-});
-
-afterEach(() => {
-  process.env.TAPROOT_STATE_ROOT = previousEnv.TAPROOT_STATE_ROOT;
-  process.env.TAPROOT_MASTER_KEY = previousEnv.TAPROOT_MASTER_KEY;
-  process.env.NODE_ENV = previousEnv.NODE_ENV;
-});
+import { describe, expect, it } from 'vitest';
+import { useQueryStateRoot } from './helpers/execute-query-state.js';
+import { fakePlugin, interceptExecute } from './helpers/fake-plugin.js';
+import { expectFailure, expectSuccess } from './helpers/query-outcome.js';
+import { runBothPaths } from './helpers/query-parity-paths.js';
+import { queryRequest } from './helpers/query-state.js';
 
 describe('query parity between the direct and daemon adapters', () => {
-  it('produces the same success envelope on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest());
+  const stateRoot = useQueryStateRoot();
 
-    expect(direct.ok).toBe(true);
+  it('produces the same success envelope on both paths', async () => {
+    const { direct, rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest() });
+
+    const success = expectSuccess(direct);
     expect(rpc.ok).toBe(true);
-    if (!direct.ok) return;
-    expect(rpc.data).toEqual(direct.data);
-    expect(direct.data.columns).toEqual(['ok']);
-    expect(direct.data.rows).toEqual([[1]]);
-    expect(direct.data.rowsForm).toBe('array');
+    expect(rpc.data).toStrictEqual(success.data);
+    expect(success.data.columns).toStrictEqual(['ok']);
+    expect(success.data.rows).toStrictEqual([[1]]);
+    expect(success.data.rowsForm).toBe('array');
   });
 
   it('reports the same resolved metadata on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest());
-    if (!direct.ok) throw new Error('direct path failed');
-    expect((rpc.meta as Record<string, unknown>)?.resolved).toEqual(direct.meta.resolved);
+    const { direct, rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest() });
+    const success = expectSuccess(direct);
+    const sentOverJson = Object.fromEntries(Object.entries({ ...success.meta.resolved }).filter(([, value]) => value !== undefined));
+    expect(rpc.meta.resolved).toStrictEqual(sentOverJson);
   });
 
   it('emits each warning exactly once on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest(), () =>
-      fakePlugin({ warnings: ['partition scan without predicate'] }),
-    );
-    if (!direct.ok) throw new Error('direct path failed');
-    expect(direct.data.warnings).toEqual(['partition scan without predicate']);
-    expect((rpc.data as Record<string, unknown>)?.warnings).toEqual(['partition scan without predicate']);
+    const { direct, rpc } = await runBothPaths({
+      stateRoot: stateRoot(),
+      request: queryRequest(),
+      makePlugin: () => fakePlugin({ warnings: ['partition scan without predicate'] }),
+    });
+    const success = expectSuccess(direct);
+    expect(success.data.warnings).toStrictEqual(['partition scan without predicate']);
+    expect(rpc.data?.warnings).toStrictEqual(['partition scan without predicate']);
   });
 
   it('wraps the query with EXPLAIN on both paths', async () => {
     const seen: string[] = [];
-    const { direct, rpc } = await runBothPaths(baseRequest({ explain: true }), () => queryRecordingPlugin(seen));
+    const { direct, rpc } = await runBothPaths({
+      stateRoot: stateRoot(),
+      request: queryRequest({ explain: true }),
+      makePlugin: () =>
+        interceptExecute(fakePlugin(), (request) => {
+          seen.push(request.query);
+        }),
+    });
 
-    expect(direct.ok).toBe(true);
+    const success = expectSuccess(direct);
     expect(rpc.ok).toBe(true);
-    expect(seen).toEqual(['EXPLAIN SELECT 1 AS ok', 'EXPLAIN SELECT 1 AS ok']);
-    if (!direct.ok) return;
-    expect(rpc.data).toEqual(direct.data);
+    expect(seen).toStrictEqual(['EXPLAIN SELECT 1 AS ok', 'EXPLAIN SELECT 1 AS ok']);
+    expect(rpc.data).toStrictEqual(success.data);
   });
 
   it('adds the json-extract derived column on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest({ jsonExtract: ['payload:order.id'] }), () =>
-      fakePlugin({ columns: ['payload'], rows: [['{"order":{"id":"A1"}}']] }),
-    );
+    const { direct, rpc } = await runBothPaths({
+      stateRoot: stateRoot(),
+      request: queryRequest({ jsonExtract: ['payload:order.id'] }),
+      makePlugin: () => fakePlugin({ columns: ['payload'], rows: [['{"order":{"id":"A1"}}']] }),
+    });
 
-    if (!direct.ok) throw new Error('direct path failed');
-    expect(direct.data.columns).toEqual(['payload', 'payload.order.id']);
-    expect(direct.data.rows).toEqual([['{"order":{"id":"A1"}}', 'A1']]);
-    expect(rpc.data).toEqual(direct.data);
+    const success = expectSuccess(direct);
+    expect(success.data.columns).toStrictEqual(['payload', 'payload.order.id']);
+    expect(success.data.rows).toStrictEqual([['{"order":{"id":"A1"}}', 'A1']]);
+    expect(rpc.data).toStrictEqual(success.data);
   });
 
   it('rejects a malformed json-extract spec on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest({ jsonExtract: ['payload'] }));
+    const { direct, rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest({ jsonExtract: ['payload'] }) });
 
-    expect(direct.ok).toBe(false);
+    const failure = expectFailure(direct);
     expect(rpc.ok).toBe(false);
-    if (direct.ok) return;
-    expect(direct.code).toBe('BAD_INPUT');
+    expect(failure.code).toBe('BAD_INPUT');
     expect(rpc.error?.code).toBe('BAD_INPUT');
   });
 
   it('rejects a malformed param on both paths', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest({ params: ['brokenpair'] }));
-    expect(direct.ok).toBe(false);
+    const { direct, rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest({ params: ['brokenpair'] }) });
+
+    const failure = expectFailure(direct);
     expect(rpc.ok).toBe(false);
-    if (direct.ok) return;
-    expect(direct.message).toContain("Invalid --param 'brokenpair'");
+    expect(failure.message).toContain("Invalid --param 'brokenpair'");
     expect(rpc.error?.message).toContain("Invalid --param 'brokenpair'");
-    expect(direct.code).toBe('BAD_INPUT');
+    expect(failure.code).toBe('BAD_INPUT');
     expect(rpc.error?.code).toBe('BAD_INPUT');
   });
 
   it('maps session and phase metadata onto the daemon response', async () => {
-    const { rpc } = await runBothPaths(baseRequest());
-    const meta = rpc.meta as Record<string, unknown>;
-    expect(meta.sessionId).toBeTruthy();
-    expect(meta.resolved).toBeDefined();
-    expect(meta.phases).toMatchObject({ resolveMs: expect.any(Number), executeMs: expect.any(Number) });
+    const { rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest() });
+    expect(rpc.meta.sessionId).toBeTypeOf('string');
+    expect(rpc.meta.resolved).toBeDefined();
+    expect(Object.keys({ ...rpc.meta.phases })).toStrictEqual(expect.arrayContaining(['resolveMs', 'executeMs']));
   });
 
   it('returns rows as objects on both paths when rowsObject is set', async () => {
-    const { direct, rpc } = await runBothPaths(baseRequest({ rowsObject: true }));
-    if (!direct.ok) throw new Error('direct path failed');
-    expect(direct.data.rows).toEqual([{ ok: 1 }]);
-    expect(rpc.data).toEqual(direct.data);
+    const { direct, rpc } = await runBothPaths({ stateRoot: stateRoot(), request: queryRequest({ rowsObject: true }) });
+    const success = expectSuccess(direct);
+    expect(success.data.rows).toStrictEqual([{ ok: 1 }]);
+    expect(rpc.data).toStrictEqual(success.data);
   });
 });

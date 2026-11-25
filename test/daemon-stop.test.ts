@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseJson } from './helpers/parse-json.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
@@ -12,6 +13,6 @@ describe('daemon stop', () => {
 
     // assert
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout)).toEqual({ ok: true, data: { running: false } });
+    expect(parseJson(out.stdout)).toStrictEqual({ ok: true, data: { running: false } });
   });
 });

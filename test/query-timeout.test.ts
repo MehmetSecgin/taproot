@@ -1,6 +1,11 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
 import { parseTimeoutMs, queryBudgetMs, queryTimeoutError, withQueryTimeout } from '../src/core/query-timeout.js';
+
+async function resultAfterAMinute(): Promise<string> {
+  return delay(60_000, 'late', { ref: false });
+}
 
 describe('query timeout helpers', () => {
   it('uses the fallback timeout when omitted', () => {
@@ -12,16 +17,16 @@ describe('query timeout helpers', () => {
   });
 
   it('rejects invalid timeout values', () => {
-    expect(() => parseTimeoutMs('0', 5000)).toThrow(/BAD_INPUT/);
-    expect(() => parseTimeoutMs('-1', 5000)).toThrow(/BAD_INPUT/);
-    expect(() => parseTimeoutMs('abc', 5000)).toThrow(/BAD_INPUT/);
+    expect(() => parseTimeoutMs('0', 5000)).toThrow(/BAD_INPUT/u);
+    expect(() => parseTimeoutMs('-1', 5000)).toThrow(/BAD_INPUT/u);
+    expect(() => parseTimeoutMs('abc', 5000)).toThrow(/BAD_INPUT/u);
   });
 
   it('echoes the effective timeout and suggests narrowing the scan', () => {
-    const message = queryTimeoutError(15000).message;
+    const { message } = queryTimeoutError(15_000);
     expect(message).toContain('15000ms');
     expect(message).toContain('--timeout');
-    expect(message).toMatch(/partition|predicate/i);
+    expect(message).toMatch(/partition|predicate/iu);
   });
 
   it('fails fast when a query exceeds the timeout', async () => {
@@ -30,7 +35,7 @@ describe('query timeout helpers', () => {
         timeoutMs: 25,
         signal: undefined,
         run: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await delay(100);
           return 'late';
         },
       }),
@@ -40,13 +45,13 @@ describe('query timeout helpers', () => {
   it('stops the run when the caller aborts before the timeout', async () => {
     // arrange
     const caller = new AbortController();
-    let runSignal: AbortSignal | undefined;
+    const runSignals: AbortSignal[] = [];
     const pending = withQueryTimeout({
-      timeoutMs: 5_000,
+      timeoutMs: 5000,
       signal: caller.signal,
-      run: (signal) => {
-        runSignal = signal;
-        return new Promise(() => undefined);
+      run: async (signal) => {
+        runSignals.push(signal);
+        return delay(60_000, null, { signal });
       },
     });
 
@@ -55,12 +60,28 @@ describe('query timeout helpers', () => {
 
     // assert
     await expect(pending).rejects.toThrow('client disconnected');
-    expect(runSignal?.aborted).toBe(true);
+    expect(runSignals.map((signal) => signal.aborted)).toStrictEqual([true]);
+  });
+
+  it('rejects with the same error whether the caller aborted before or during the run', async () => {
+    // arrange
+    const before = new AbortController();
+    before.abort('client gone');
+    const during = new AbortController();
+
+    // act
+    const abortedBefore = withQueryTimeout({ timeoutMs: 5000, signal: before.signal, run: resultAfterAMinute });
+    const abortedDuring = withQueryTimeout({ timeoutMs: 5000, signal: during.signal, run: resultAfterAMinute });
+    during.abort('client gone');
+
+    // assert
+    await expect(abortedBefore).rejects.toStrictEqual(new Error('client gone'));
+    await expect(abortedDuring).rejects.toStrictEqual(new Error('client gone'));
   });
 
   it('lets the client wait for queue wait, connector preflight and execution', () => {
     const preflightMs = RUNTIME_CONSTANTS.connector.preflightTimeoutMs;
-    expect(queryBudgetMs(1_000)).toBe(1_000 + preflightMs + 1_000);
+    expect(queryBudgetMs(1000)).toBe(1000 + preflightMs + 1000);
     expect(queryBudgetMs(preflightMs * 2)).toBe(preflightMs * 6);
   });
 });

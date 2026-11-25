@@ -1,13 +1,11 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import type * as grpc from '@grpc/grpc-js';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ServerUnaryCall, ServerWritableStream } from '@grpc/grpc-js';
+import { describe, expect, it, vi } from 'vitest';
 import { callUnary } from '../src/plugins-builtins/grpc/call.js';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { QueryRequest } from '../src/types/core.js';
+import type { QueryRequest } from '../src/types/plugin.js';
+import { protoRootWith, startProfileServer } from './helpers/grpc-streaming-support.js';
 import { testDatasource } from './helpers/datasource.js';
-import { profileServiceDefinition, startGrpcServer } from './helpers/grpc-server.js';
+import { executeOf } from './helpers/mysql-row-cap-support.js';
 
 const PROTO = `syntax = "proto3";
 package taproot.test;
@@ -26,33 +24,32 @@ service ProfileService {
 }
 `;
 
-const cancelledMethods: string[] = [];
-const startedMethods: string[] = [];
-let protoRoot = '';
-let port = 0;
-let server: grpc.Server;
+type NeverAnsweringServer = {
+  port: number;
+  protoRoot: string;
+  cancelledMethods: string[];
+  startedMethods: string[];
+};
 
-function neverAnswer(method: string) {
-  return (call: grpc.ServerUnaryCall<unknown, unknown> | grpc.ServerWritableStream<unknown, unknown>) => {
+async function startNeverAnsweringServer(): Promise<NeverAnsweringServer> {
+  const protoRoot = protoRootWith('taproot-grpc-abort-', PROTO);
+  const cancelledMethods: string[] = [];
+  const startedMethods: string[] = [];
+  const neverAnswer = (method: string) => (call: ServerUnaryCall<unknown, unknown> | ServerWritableStream<unknown, unknown>): void => {
     startedMethods.push(method);
-    call.on('cancelled', () => cancelledMethods.push(method));
+    call.on('cancelled', () => {
+      cancelledMethods.push(method);
+    });
   };
-}
-
-beforeAll(async () => {
-  protoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-grpc-abort-'));
-  fs.writeFileSync(path.join(protoRoot, 'profile.proto'), PROTO, 'utf8');
-  ({ server, port } = await startGrpcServer(await profileServiceDefinition(protoRoot), {
+  const port = await startProfileServer(protoRoot, {
     GetProfile: neverAnswer('GetProfile'),
     ListProfiles: neverAnswer('ListProfiles'),
-  }));
-});
+  });
+  return { port, protoRoot, cancelledMethods, startedMethods };
+}
 
-afterAll(() => {
-  server?.forceShutdown();
-});
-
-function callProfiles(method: string, signal: AbortSignal): QueryRequest {
+function callProfiles(server: NeverAnsweringServer, method: string, signal: AbortSignal): QueryRequest {
+  const { port, protoRoot } = server;
   return {
     datasource: testDatasource('grpc', port, { protoRoot }),
     query: `taproot.test.ProfileService/${method}`,
@@ -67,34 +64,46 @@ function callProfiles(method: string, signal: AbortSignal): QueryRequest {
 describe('grpcPlugin abort', () => {
   it.each(['GetProfile', 'ListProfiles'])('cancels %s on the server and fails with the abort reason', async (method) => {
     // arrange
+    const server = await startNeverAnsweringServer();
     const caller = new AbortController();
-    const pending = grpcPlugin.execute!(callProfiles(method, caller.signal), {});
-    await vi.waitFor(() => expect(startedMethods).toContain(method));
+    const pending = executeOf(grpcPlugin)(callProfiles(server, method, caller.signal), {});
+    await vi.waitFor(() => {
+      expect(server.startedMethods).toContain(method);
+    });
 
     // act
     caller.abort(new Error('client disconnected'));
 
     // assert
     await expect(pending).rejects.toThrow('client disconnected');
-    await vi.waitFor(() => expect(cancelledMethods).toContain(method));
+    await vi.waitFor(() => {
+      expect(server.cancelledMethods).toContain(method);
+    });
   });
 });
 
-describe('callUnary', () => {
+describe('grpc unary call helper', () => {
   it('settles when the client answers before the call object is returned', async () => {
     // arrange
     const caller = new AbortController();
+    const cancelledCalls: string[] = [];
     const client = {
-      GetProfile: (_payload: unknown, _metadata: unknown, _options: unknown, callback: (err: null, response: unknown) => void) => {
-        callback(null, { name: 'Ada' });
-        return { cancel: () => undefined };
+      GetProfile: (_payload: unknown, _metadata: unknown, ...rest: [unknown, (error: null, response: unknown) => void]): { cancel: () => void } => {
+        const [, onResponse] = rest;
+        onResponse(null, { name: 'Ada' });
+        return {
+          cancel: (): void => {
+            cancelledCalls.push('cancel');
+          },
+        };
       },
     };
+    const method = { name: 'GetProfile', requestType: 'taproot.test.GetProfileRequest', responseType: 'taproot.test.Profile' };
 
     // act
-    const response = callUnary(client, { name: 'GetProfile', requestType: 'taproot.test.GetProfileRequest', responseType: 'taproot.test.Profile' }, { id: '1' }, undefined, 5000, caller.signal);
+    const response = callUnary({ client, method, metadata: undefined, deadlineMs: 5000, signal: caller.signal }, { id: '1' });
 
     // assert
-    await expect(response).resolves.toEqual({ name: 'Ada' });
+    await expect(response).resolves.toStrictEqual({ name: 'Ada' });
   });
 });

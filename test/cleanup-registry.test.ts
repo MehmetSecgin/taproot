@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { registerCleanup, runRegisteredCleanup } from '../src/core/cleanup.js';
+import { registerCleanup, runRegisteredCleanup } from '../src/core/process-cleanup.js';
 
 describe('cleanup registry', () => {
   it('runs cleanup handlers in reverse registration order', async () => {
@@ -11,7 +11,7 @@ describe('cleanup registry', () => {
       out.push('b');
     });
     await runRegisteredCleanup();
-    expect(out).toEqual(['b', 'a']);
+    expect(out).toStrictEqual(['b', 'a']);
   });
 
   it('supports unregistering handlers', async () => {
@@ -21,6 +21,6 @@ describe('cleanup registry', () => {
     });
     unregister();
     await runRegisteredCleanup();
-    expect(out).toEqual([]);
+    expect(out).toStrictEqual([]);
   });
 });

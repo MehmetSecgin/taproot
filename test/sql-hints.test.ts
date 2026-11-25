@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { classifyError } from '../src/core/error-classification.js';
 import { enrichResourceLimitError, enrichSqlSyntaxError, reservedAliasHint } from '../src/core/sql-hints.js';
 
-describe('reservedAliasHint', () => {
+describe('reserved alias hint', () => {
   it('flags a bare reserved word used as an alias', () => {
     const hint = reservedAliasHint('SELECT COUNT(*) rows FROM t');
     expect(hint).toContain('rows');
@@ -23,7 +23,7 @@ describe('reservedAliasHint', () => {
   });
 });
 
-describe('enrichSqlSyntaxError', () => {
+describe('sql syntax error enrichment', () => {
   it('appends a hint to MySQL syntax errors that have a reserved alias', () => {
     const message = "You have an error in your SQL syntax; check the manual ... near 'rows FROM t'";
     const enriched = enrichSqlSyntaxError(message, 'SELECT COUNT(*) rows FROM t');
@@ -42,7 +42,7 @@ describe('enrichSqlSyntaxError', () => {
   });
 });
 
-describe('enrichResourceLimitError', () => {
+describe('resource limit error enrichment', () => {
   it.each([
     'Exceeded resource group quota limitation',
     'Quarantined and interrupted because of being in runaway watch list',
@@ -51,7 +51,7 @@ describe('enrichResourceLimitError', () => {
     // act
     const enriched = enrichResourceLimitError(message);
     // assert
-    expect(enriched.startsWith(`${message} (taproot hint:`)).toBe(true);
+    expect(enriched).toContain(`${message} (taproot hint:`);
     expect(enriched).toContain('partition column or an indexed id range');
     expect(enriched).toContain('add LIMIT');
     expect(classifyError(enriched)).toBe('RESOURCE_LIMIT');

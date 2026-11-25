@@ -1,90 +1,114 @@
 import { readJsonFile, writeJsonFile } from '../core/json.js';
-import type { DatasourceProfile } from '../types/core.js';
+import type { DatasourceProfile } from '../types/datasource.js';
 import { parseDatasourceProfile } from './schemas.js';
-import { str } from '../core/strings.js';
-import { ambiguousDatasource } from '../core/error-classification.js';
+import { isNonEmpty, textUnlessFalsy } from '../core/text-presence.js';
+import { ambiguousDatasource } from '../core/taproot-error.js';
+import { isRecord } from '../core/json-shapes.js';
+import { describeTarget } from '../core/describe-target.js';
 
-function ambiguousMatchError(candidates: DatasourceProfile[], env: string, service: string, namespace?: string): Error {
-  const names = candidates.map((d) => d.name);
-  const target = `env=${env}${namespace ? ` namespace=${namespace}` : ''} service=${service}`;
+type ServiceQuery = {
+  env: string;
+  namespace: string | undefined;
+  service: string;
+  preferKinds: readonly string[];
+};
+
+function ambiguousMatchError(candidates: DatasourceProfile[], query: ServiceQuery): Error {
+  const names = candidates.map((candidate) => candidate.name);
   const pickByName = 'use --datasource <name> on query and doctor';
-  const fix = namespace ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
-  return ambiguousDatasource(`${names.length} datasources match ${target}: ${names.join(', ')}. ${fix}`);
+  const fix = isNonEmpty(query.namespace) ? `Pick one: ${pickByName}.` : `Narrow with --namespace, or ${pickByName}.`;
+  return ambiguousDatasource(`${names.length} datasources match ${describeTarget(query)}: ${names.join(', ')}. ${fix}`);
 }
 
 function rowName(row: unknown): string {
-  return str((row as { name?: unknown } | null)?.name);
+  return isRecord(row) ? textUnlessFalsy(row.name) : '';
+}
+
+function findUniqueProfile(profiles: DatasourceProfile[], query: ServiceQuery): DatasourceProfile | undefined {
+  const { env, namespace, service } = query;
+  const matching = profiles.filter((profile) => {
+    if (profile.env !== env || profile.service !== service) {
+      return false;
+    }
+    return !isNonEmpty(namespace) || textUnlessFalsy(profile.namespace) === namespace;
+  });
+  const ofPreferredKind = matching.filter((profile) => query.preferKinds.includes(profile.kind));
+  const candidates = ofPreferredKind.length > 0 ? ofPreferredKind : matching;
+  if (candidates.length > 1) {
+    throw ambiguousMatchError(candidates, query);
+  }
+  return candidates[0];
+}
+
+function findWithEnvSplitIntoNamespace(profiles: DatasourceProfile[], query: ServiceQuery): DatasourceProfile | undefined {
+  const separatorIndex = query.env.indexOf('-');
+  if (separatorIndex === -1) {
+    return undefined;
+  }
+  return findUniqueProfile(profiles, { ...query, env: query.env.slice(0, separatorIndex), namespace: query.env.slice(separatorIndex + 1) });
 }
 
 export class DatasourceStore {
-  constructor(private readonly file: string) {}
+  private readonly file: string;
 
-  private rows(): unknown[] {
-    const raw = readJsonFile<unknown>(this.file, []);
-    if (!Array.isArray(raw)) throw new Error(`${this.file} must hold a JSON array of datasource profiles. Fix it; TapRoot does not overwrite it until then.`);
-    return raw;
+  public constructor(file: string) {
+    this.file = file;
   }
 
-  load(): { profiles: DatasourceProfile[]; warnings: string[] } {
+  public load(): { profiles: DatasourceProfile[]; warnings: string[] } {
     const profiles: DatasourceProfile[] = [];
     const warnings: string[] = [];
-    this.rows().forEach((row, index) => {
+    for (const [index, row] of this.rawRows().entries()) {
       const parsed = parseDatasourceProfile(row);
-      if (parsed.ok) profiles.push(parsed.profile);
-      else warnings.push(`skipped invalid datasource ${rowName(row) || `#${index}`}: ${parsed.error}`);
-    });
+      if (parsed.ok) {
+        profiles.push(parsed.profile);
+      } else {
+        const label = rowName(row) === '' ? `#${index}` : rowName(row);
+        warnings.push(`skipped invalid datasource ${label}: ${parsed.error}`);
+      }
+    }
     return { profiles, warnings };
   }
 
-  list(): DatasourceProfile[] {
+  public list(): DatasourceProfile[] {
     return this.load().profiles;
   }
 
-  get(name: string): DatasourceProfile | undefined {
-    return this.list().find((d) => d.name === name);
+  public get(name: string): DatasourceProfile | undefined {
+    return this.list().find((profile) => profile.name === name);
   }
 
-  save(profile: DatasourceProfile): DatasourceProfile {
-    const rows = this.rows().filter((row) => rowName(row) !== profile.name);
+  public save(profile: DatasourceProfile): DatasourceProfile {
+    const rows = this.rawRows().filter((row) => rowName(row) !== profile.name);
     rows.push(profile);
     writeJsonFile(this.file, rows);
     return profile;
   }
 
-  remove(name: string): boolean {
-    const rows = this.rows();
-    const next = rows.filter((row) => rowName(row) !== name);
-    if (next.length === rows.length) return false;
-    writeJsonFile(this.file, next);
+  public remove(name: string): boolean {
+    const rows = this.rawRows();
+    const remaining = rows.filter((row) => rowName(row) !== name);
+    if (remaining.length === rows.length) {
+      return false;
+    }
+    writeJsonFile(this.file, remaining);
     return true;
   }
 
-  resolveByEnvService(env: string, service: string, namespace?: string, preferKinds: readonly string[] = []): DatasourceProfile | undefined {
-    const all = this.list();
-    const tryMatch = (envValue: string, nsValue?: string): DatasourceProfile | undefined => {
-      const filtered = all.filter((d) => {
-        if (d.env !== envValue || d.service !== service) return false;
-        if (nsValue == null || nsValue === '') return true;
-        return str(d.namespace) === nsValue;
-      });
-      const ofKind = filtered.filter((d) => preferKinds.includes(d.kind));
-      const candidates = ofKind.length ? ofKind : filtered;
-      if (candidates.length > 1) throw ambiguousMatchError(candidates, envValue, service, nsValue);
-      return candidates[0];
-    };
-
-    const direct = tryMatch(env, namespace);
-    if (direct) return direct;
-
-    // Fallback: callers commonly pass `qa-develop` or `qa-test` as a single token.
-    // Split on the first `-` and retry as env+namespace before declaring no match.
-    if (!namespace && env.includes('-')) {
-      const dashIdx = env.indexOf('-');
-      const envPart = env.slice(0, dashIdx);
-      const nsPart = env.slice(dashIdx + 1);
-      const splitMatch = tryMatch(envPart, nsPart);
-      if (splitMatch) return splitMatch;
+  public resolveByEnvService(query: ServiceQuery): DatasourceProfile | undefined {
+    const profiles = this.list();
+    const direct = findUniqueProfile(profiles, query);
+    if (direct !== undefined) {
+      return direct;
     }
-    return undefined;
+    return isNonEmpty(query.namespace) ? undefined : findWithEnvSplitIntoNamespace(profiles, query);
+  }
+
+  private rawRows(): unknown[] {
+    const raw = readJsonFile<unknown>(this.file, []);
+    if (!Array.isArray(raw)) {
+      throw new TypeError(`${this.file} must hold a JSON array of datasource profiles. Fix it; TapRoot does not overwrite it until then.`);
+    }
+    return raw;
   }
 }

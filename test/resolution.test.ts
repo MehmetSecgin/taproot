@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { datasourceKindsForQuery } from '../src/core/resolve-datasource.js';
 import { DatasourceStore } from '../src/store/datasources.js';
+import type { DatasourceProfile } from '../src/types/datasource.js';
 
 describe('datasource resolution', () => {
   it('refuses to pick between two profiles that match env and service', () => {
@@ -34,7 +35,7 @@ describe('datasource resolution', () => {
       updatedAt: '2026-03-02T00:00:00.000Z',
     });
 
-    expect(() => store.resolveByEnvService('prod', 'svc')).toThrow(
+    expect(() => store.resolveByEnvService({ env: 'prod', namespace: undefined, service: 'svc', preferKinds: [] })).toThrow(
       'AMBIGUOUS_DATASOURCE: 2 datasources match env=prod service=svc: a, b. Narrow with --namespace, or use --datasource <name> on query and doctor.',
     );
   });
@@ -69,8 +70,8 @@ describe('datasource resolution', () => {
       updatedAt: '2026-03-02T00:00:00.000Z',
     });
 
-    expect(store.resolveByEnvService('qa', 'svc', 'develop')?.name).toBe('qa-develop-svc');
-    expect(store.resolveByEnvService('qa', 'svc', 'test')?.name).toBe('qa-test-svc');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: 'develop', service: 'svc', preferKinds: [] })?.name).toBe('qa-develop-svc');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: 'test', service: 'svc', preferKinds: [] })?.name).toBe('qa-test-svc');
   });
 
   it('loads a profile saved with the removed confidence key', () => {
@@ -94,15 +95,14 @@ describe('datasource resolution', () => {
     const loaded = new DatasourceStore(file).load();
 
     // assert
-    expect(loaded.warnings).toEqual([]);
-    expect(loaded.profiles.map((profile) => profile.name)).toEqual(['qa-orders']);
+    expect(loaded.warnings).toStrictEqual([]);
+    expect(loaded.profiles.map((profile) => profile.name)).toStrictEqual(['qa-orders']);
   });
 
   it('only offers --datasource when the namespace is already given', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const store = new DatasourceStore(path.join(dir, 'datasources.json'));
-    const base = {
-      kind: 'grpc',
+    const base: Omit<DatasourceProfile, 'name' | 'kind'> = {
       env: 'qa',
       namespace: 'develop',
       service: 'svc',
@@ -112,10 +112,10 @@ describe('datasource resolution', () => {
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-01T00:00:00.000Z',
     };
-    store.save({ ...base, name: 'qa-svc-grpc' } as never);
-    store.save({ ...base, name: 'qa-svc-legacy-grpc' } as never);
+    store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' });
+    store.save({ ...base, name: 'qa-svc-legacy-grpc', kind: 'grpc' });
 
-    expect(() => store.resolveByEnvService('qa', 'svc', 'develop', ['grpc'])).toThrow(
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: 'develop', service: 'svc', preferKinds: ['grpc'] })).toThrow(
       'AMBIGUOUS_DATASOURCE: 2 datasources match env=qa namespace=develop service=svc: qa-svc-grpc, qa-svc-legacy-grpc. Pick one: use --datasource <name> on query and doctor.',
     );
   });
@@ -123,7 +123,7 @@ describe('datasource resolution', () => {
   it('picks the datasource of the requested kind and refuses to guess without one', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-test-'));
     const store = new DatasourceStore(path.join(dir, 'datasources.json'));
-    const base = {
+    const base: Omit<DatasourceProfile, 'name' | 'kind'> = {
       env: 'qa',
       service: 'svc',
       tags: [],
@@ -132,19 +132,19 @@ describe('datasource resolution', () => {
       policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
       updatedAt: '2026-03-01T00:00:00.000Z',
     };
-    store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' } as never);
-    store.save({ ...base, name: 'qa-svc-sql', kind: 'mysql' } as never);
+    store.save({ ...base, name: 'qa-svc-grpc', kind: 'grpc' });
+    store.save({ ...base, name: 'qa-svc-sql', kind: 'mysql' });
 
-    expect(store.resolveByEnvService('qa', 'svc', undefined, ['mysql'])?.name).toBe('qa-svc-sql');
-    expect(store.resolveByEnvService('qa', 'svc', undefined, ['grpc'])?.name).toBe('qa-svc-grpc');
-    expect(() => store.resolveByEnvService('qa', 'svc')).toThrow('AMBIGUOUS_DATASOURCE');
-    expect(() => store.resolveByEnvService('qa', 'svc', undefined, ['redis'])).toThrow('AMBIGUOUS_DATASOURCE');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['mysql'] })?.name).toBe('qa-svc-sql');
+    expect(store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['grpc'] })?.name).toBe('qa-svc-grpc');
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: [] })).toThrow('AMBIGUOUS_DATASOURCE');
+    expect(() => store.resolveByEnvService({ env: 'qa', namespace: undefined, service: 'svc', preferKinds: ['redis'] })).toThrow('AMBIGUOUS_DATASOURCE');
   });
 });
 
-describe('datasourceKindsForQuery', () => {
+describe('datasource kinds for a query text', () => {
   it('maps SQL statements to the sql kinds', () => {
-    for (const query of [
+    const queries = [
       'SELECT 1',
       '  select * from orders',
       'SHOW COLUMNS FROM orders',
@@ -156,18 +156,18 @@ describe('datasourceKindsForQuery', () => {
       'UPDATE orders SET id = 2',
       'DELETE FROM orders',
       'REPLACE INTO orders VALUES (1)',
-    ]) {
-      expect(datasourceKindsForQuery(query), query).toEqual(['mysql', 'teleport-mysql']);
-    }
+    ];
+
+    expect(queries.map((query) => datasourceKindsForQuery(query))).toStrictEqual(queries.map(() => ['mysql', 'teleport-mysql']));
   });
 
   it('maps Package.Service/method to the grpc kind', () => {
-    expect(datasourceKindsForQuery('taproot.test.ProfileService/getProfile')).toEqual(['grpc']);
-    expect(datasourceKindsForQuery('update.v1.AddressService/select')).toEqual(['grpc']);
+    expect(datasourceKindsForQuery('taproot.test.ProfileService/getProfile')).toStrictEqual(['grpc']);
+    expect(datasourceKindsForQuery('update.v1.AddressService/select')).toStrictEqual(['grpc']);
   });
 
   it('expresses no preference for anything else', () => {
-    expect(datasourceKindsForQuery('GET orders:1')).toEqual([]);
-    expect(datasourceKindsForQuery('')).toEqual([]);
+    expect(datasourceKindsForQuery('GET orders:1')).toStrictEqual([]);
+    expect(datasourceKindsForQuery('')).toStrictEqual([]);
   });
 });

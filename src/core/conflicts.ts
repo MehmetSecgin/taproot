@@ -1,66 +1,113 @@
-import { AccessMethod, DatasourceKind, type DatasourceProfile } from '../types/core.js';
+import { AccessMethod, DatasourceKind } from '../types/datasource.js';
+import type { DatasourceProfile } from '../types/datasource.js';
 import { kubectlPortforwardLocalPort } from './kubectl-portforward.js';
-import { str } from './strings.js';
+import { isNonEmpty, textUnlessFalsy } from './text-presence.js';
 
-export function expectedKindFromKb(kb: Record<string, unknown>): DatasourceKind {
-  const accessMethod = str(kb.access_method).toLowerCase();
-  if (accessMethod === AccessMethod.Tsh) return DatasourceKind.TeleportMysql;
-  return DatasourceKind.Mysql;
+type KbEntry = Record<string, unknown>;
+type KbConflictField = 'kind' | 'host' | 'port' | 'database' | 'target' | 'local port';
+type KbConflict = { field: KbConflictField; message: string };
+
+const COMPARED_CONNECTION_FIELDS = ['host', 'port', 'database', 'target'] as const;
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
+
+function kbAccessMethod(kb: KbEntry): string {
+  return textUnlessFalsy(kb.access_method).toLowerCase();
 }
 
-export function datasourceKbConflicts(datasource: DatasourceProfile, kb: Record<string, unknown>): string[] {
-  const conflicts: string[] = [];
+function expectedKindFromKb(kb: KbEntry): DatasourceKind {
+  return kbAccessMethod(kb) === AccessMethod.Tsh ? DatasourceKind.TeleportMysql : DatasourceKind.Mysql;
+}
+
+function trimmedText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value).trim() : '';
+}
+
+function kindConflict(datasource: DatasourceProfile, kb: KbEntry): KbConflict[] {
   const expectedKind = expectedKindFromKb(kb);
-  if (str(datasource.kind).trim() && datasource.kind !== expectedKind) {
-    conflicts.push(`kind=${datasource.kind} (kb:${expectedKind})`);
+  if (textUnlessFalsy(datasource.kind).trim() === '' || datasource.kind === expectedKind) {
+    return [];
   }
-  const pairs: Array<{ key: string; ds: unknown; kb: unknown }> = [
-    { key: 'host', ds: datasource.connection?.host, kb: kb.host },
-    { key: 'port', ds: datasource.connection?.port, kb: kb.port },
-    { key: 'database', ds: datasource.connection?.database, kb: kb.database },
-    { key: 'target', ds: datasource.connection?.target, kb: kb.target },
-  ];
-  for (const p of pairs) {
-    const dsVal = String(p.ds ?? '').trim();
-    const kbVal = String(p.kb ?? '').trim();
-    if (dsVal && kbVal && dsVal !== kbVal) conflicts.push(`${p.key}=${dsVal} (kb:${kbVal})`);
+  return [{ field: 'kind', message: `kind=${datasource.kind} (kb:${expectedKind})` }];
+}
+
+function connectionFieldConflicts(datasource: DatasourceProfile, kb: KbEntry): KbConflict[] {
+  const conflicts: KbConflict[] = [];
+  for (const field of COMPARED_CONNECTION_FIELDS) {
+    const datasourceValue = trimmedText(datasource.connection?.[field]);
+    const kbValue = trimmedText(kb[field]);
+    if (datasourceValue !== '' && kbValue !== '' && datasourceValue !== kbValue) {
+      conflicts.push({ field, message: `${field}=${datasourceValue} (kb:${kbValue})` });
+    }
   }
-  const portforwardPort = kubectlPortforwardPortConflict(datasource, kb);
-  if (portforwardPort) conflicts.push(portforwardPort);
   return conflicts;
 }
 
-function kubectlPortforwardPortConflict(datasource: DatasourceProfile, kb: Record<string, unknown>): string | undefined {
-  if (str(kb.access_method).toLowerCase() !== AccessMethod.KubectlPortforward) return undefined;
-  if (!datasource.env || !datasource.service) return undefined;
-  const expected = kubectlPortforwardLocalPort(datasource.env, datasource.namespace, datasource.service);
-  const actual = datasource.connection?.port;
-  return actual === expected ? undefined : `local port=${actual} (kubectl-portforward:${expected})`;
+function kubectlPortforwardPortConflict(datasource: DatasourceProfile, kb: KbEntry): KbConflict[] {
+  if (kbAccessMethod(kb) !== AccessMethod.KubectlPortforward) {
+    return [];
+  }
+  if (!isNonEmpty(datasource.env) || !isNonEmpty(datasource.service)) {
+    return [];
+  }
+  const expectedPort = kubectlPortforwardLocalPort(datasource.env, datasource.namespace, datasource.service);
+  const actualPort = datasource.connection?.port;
+  if (actualPort === expectedPort) {
+    return [];
+  }
+  return [{ field: 'local port', message: `local port=${actualPort} (kubectl-portforward:${expectedPort})` }];
 }
 
-export function criticalDatasourceKbConflicts(datasource: DatasourceProfile, kb: Record<string, unknown>): string[] {
-  const conflicts = datasourceKbConflicts(datasource, kb);
-  if (!conflicts.length) return [];
+function findKbConflicts(datasource: DatasourceProfile, kb: KbEntry): KbConflict[] {
+  return [
+    ...kindConflict(datasource, kb),
+    ...connectionFieldConflicts(datasource, kb),
+    ...kubectlPortforwardPortConflict(datasource, kb),
+  ];
+}
 
-  const accessMethod = str(kb.access_method).toLowerCase();
-  const critical: string[] = [];
+function messagesOfField(conflicts: KbConflict[], field: KbConflictField): string[] {
+  return conflicts.filter((conflict) => conflict.field === field).map((conflict) => conflict.message);
+}
 
-  if (accessMethod === AccessMethod.Tsh) {
-    if (datasource.kind !== DatasourceKind.TeleportMysql) critical.push(...conflicts.filter((c) => c.startsWith('kind=')));
-    if (str(datasource.connection.host).trim()) critical.push(...conflicts.filter((c) => c.startsWith('host=')));
-    if (str(datasource.connection.port).trim()) critical.push(...conflicts.filter((c) => c.startsWith('port=')));
-    if (!str(datasource.connection.target).trim()) critical.push('target missing (kb requires teleport target)');
-    if (str(datasource.connection.target).trim() && str(kb.target).trim() && str(datasource.connection.target).trim() !== str(kb.target).trim()) {
-      critical.push(...conflicts.filter((c) => c.startsWith('target=')));
-    }
+function blockingTshConflicts(datasource: DatasourceProfile, kb: KbEntry, conflicts: KbConflict[]): string[] {
+  const datasourceTarget = textUnlessFalsy(datasource.connection.target).trim();
+  const kbTarget = textUnlessFalsy(kb.target).trim();
+  const targetDiffersFromKb = datasourceTarget !== '' && kbTarget !== '' && datasourceTarget !== kbTarget;
+  return [
+    ...(datasource.kind === DatasourceKind.TeleportMysql ? [] : messagesOfField(conflicts, 'kind')),
+    ...(textUnlessFalsy(datasource.connection.host).trim() === '' ? [] : messagesOfField(conflicts, 'host')),
+    ...(textUnlessFalsy(datasource.connection.port).trim() === '' ? [] : messagesOfField(conflicts, 'port')),
+    ...(datasourceTarget === '' ? ['target missing (kb requires teleport target)'] : []),
+    ...(targetDiffersFromKb ? messagesOfField(conflicts, 'target') : []),
+  ];
+}
+
+function blockingKubectlPortforwardConflicts(datasource: DatasourceProfile, conflicts: KbConflict[]): string[] {
+  const blocking: string[] = [];
+  const host = textUnlessFalsy(datasource.connection.host).trim();
+  if (host !== '' && !LOCAL_HOSTS.has(host)) {
+    blocking.push(...messagesOfField(conflicts, 'host'));
   }
-
-  if (accessMethod === AccessMethod.KubectlPortforward) {
-    const host = str(datasource.connection.host).trim();
-    if (host && host !== '127.0.0.1' && host !== 'localhost') critical.push(...conflicts.filter((c) => c.startsWith('host=')));
-    if (datasource.kind === DatasourceKind.TeleportMysql) critical.push(...conflicts.filter((c) => c.startsWith('kind=')));
-    critical.push(...conflicts.filter((c) => c.startsWith('local port=')));
+  if (datasource.kind === DatasourceKind.TeleportMysql) {
+    blocking.push(...messagesOfField(conflicts, 'kind'));
   }
+  blocking.push(...messagesOfField(conflicts, 'local port'));
+  return blocking;
+}
 
-  return Array.from(new Set(critical));
+export function datasourceKbConflicts(datasource: DatasourceProfile, kb: KbEntry): string[] {
+  return findKbConflicts(datasource, kb).map((conflict) => conflict.message);
+}
+
+export function blockingDatasourceKbConflicts(datasource: DatasourceProfile, kb: KbEntry): string[] {
+  const conflicts = findKbConflicts(datasource, kb);
+  if (conflicts.length === 0) {
+    return [];
+  }
+  const accessMethod = kbAccessMethod(kb);
+  const blocking = [
+    ...(accessMethod === AccessMethod.Tsh ? blockingTshConflicts(datasource, kb, conflicts) : []),
+    ...(accessMethod === AccessMethod.KubectlPortforward ? blockingKubectlPortforwardConflicts(datasource, conflicts) : []),
+  ];
+  return [...new Set(blocking)];
 }

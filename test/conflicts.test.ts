@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { datasourceKbConflicts } from '../src/core/conflicts.js';
+import type { DatasourceProfile } from '../src/types/datasource.js';
 
 describe('datasource kb conflicts', () => {
   it('detects mismatched fields', () => {
-    const datasource: any = {
+    const datasource: DatasourceProfile = {
+      name: 'sample',
       kind: 'mysql',
       connection: {
         host: '127.0.0.1',
         port: 4406,
         database: 'sample_db',
       },
+      credentialRef: 'sample',
+      policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
+      updatedAt: '2026-01-01T00:00:00.000Z',
     };
     const kb = {
       access_method: 'kubectl-portforward',

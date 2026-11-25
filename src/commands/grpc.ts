@@ -1,42 +1,172 @@
-import { Command } from 'commander';
+import type { Command } from 'commander';
 import type { LocalExecutor } from '../cli/types.js';
 import type { AppContext } from '../core/app.js';
-import { badInput } from '../core/error-classification.js';
-import { printEnvelope, printJson } from '../core/output.js';
-import { loadProtobufRoot, resolveProtoRoot } from '../core/proto-loader.js';
+import { badInput } from '../core/taproot-error.js';
 import {
   buildRequestSkeleton,
   describeProto,
   listServices,
-  resolveName,
   searchMethods,
 } from '../core/grpc-introspect.js';
+import { resolveName } from '../core/name-match.js';
+import type { GrpcMethodShape, GrpcServiceShape, ProtoDescriptor } from '../core/grpc-introspect.js';
+import { printJson, printSuccess } from '../core/output.js';
+import { loadProtobufRoot, resolveProtoRoot } from '../core/proto-loader.js';
+import type { ProtobufRoot } from '../core/proto-loader.js';
+import { requireDatasource } from './datasource-lookup.js';
+import { emptyToUndefined } from '../core/text-presence.js';
 
-function protoRootFor(ctx: AppContext, opts: { datasource?: string; protoRoot?: string }): { root: string; source: string } {
-  const flagRoot = resolveProtoRoot(opts.protoRoot, undefined);
-  if (flagRoot) return { root: flagRoot, source: 'flag' };
-  if (!opts.datasource) {
-    throw badInput('--proto-root or --datasource required for grpc describe.');
+type ProtoRootOptions = { datasource?: string; protoRoot?: string };
+type GrpcDescribeOptions = ProtoRootOptions & { service?: string; method?: string; skeleton: boolean; maxDepth: string };
+type GrpcListOptions = ProtoRootOptions & { service?: string };
+type ProtoRootChoice = { root: string; source: string };
+type RequestSkeleton = { service: string; method: string; request: string; skeleton: unknown; call: string };
+
+const MAX_LISTED_CANDIDATES = 10;
+
+const NO_RESOLVER_HINTS = undefined;
+
+function protoRootFromDatasource(ctx: AppContext, datasourceName: string): ProtoRootChoice {
+  const datasource = requireDatasource(ctx, datasourceName);
+  if (datasource.kind !== 'grpc') {
+    throw new Error(`Datasource '${datasourceName}' is kind=${datasource.kind}; grpc describe needs a grpc datasource.`);
   }
-  const ds = ctx.datasourceStore.get(opts.datasource);
-  if (!ds) throw new Error(`Datasource not found: ${opts.datasource}`);
-  if (ds.kind !== 'grpc') {
-    throw new Error(`Datasource '${opts.datasource}' is kind=${ds.kind}; grpc describe needs a grpc datasource.`);
+  const root = emptyToUndefined(resolveProtoRoot(undefined, datasource.resolverHints));
+  if (root === undefined) {
+    throw new Error(`Datasource '${datasourceName}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
   }
-  const root = resolveProtoRoot(undefined, ds.resolverHints);
-  if (!root) throw new Error(`Datasource '${opts.datasource}' has no resolverHints.protoRoot. Add via 'taproot datasource add ... --hint protoRoot=<dir>'.`);
-  return { root, source: `datasource:${opts.datasource}` };
+  return { root, source: `datasource:${datasourceName}` };
 }
 
-function resolveOrThrow(query: string, names: string[], label: string): string {
-  const res = resolveName(query, names);
-  if (res.match) return res.match;
-  if (!res.candidates.length) {
+function resolveProtoRootChoice(ctx: AppContext, opts: ProtoRootOptions): ProtoRootChoice {
+  const flagRoot = emptyToUndefined(resolveProtoRoot(opts.protoRoot, NO_RESOLVER_HINTS));
+  if (flagRoot !== undefined) {
+    return { root: flagRoot, source: 'flag' };
+  }
+  const datasourceName = emptyToUndefined(opts.datasource);
+  if (datasourceName === undefined) {
+    throw badInput('--proto-root or --datasource required for grpc describe.');
+  }
+  return protoRootFromDatasource(ctx, datasourceName);
+}
+
+function resolveNameOrThrow(query: string, names: string[], label: string): string {
+  const resolution = resolveName(query, names);
+  if (resolution.match !== undefined) {
+    return resolution.match;
+  }
+  if (resolution.candidates.length === 0) {
     throw new Error(`No ${label} found.`);
   }
-  const list = res.candidates.slice(0, 10).join(', ');
-  const more = res.candidates.length > 10 ? `, … (${res.candidates.length - 10} more)` : '';
-  throw new Error(`${label} '${query}' is ambiguous or unknown. Candidates: ${list}${more}.`);
+  const listed = resolution.candidates.slice(0, MAX_LISTED_CANDIDATES).join(', ');
+  const hiddenCount = resolution.candidates.length - MAX_LISTED_CANDIDATES;
+  const more = hiddenCount > 0 ? `, … (${hiddenCount} more)` : '';
+  throw new Error(`${label} '${query}' is ambiguous or unknown. Candidates: ${listed}${more}.`);
+}
+
+function resolveServiceOption(services: GrpcServiceShape[], requestedService: string | undefined): string | undefined {
+  const query = emptyToUndefined(requestedService);
+  return query === undefined ? undefined : resolveNameOrThrow(query, services.map((service) => service.name), 'service');
+}
+
+function resolveMethodOption(services: GrpcServiceShape[], serviceName: string | undefined, requestedMethod: string | undefined): string | undefined {
+  const query = emptyToUndefined(requestedMethod);
+  if (query === undefined) {
+    return undefined;
+  }
+  const candidateServices = serviceName === undefined ? services : services.filter((service) => service.name === serviceName);
+  return resolveNameOrThrow(query, candidateServices.flatMap((service) => service.methods.map((method) => method.name)), 'method');
+}
+
+function requestSkeleton(
+  protobufRoot: ProtobufRoot,
+  rpc: { service: GrpcServiceShape; method: GrpcMethodShape },
+  selection: { maxDepth: number; datasourceName: string },
+): RequestSkeleton {
+  const { service, method } = rpc;
+  const message = buildRequestSkeleton(protobufRoot, method.requestType, { maxDepth: selection.maxDepth });
+  const skeleton = method.requestStream === true ? [message] : message;
+  const body = JSON.stringify(skeleton).replaceAll('\'', `'\\''`);
+  return {
+    service: service.name,
+    method: method.name,
+    request: method.requestType,
+    skeleton,
+    call: `taproot query --datasource ${selection.datasourceName} --query "${service.name}/${method.name}" --request-json '${body}'`,
+  };
+}
+
+function requestSkeletonsFor(
+  protobufRoot: ProtobufRoot,
+  descriptor: ProtoDescriptor,
+  selection: { methodName?: string; maxDepth: number; datasourceName: string },
+): RequestSkeleton[] {
+  return descriptor.services.flatMap((service) =>
+    service.methods
+      .filter((method) => selection.methodName === undefined || method.name === selection.methodName)
+      .map((method) => requestSkeleton(protobufRoot, { service, method }, selection)),
+  );
+}
+
+function parseMaxDepth(rawMaxDepth: string): number {
+  const maxDepth = Number(rawMaxDepth);
+  if (!Number.isInteger(maxDepth) || maxDepth < 0) {
+    throw badInput(`--max-depth must be a non-negative integer, got '${rawMaxDepth}'.`);
+  }
+  return maxDepth;
+}
+
+async function describeGrpc(ctx: AppContext, opts: GrpcDescribeOptions): Promise<void> {
+  const { root, source } = resolveProtoRootChoice(ctx, opts);
+  const maxDepth = parseMaxDepth(opts.maxDepth);
+  const { protobufRoot } = await loadProtobufRoot(root);
+  const allServices = listServices(protobufRoot);
+  const serviceName = resolveServiceOption(allServices, opts.service);
+  const methodName = resolveMethodOption(allServices, serviceName, opts.method);
+  const descriptor = describeProto(protobufRoot, { service: serviceName, method: methodName, expand: { maxDepth } });
+  const datasourceName = emptyToUndefined(opts.datasource) ?? '<datasource>';
+  const data = opts.skeleton
+    ? { ...descriptor, requestSkeletons: requestSkeletonsFor(protobufRoot, descriptor, { methodName, maxDepth, datasourceName }) }
+    : descriptor;
+  printJson({
+    ok: true,
+    data,
+    meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName, resolvedMethod: methodName },
+  });
+}
+
+function methodRows(services: GrpcServiceShape[], serviceName: string | undefined): Record<string, string>[] {
+  return services
+    .filter((service) => serviceName === undefined || service.name === serviceName)
+    .flatMap((service) =>
+      service.methods.map((method) => ({
+        service: service.name,
+        method: method.name,
+        request: method.requestType,
+        response: method.responseType,
+        streams: [method.requestStream === true ? 'req' : '', method.responseStream === true ? 'resp' : ''].filter(Boolean).join('+'),
+      })),
+    );
+}
+
+async function listGrpc(ctx: AppContext, pattern: string | undefined, opts: GrpcListOptions): Promise<void> {
+  const { root, source } = resolveProtoRootChoice(ctx, opts);
+  const { protobufRoot } = await loadProtobufRoot(root);
+  const services = listServices(protobufRoot);
+  const serviceName = resolveServiceOption(services, opts.service);
+  const rows = methodRows(services, serviceName);
+  const needle = emptyToUndefined(pattern)?.toLowerCase();
+  const methods = needle === undefined
+    ? rows
+    : rows.filter((row) => `${row.service} ${row.method} ${row.request} ${row.response}`.toLowerCase().includes(needle));
+  printSuccess({ methods }, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
+}
+
+async function findGrpc(ctx: AppContext, pattern: string, opts: ProtoRootOptions): Promise<void> {
+  const { root, source } = resolveProtoRootChoice(ctx, opts);
+  const { protobufRoot } = await loadProtobufRoot(root);
+  const matches = searchMethods(protobufRoot, pattern);
+  printSuccess({ matches }, { protoRoot: root, protoRootSource: source, pattern });
 }
 
 export function grpcCommand(program: Command, executor: LocalExecutor): void {
@@ -51,56 +181,8 @@ export function grpcCommand(program: Command, executor: LocalExecutor): void {
     .option('--method <name>', 'restrict expanded messages to a single rpc method (exact or unambiguous substring)')
     .option('--skeleton', 'emit an example request JSON for the matched method(s) and a ready-to-run query call line', false)
     .option('--max-depth <n>', 'message expansion depth cap (default 4)', '4')
-    .action(async (opts) => {
-      const ctx = executor.context();
-      const { root, source } = protoRootFor(ctx, opts);
-      const maxDepth = Number(opts.maxDepth);
-      if (!Number.isInteger(maxDepth) || maxDepth < 0) {
-        throw badInput(`--max-depth must be a non-negative integer, got '${opts.maxDepth}'.`);
-      }
-      const { protobufRoot } = await loadProtobufRoot(root);
-
-      const allServices = listServices(protobufRoot);
-      const serviceName = opts.service
-        ? resolveOrThrow(String(opts.service), allServices.map((s) => s.name), 'service')
-        : undefined;
-      let methodName: string | undefined;
-      if (opts.method) {
-        const pool = serviceName ? allServices.filter((s) => s.name === serviceName) : allServices;
-        methodName = resolveOrThrow(String(opts.method), pool.flatMap((s) => s.methods.map((m) => m.name)), 'method');
-      }
-
-      const descriptor = describeProto(protobufRoot, {
-        service: serviceName,
-        method: methodName,
-        expand: { maxDepth },
-      });
-
-      const skeletons: Array<{ service: string; method: string; request: string; skeleton: unknown; call: string }> = [];
-      const datasourceArg = opts.datasource ? String(opts.datasource) : '<datasource>';
-      if (opts.skeleton) {
-        for (const svc of descriptor.services) {
-          for (const m of svc.methods) {
-            if (methodName && m.name !== methodName) continue;
-            const message = buildRequestSkeleton(protobufRoot, m.requestType, { maxDepth });
-            const skeleton = m.requestStream ? [message] : message;
-            const body = JSON.stringify(skeleton).replace(/'/g, `'\\''`);
-            skeletons.push({
-              service: svc.name,
-              method: m.name,
-              request: m.requestType,
-              skeleton,
-              call: `taproot query --datasource ${datasourceArg} --query "${svc.name}/${m.name}" --request-json '${body}'`,
-            });
-          }
-        }
-      }
-
-      printJson({
-        ok: true,
-        data: opts.skeleton ? { ...descriptor, requestSkeletons: skeletons } : descriptor,
-        meta: { protoRoot: root, protoRootSource: source, resolvedService: serviceName, resolvedMethod: methodName },
-      });
+    .action(async (opts: GrpcDescribeOptions) => {
+      await describeGrpc(executor.context(), opts);
     });
 
   grpc
@@ -110,30 +192,8 @@ export function grpcCommand(program: Command, executor: LocalExecutor): void {
     .option('--datasource <name>', 'grpc datasource whose protoRoot hint to read')
     .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
     .option('--service <name>', 'restrict to one service (fully-qualified, short name, or unambiguous substring)')
-    .action(async (pattern, opts) => {
-      const ctx = executor.context();
-      const { root, source } = protoRootFor(ctx, opts);
-      const { protobufRoot } = await loadProtobufRoot(root);
-      const services = listServices(protobufRoot);
-      const serviceName = opts.service
-        ? resolveOrThrow(String(opts.service), services.map((s) => s.name), 'service')
-        : undefined;
-      let flat = services
-        .filter((s) => !serviceName || s.name === serviceName)
-        .flatMap((s) =>
-          s.methods.map((m) => ({
-            service: s.name,
-            method: m.name,
-            request: m.requestType,
-            response: m.responseType,
-            streams: [m.requestStream ? 'req' : '', m.responseStream ? 'resp' : ''].filter(Boolean).join('+') || '',
-          })),
-        );
-      if (pattern) {
-        const p = String(pattern).toLowerCase();
-        flat = flat.filter((r) => `${r.service} ${r.method} ${r.request} ${r.response}`.toLowerCase().includes(p));
-      }
-      printEnvelope(true, { methods: flat }, undefined, { protoRoot: root, protoRootSource: source, resolvedService: serviceName });
+    .action(async (pattern: string | undefined, opts: GrpcListOptions) => {
+      await listGrpc(executor.context(), pattern, opts);
     });
 
   grpc
@@ -142,11 +202,7 @@ export function grpcCommand(program: Command, executor: LocalExecutor): void {
     .argument('<pattern>', 'substring to search for, case-insensitive')
     .option('--datasource <name>', 'grpc datasource whose protoRoot hint to read')
     .option('--proto-root <dir>', 'proto source directory, when no datasource is registered')
-    .action(async (pattern, opts) => {
-      const ctx = executor.context();
-      const { root, source } = protoRootFor(ctx, opts);
-      const { protobufRoot } = await loadProtobufRoot(root);
-      const matches = searchMethods(protobufRoot, String(pattern));
-      printEnvelope(true, { matches }, undefined, { protoRoot: root, protoRootSource: source, pattern: String(pattern) });
+    .action(async (pattern: string, opts: ProtoRootOptions) => {
+      await findGrpc(executor.context(), pattern, opts);
     });
 }

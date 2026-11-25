@@ -1,17 +1,13 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { _resetProtoCachesForTest, loadProtobufRoot } from '../src/core/proto-loader.js';
+import { loadProtobufRoot, resetProtoCacheForTest } from '../src/core/proto-loader.js';
 import { buildRequestSkeleton } from '../src/core/grpc-introspect.js';
 import { validateGrpcRequest } from '../src/core/grpc-proto-validate.js';
 import { grpcPlugin } from '../src/plugins-builtins/grpc/index.js';
-import type { QueryRequest } from '../src/types/core.js';
+import type { QueryRequest, QueryResult } from '../src/types/plugin.js';
 import { testDatasource } from './helpers/datasource.js';
-
-function tmpDir(name: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `taproot-${name}-`));
-}
+import { makeTempDir } from './helpers/grpc-introspect-fixtures.js';
 
 function writeFixtureProto(root: string): void {
   fs.mkdirSync(root, { recursive: true });
@@ -47,11 +43,36 @@ service ItemService {
   fs.writeFileSync(path.join(root, 'item.proto'), proto, 'utf8');
 }
 
-describe('validateGrpcRequest', () => {
-  beforeEach(() => _resetProtoCachesForTest());
+function makeRequest(opts: { protoRoot: string; requestJson?: string; skipProtoValidate?: boolean }): QueryRequest {
+  return {
+    datasource: testDatasource('grpc', 65_535, { protoRoot: opts.protoRoot }),
+    query: 'taproot.test.ItemService/GetItem',
+    capability: 'executeRead',
+    timeoutMs: 5000,
+    sessionTimeZone: '+00:00',
+    pluginParams: {
+      protoRoot: opts.protoRoot,
+      requestJson: opts.requestJson,
+      skipProtoValidate: opts.skipProtoValidate,
+    },
+    signal: undefined,
+  };
+}
+
+async function executeGrpc(request: QueryRequest): Promise<QueryResult> {
+  if (!grpcPlugin.execute) {
+    throw new Error('grpc plugin has no execute');
+  }
+  return grpcPlugin.execute(request, {});
+}
+
+describe('grpc request validation', () => {
+  beforeEach(() => {
+    resetProtoCacheForTest();
+  });
 
   it('returns null for a valid payload', async () => {
-    const dir = tmpDir('grpcv-valid');
+    const dir = makeTempDir('grpcv-valid');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
@@ -64,21 +85,20 @@ describe('validateGrpcRequest', () => {
   });
 
   it('flags unknown top-level fields with a Did you mean suggestion', async () => {
-    const dir = tmpDir('grpcv-unknown');
+    const dir = makeTempDir('grpcv-unknown');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
       itemid: 'abc',
     });
-    expect(err).not.toBeNull();
-    expect(err!.field).toBe('itemid');
-    expect(err!.message).toMatch(/unknown field 'itemid' on taproot\.test\.GetItemRequest/);
-    expect(err!.message).toMatch(/Did you mean 'item_id'/);
+    expect(err).toMatchObject({ field: 'itemid' });
+    expect(err?.message).toMatch(/unknown field 'itemid' on taproot\.test\.GetItemRequest/u);
+    expect(err?.message).toMatch(/Did you mean 'item_id'/u);
   });
 
   it('rejects a camelCase key the request encoder would drop', async () => {
     // arrange
-    const dir = tmpDir('grpcv-camel');
+    const dir = makeTempDir('grpcv-camel');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
 
@@ -86,63 +106,56 @@ describe('validateGrpcRequest', () => {
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', { itemId: 'abc' });
 
     // assert
-    expect(err!.field).toBe('itemId');
-    expect(err!.message).toMatch(/Did you mean 'item_id'/);
+    expect(err).toMatchObject({ field: 'itemId' });
+    expect(err?.message).toMatch(/Did you mean 'item_id'/u);
   });
 
   it('flags wrong scalar type (number instead of string)', async () => {
-    const dir = tmpDir('grpcv-scalar-string');
+    const dir = makeTempDir('grpcv-scalar-string');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
-      item_id: 12345,
+      item_id: 12_345,
     });
-    expect(err).not.toBeNull();
-    expect(err!.field).toBe('item_id');
-    expect(err!.expected).toBe('string');
-    expect(err!.message).toMatch(/expected string at item_id/);
+    expect(err).toMatchObject({ field: 'item_id', expected: 'string' });
+    expect(err?.message).toMatch(/expected string at item_id/u);
   });
 
   it('flags wrong scalar type (string for int64 that is not numeric)', async () => {
-    const dir = tmpDir('grpcv-scalar-int');
+    const dir = makeTempDir('grpcv-scalar-int');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
       address: { postal_code: 'not-a-number' },
     });
-    expect(err).not.toBeNull();
-    expect(err!.field).toBe('address.postal_code');
-    expect(err!.expected).toBe('int64');
+    expect(err).toMatchObject({ field: 'address.postal_code', expected: 'int64' });
   });
 
   it('flags bad enum string with closest-value suggestion', async () => {
-    const dir = tmpDir('grpcv-enum');
+    const dir = makeTempDir('grpcv-enum');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
       status: 'ACTIV',
     });
-    expect(err).not.toBeNull();
-    expect(err!.field).toBe('status');
-    expect(err!.expected).toBe('enum:taproot.test.Status');
-    expect(err!.message).toMatch(/Did you mean 'ACTIVE'/);
+    expect(err).toMatchObject({ field: 'status', expected: 'enum:taproot.test.Status' });
+    expect(err?.message).toMatch(/Did you mean 'ACTIVE'/u);
   });
 
   it('identifies the full path for unknown nested fields', async () => {
-    const dir = tmpDir('grpcv-nested');
+    const dir = makeTempDir('grpcv-nested');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const err = validateGrpcRequest(protobufRoot, 'taproot.test.GetItemRequest', {
       address: { cityname: 'foo' },
     });
-    expect(err).not.toBeNull();
-    expect(err!.field).toBe('address.cityname');
-    expect(err!.message).toMatch(/unknown field 'cityname' on taproot\.test\.Address/);
-    expect(err!.message).toMatch(/Did you mean 'city_name'/);
+    expect(err).toMatchObject({ field: 'address.cityname' });
+    expect(err?.message).toMatch(/unknown field 'cityname' on taproot\.test\.Address/u);
+    expect(err?.message).toMatch(/Did you mean 'city_name'/u);
   });
 
   it('accepts skeleton output as round-trippable', async () => {
-    const dir = tmpDir('grpcv-skeleton');
+    const dir = makeTempDir('grpcv-skeleton');
     writeFixtureProto(dir);
     const { protobufRoot } = await loadProtobufRoot(dir);
     const skeleton = buildRequestSkeleton(protobufRoot, 'taproot.test.GetItemRequest');
@@ -151,46 +164,29 @@ describe('validateGrpcRequest', () => {
 });
 
 describe('grpcPlugin proto pre-flight validation', () => {
-  beforeEach(() => _resetProtoCachesForTest());
-
-  function makeRequest(opts: { protoRoot: string; requestJson?: string; skipProtoValidate?: boolean }): QueryRequest {
-    return {
-      datasource: testDatasource('grpc', 65535, { protoRoot: opts.protoRoot }),
-      query: 'taproot.test.ItemService/GetItem',
-      capability: 'executeRead',
-      timeoutMs: 5000,
-      sessionTimeZone: '+00:00',
-      pluginParams: {
-        protoRoot: opts.protoRoot,
-        requestJson: opts.requestJson,
-        skipProtoValidate: opts.skipProtoValidate,
-      },
-      signal: undefined,
-    } as QueryRequest;
-  }
+  beforeEach(() => {
+    resetProtoCacheForTest();
+  });
 
   it('throws BAD_INPUT before opening a channel for unknown fields', async () => {
-    const dir = tmpDir('grpc-plugin-unknown');
+    const dir = makeTempDir('grpc-plugin-unknown');
     writeFixtureProto(dir);
     const request = makeRequest({
       protoRoot: dir,
       requestJson: JSON.stringify({ itemid: 'abc' }),
     });
-    await expect(grpcPlugin.execute!(request, {})).rejects.toMatchObject({
-      message: expect.stringMatching(/^BAD_INPUT: unknown field 'itemid'.*taproot grpc describe .* --method GetItem --skeleton/),
-      code: 'BAD_INPUT',
-      details: { field: 'itemid' },
-    });
+    await expect(executeGrpc(request)).rejects.toThrow(/^BAD_INPUT: unknown field 'itemid'.*taproot grpc describe .* --method GetItem --skeleton/u);
+    await expect(executeGrpc(request)).rejects.toMatchObject({ code: 'BAD_INPUT', details: { field: 'itemid' } });
   });
 
   it('--skip-proto-validate bypasses the validator', async () => {
-    const dir = tmpDir('grpc-plugin-skip');
+    const dir = makeTempDir('grpc-plugin-skip');
     writeFixtureProto(dir);
     const request = makeRequest({
       protoRoot: dir,
       requestJson: JSON.stringify({ itemid: 'abc' }),
       skipProtoValidate: true,
     });
-    await expect(grpcPlugin.execute!(request, {})).rejects.not.toThrow(/^BAD_INPUT:/);
+    await expect(executeGrpc(request)).rejects.not.toThrow(/^BAD_INPUT:/u);
   });
 });

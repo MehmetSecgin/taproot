@@ -6,7 +6,7 @@ describe('query limiter', () => {
     const limiter = new QueryLimiter(1, 1);
     const releaseA = await limiter.acquire();
     const waiter = limiter.acquire();
-    await expect(limiter.acquire()).rejects.toThrow(/OVERLOADED/);
+    await expect(limiter.acquire()).rejects.toThrow(/OVERLOADED/u);
     releaseA();
     const releaseB = await waiter;
     releaseB();

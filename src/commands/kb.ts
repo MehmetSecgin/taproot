@@ -1,15 +1,114 @@
-import { Command } from 'commander';
+import type { Command } from 'commander';
+import { isRecord } from '../core/json-shapes.js';
 import type { LocalExecutor } from '../cli/types.js';
-import fs from 'node:fs';
+import type { AppContext } from '../core/app.js';
+import { badInput } from '../core/taproot-error.js';
 import { normalizeNamespace, normalizeService } from '../core/naming.js';
-import { printEnvelope } from '../core/output.js';
-import { badInput } from '../core/error-classification.js';
-import { normalizeRelations } from '../core/relations.js';
-import { str } from '../core/strings.js';
+import { importRelations } from './kb-relations-import.js';
+import { printSuccess } from '../core/output.js';
+import { emptyToUndefined, firstNonEmpty, textUnlessFalsy } from '../core/text-presence.js';
+
+type KbRecord = Record<string, unknown>;
+type KbResolveOptions = { datasource?: string; service?: string; env?: string; namespace?: string };
+type KbTablesOptions = { service: string; env?: string; text?: string; match?: string; list: boolean };
+type KbTarget = { service: string; env: string; namespace?: string };
+
+const MAX_LISTED_SERVICES = 10;
+const ACTIVE_STATUS = 'active';
+
+function kbServiceRecords(ctx: AppContext): KbRecord[] {
+  const services: unknown[] = ctx.kbStore.services();
+  return services.filter((service) => isRecord(service));
+}
+
+function kbTableRecords(ctx: AppContext): KbRecord[] {
+  const tables: unknown[] = ctx.kbStore.tables();
+  return tables.filter((table) => isRecord(table));
+}
+
+function tableNames(record: KbRecord): string[] {
+  const names: unknown = record.tables;
+  return Array.isArray(names) ? names.filter((name) => typeof name === 'string') : [];
+}
+
+function availableEnvironments(registeredService: KbRecord): string[] {
+  const connections: unknown = registeredService.connections;
+  const activeConnections = (Array.isArray(connections) ? connections : [])
+    .filter((connection) => isRecord(connection))
+    .filter((connection) => (textUnlessFalsy(connection.status) || ACTIVE_STATUS) === ACTIVE_STATUS);
+  const labels = activeConnections.map((connection) => {
+    const namespace = textUnlessFalsy(connection.namespace);
+    return `${String(connection.env)}${namespace === '' ? '' : `/${namespace}`}`;
+  });
+  return [...new Set(labels)].toSorted();
+}
+
+function noKbConnectionError(ctx: AppContext, target: KbTarget): Error {
+  const { service, env, namespace } = target;
+  const registeredService = kbServiceRecords(ctx).find((record) => textUnlessFalsy(record.service).trim().toLowerCase() === service.toLowerCase());
+  if (!registeredService) {
+    const known = ctx.kbStore.listServices();
+    const hiddenCount = known.length - MAX_LISTED_SERVICES;
+    return new Error(`No KB connection match: service '${service}' is not registered in KB. Known services: ${known.slice(0, MAX_LISTED_SERVICES).join(', ')}${hiddenCount > 0 ? ` (+${hiddenCount})` : ''}`);
+  }
+  const namespaceHint = namespace === undefined ? '' : ` namespace=${namespace}`;
+  const available = availableEnvironments(registeredService).join(', ') || '(none active)';
+  return new Error(
+    `No KB connection match: service '${service}' is registered but not for env=${env}${namespaceHint}. Available: ${available}. Register this env with 'taproot datasource add --env ${env} --service ${service} ...' or pick an available env.`,
+  );
+}
+
+function requestedKbTarget(ctx: AppContext, opts: KbResolveOptions): KbTarget {
+  const datasourceName = emptyToUndefined(opts.datasource);
+  const profile = datasourceName === undefined ? undefined : ctx.datasourceStore.get(datasourceName);
+  if (datasourceName !== undefined && !profile) {
+    throw badInput(`Datasource not found: ${datasourceName}. List profiles with taproot datasource list.`);
+  }
+  const env = textUnlessFalsy(firstNonEmpty(opts.env, profile?.env)).trim();
+  const requestedService = textUnlessFalsy(firstNonEmpty(opts.service, profile?.service)).trim();
+  if (env === '' || requestedService === '') {
+    throw badInput(datasourceName === undefined ? 'Specify --datasource <name>, or --env <env> and --service <service>.' : `Datasource ${datasourceName} has no env or service; pass --env and --service.`);
+  }
+  return {
+    service: normalizeService(requestedService, ctx.runtimeConfigStore.serviceAliases()),
+    env,
+    namespace: emptyToUndefined(normalizeNamespace(firstNonEmpty(opts.namespace, profile?.namespace))),
+  };
+}
+
+function resolveKbConnection(ctx: AppContext, opts: KbResolveOptions): KbRecord {
+  const target = requestedKbTarget(ctx, opts);
+  const connection = ctx.kbStore.resolveConnection(target.service, target.env, target.namespace);
+  if (!connection) {
+    throw noKbConnectionError(ctx, target);
+  }
+  return { service: target.service, ...connection };
+}
+
+function withTables(record: KbRecord, tables: unknown): KbRecord {
+  return { ...record, tables };
+}
+
+function kbTables(ctx: AppContext, opts: KbTablesOptions): unknown {
+  const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
+  const matchText = textUnlessFalsy(firstNonEmpty(opts.match, opts.text)).trim();
+  const envFilter = emptyToUndefined(opts.env);
+  const serviceRecords = kbTableRecords(ctx).filter((record) => textUnlessFalsy(record.service).toLowerCase() === service.toLowerCase());
+  const inEnv = serviceRecords.filter((record) => envFilter === undefined || String(record.env) === envFilter);
+  const filtered = inEnv.map((record) => withTables(
+    record,
+    matchText === '' ? record.tables : tableNames(record).filter((table) => table.toLowerCase().includes(matchText.toLowerCase())),
+  ));
+  return opts.list
+    ? filtered.flatMap((record) => tableNames(record).map((table) => ({ service: record.service, env: record.env, database: record.database, table })))
+    : filtered;
+}
 
 export function kbCommand(program: Command, executor: LocalExecutor): void {
   const kb = program.command('kb').description('Knowledge base resolvers');
-  kb.hook('preAction', () => executor.context().kbStore.requirePresent());
+  kb.hook('preAction', () => {
+    executor.context().kbStore.requirePresent();
+  });
 
   kb.command('resolve')
     .description('Resolve the KB connection (target, database, db_user, engine, access_method) for a service in an env')
@@ -17,33 +116,9 @@ export function kbCommand(program: Command, executor: LocalExecutor): void {
     .option('--service <service>', 'service name')
     .option('--env <env>', 'environment (e.g. qa, stg)')
     .option('--namespace <namespace>', 'namespace within the environment (e.g. develop)')
-    .action((opts) => {
-    const ctx = executor.context();
-    const profile = opts.datasource ? ctx.datasourceStore.get(opts.datasource) : undefined;
-    if (opts.datasource && !profile) throw badInput(`Datasource not found: ${opts.datasource}. List profiles with taproot datasource list.`);
-    const env = str(opts.env || profile?.env).trim();
-    const rawService = str(opts.service || profile?.service).trim();
-    if (!env || !rawService) throw badInput(opts.datasource ? `Datasource ${opts.datasource} has no env or service; pass --env and --service.` : 'Specify --datasource <name>, or --env <env> and --service <service>.');
-    const service = normalizeService(rawService, ctx.runtimeConfigStore.serviceAliases());
-    const namespace = normalizeNamespace(opts.namespace || profile?.namespace) || undefined;
-    const out = ctx.kbStore.resolveConnection(service, env, namespace);
-    if (!out) {
-      const svc = ctx.kbStore.services().find((s) => str(s.service).trim().toLowerCase() === service.toLowerCase());
-      if (!svc) {
-        const known = ctx.kbStore.listServices();
-        throw new Error(`No KB connection match: service '${service}' is not registered in KB. Known services: ${known.slice(0, 10).join(', ')}${known.length > 10 ? ` (+${known.length - 10})` : ''}`);
-      }
-      const envs = Array.from(new Set((Array.isArray(svc.connections) ? svc.connections : [])
-        .filter((c: any) => String(c.status || 'active') === 'active')
-        .map((c: any) => `${String(c.env)}${c.namespace ? `/${c.namespace}` : ''}`))).toSorted();
-      const nsHint = namespace ? ` namespace=${namespace}` : '';
-      throw new Error(
-        `No KB connection match: service '${service}' is registered but not for env=${env}${nsHint}. Available: ${envs.join(', ') || '(none active)'}. Register this env with 'taproot datasource add --env ${env} --service ${service} ...' or pick an available env.`,
-      );
-    }
-    const row = { service, ...out };
-    printEnvelope(true, row);
-  });
+    .action((opts: KbResolveOptions) => {
+      printSuccess(resolveKbConnection(executor.context(), opts));
+    });
 
   kb.command('tables')
     .description('Tables the KB records for a service')
@@ -52,20 +127,8 @@ export function kbCommand(program: Command, executor: LocalExecutor): void {
     .option('--text <text>', 'substring filter on table names (alias: --match)')
     .option('--match <text>', 'substring filter on table names (alias of --text)')
     .option('--list', 'render flat list of matching table names instead of per-database counts', false)
-    .action((opts) => {
-      const ctx = executor.context();
-      const service = normalizeService(opts.service, ctx.runtimeConfigStore.serviceAliases());
-      const matchText = str(opts.match || opts.text).trim();
-      const rows = ctx.kbStore.tables().filter((r) => str(r.service).toLowerCase() === service.toLowerCase());
-      const scoped = rows.filter((r) => !opts.env || String(r.env) === String(opts.env));
-      const filtered = scoped.map((r) => ({
-        ...r,
-        tables: matchText ? (r.tables || []).filter((t: string) => t.toLowerCase().includes(matchText.toLowerCase())) : r.tables,
-      }));
-      const payload = opts.list
-        ? filtered.flatMap((r) => (r.tables || []).map((t: string) => ({ service: r.service, env: r.env, database: r.database, table: t })))
-        : filtered;
-      printEnvelope(true, payload);
+    .action((opts: KbTablesOptions) => {
+      printSuccess(kbTables(executor.context(), opts));
     });
 
   const relations = kb.command('relations').description('Curated cross-service relation operations');
@@ -73,37 +136,21 @@ export function kbCommand(program: Command, executor: LocalExecutor): void {
   relations.command('list')
     .description('List all curated relations in the KB')
     .option('--cross-service', 'only relations that cross a service boundary', false)
-    .action((opts) => {
-      const ctx = executor.context();
-      let rows = ctx.kbStore.typedRelations();
-      if (opts.crossService) rows = rows.filter((r) => r.from.service.toLowerCase() !== r.to.service.toLowerCase());
-      printEnvelope(true, rows);
+    .action((opts: { crossService: boolean }) => {
+      const allRelations = executor.context().kbStore.typedRelations();
+      printSuccess(opts.crossService ? allRelations.filter((relation) => relation.from.service.toLowerCase() !== relation.to.service.toLowerCase()) : allRelations);
     });
 
   relations.command('import')
     .description('Merge a JSON file of curated relations into KB relations.json (dedup by id)')
     .requiredOption('--file <path>', 'path to a JSON array of relation objects')
-    .action((opts) => {
-      const ctx = executor.context();
-      const file = String(opts.file);
-      if (!fs.existsSync(file)) throw new Error(`Relations file not found: ${file}`);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      } catch (error) {
-        throw new Error(`Invalid JSON in ${file}: ${(error as Error).message}`, { cause: error });
-      }
-      if (!Array.isArray(parsed)) throw new Error('Relations file must be a JSON array of relation objects.');
-      const normalized = normalizeRelations(parsed);
-      const skipped = parsed.length - normalized.length;
-      const result = ctx.kbStore.promoteRelations(normalized);
-      printEnvelope(true, { added: result.added, total: result.total, skipped });
+    .action((opts: { file: string }) => {
+      importRelations(executor.context(), opts.file);
     });
 
   kb.command('list-services')
     .description('List the services the KB knows')
     .action(() => {
-      const ctx = executor.context();
-      printEnvelope(true, ctx.kbStore.listServices());
+      printSuccess(executor.context().kbStore.listServices());
     });
 }

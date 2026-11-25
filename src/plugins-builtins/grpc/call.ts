@@ -1,168 +1,263 @@
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import type { RpcMethodShape } from '../../types/core.js';
+import type { GrpcMethodShape } from '../../core/grpc-introspect.js';
+import { firstNonEmpty, textUnlessFalsy } from '../../core/text-presence.js';
 
-type Listener = (...args: any[]) => void;
+type CallError = Error & {
+  code?: number;
+  details?: string;
+};
 
-interface GrpcCall {
-  on: (event: string, listener: Listener) => unknown;
-  off: (event: string, listener: Listener) => unknown;
+type CallEvents = {
+  data: (value: Record<string, unknown> | undefined) => void;
+  error: (error: CallError) => void;
+  end: () => void;
+  close: () => void;
+  status: () => void;
+  drain: () => void;
+};
+
+type GrpcCall = {
+  on: <Event extends keyof CallEvents>(event: Event, listener: CallEvents[Event]) => unknown;
+  off: <Event extends keyof CallEvents>(event: Event, listener: CallEvents[Event]) => unknown;
   write: (message: unknown) => boolean;
   end: () => void;
   cancel: () => void;
-}
+};
 
 type GrpcMethod = (...args: unknown[]) => GrpcCall;
 
-interface CallError extends Error {
-  code?: number;
-  details?: string;
-}
+type UnaryCallback = (error: CallError | null | undefined, response: Record<string, unknown> | undefined) => void;
 
-export interface StreamCallResult {
+type CallStart<Result> = {
+  grpcMethod: GrpcMethod;
+  deadline: { deadline: number };
+  resolve: (value: Result) => void;
+  reject: (error: Error) => void;
+};
+
+type StreamState = {
+  responses: Record<string, unknown>[];
+  sent: number;
+  settled: boolean;
+  truncated: boolean;
+  failure: CallError | undefined;
+};
+
+type StreamCallResult = {
   responses: Record<string, unknown>[];
   truncated: boolean;
+};
+
+export type GrpcCallOptions = {
+  client: Record<string, unknown>;
+  method: GrpcMethodShape;
+  metadata: unknown;
+  deadlineMs: number;
+  signal: AbortSignal | undefined;
+};
+
+const CALL_EVENTS_THAT_UNBLOCK_WRITES = ['drain', 'status', 'error', 'close'] as const;
+
+function requestsStream(method: GrpcMethodShape): boolean {
+  return method.requestStream === true;
 }
 
-export function isStreamingMethod(method: RpcMethodShape): boolean {
-  return Boolean(method.requestStream || method.responseStream);
+function responsesStream(method: GrpcMethodShape): boolean {
+  return method.responseStream === true;
 }
 
-function openCall<T>(
-  client: Record<string, unknown>,
-  methodName: string,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
-  start: (grpcMethod: GrpcMethod, options: { deadline: number }, resolve: (value: T) => void, reject: (error: Error) => void) => GrpcCall,
-): Promise<T> {
+export function isStreamingMethod(method: GrpcMethodShape): boolean {
+  return requestsStream(method) || responsesStream(method);
+}
+
+function isGrpcCall(value: unknown): value is GrpcCall {
+  return typeof value === 'object' && value !== null && 'cancel' in value && typeof value.cancel === 'function';
+}
+
+function bindGrpcMethod(client: Record<string, unknown>, methodName: string): GrpcMethod {
   const method = client[methodName];
   if (typeof method !== 'function') {
-    return Promise.reject(new Error(`grpc method '${methodName}' not found on service. Check spelling and that the .proto defines it.`));
+    throw new TypeError(`grpc method '${methodName}' not found on service. Check spelling and that the .proto defines it.`);
   }
-  const options = { deadline: Date.now() + Math.max(1, deadlineMs) };
-  let call: GrpcCall | undefined;
-  const cancel = (): void => call?.cancel();
+  return (...args) => {
+    const call: unknown = Reflect.apply(method, client, args);
+    if (!isGrpcCall(call)) {
+      throw new TypeError(`grpc method '${methodName}' did not return a call`);
+    }
+    return call;
+  };
+}
+
+async function openCall<Result>(options: GrpcCallOptions, start: (context: CallStart<Result>) => GrpcCall): Promise<Result> {
+  const { client, method, deadlineMs, signal } = options;
+  const grpcMethod = bindGrpcMethod(client, method.name);
+  const deadline = { deadline: Date.now() + Math.max(1, deadlineMs) };
+  const active: { call: GrpcCall | undefined } = { call: undefined };
+  const cancel = (): void => {
+    active.call?.cancel();
+  };
   signal?.addEventListener('abort', cancel, { once: true });
-  return new Promise<T>((resolve, reject) => {
-    call = start(method.bind(client) as GrpcMethod, options, resolve, reject);
-    if (signal?.aborted) call.cancel();
-  }).finally(() => signal?.removeEventListener('abort', cancel));
+  try {
+    return await new Promise<Result>((resolve, reject) => {
+      active.call = start({ grpcMethod, deadline, resolve, reject });
+      if (signal?.aborted === true) {
+        active.call.cancel();
+      }
+    });
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
 }
 
-function describeCallError(err: CallError): string {
-  const code = typeof err.code === 'number' ? `grpc_code=${err.code} ` : '';
-  return `${code}${err.details || err.message || 'grpc call failed'}`;
+function describeCallError(error: CallError): string {
+  const code = typeof error.code === 'number' ? `grpc_code=${error.code} ` : '';
+  return `${code}${firstNonEmpty(textUnlessFalsy(error.details), textUnlessFalsy(error.message)) ?? 'grpc call failed'}`;
 }
 
-export function callUnary(
-  client: Record<string, unknown>,
-  method: RpcMethodShape,
-  payload: Record<string, unknown>,
-  metadata: unknown,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
-): Promise<Record<string, unknown>> {
-  return openCall(client, method.name, deadlineMs, signal, (grpcMethod, options, resolve, reject) =>
-    grpcMethod(payload, metadata, options, (err: CallError | null, response: Record<string, unknown>) => {
-      if (err) reject(new Error(describeCallError(err)));
-      else resolve(response || {});
-    }),
-  );
-}
-
-function waitForDrain(call: GrpcCall): Promise<void> {
-  return new Promise((resolve) => {
-    const events = ['drain', 'status', 'error', 'close'];
-    const done = (): void => {
-      for (const event of events) call.off(event, done);
-      resolve();
+export async function callUnary(options: GrpcCallOptions, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return openCall(options, ({ grpcMethod, deadline, resolve, reject }) => {
+    const onResponse: UnaryCallback = (error, response) => {
+      if (error === null || error === undefined) {
+        resolve(response ?? {});
+      } else {
+        reject(new Error(describeCallError(error)));
+      }
     };
-    for (const event of events) call.on(event, done);
+    return grpcMethod(payload, options.metadata, deadline, onResponse);
   });
 }
 
-function streamFailure(err: CallError, sent: number, responses: Record<string, unknown>[]): Error {
-  const error = new Error(
-    `${describeCallError(err)} (stream failed after ${responses.length} responses, ${sent} requests sent)`,
-  ) as Error & { details?: Record<string, unknown> };
-  error.details = {
-    stream: { sent, received: responses.length, grpcCode: err.code },
-    receivedRows: responses
-      .slice(0, RUNTIME_CONSTANTS.grpc.streamFailureRowLimit)
-      .map((value, seq) => ({ seq, value })),
-  };
-  return error;
+async function waitForDrain(call: GrpcCall): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      for (const event of CALL_EVENTS_THAT_UNBLOCK_WRITES) {
+        call.off(event, done);
+      }
+      resolve();
+    };
+    for (const event of CALL_EVENTS_THAT_UNBLOCK_WRITES) {
+      call.on(event, done);
+    }
+  });
 }
 
-export function callStreaming(
-  client: Record<string, unknown>,
-  method: RpcMethodShape,
-  messages: Record<string, unknown>[],
-  metadata: unknown,
-  deadlineMs: number,
-  signal: AbortSignal | undefined,
-): Promise<StreamCallResult> {
+function streamFailureError(error: CallError, state: StreamState): Error {
+  const { sent, responses } = state;
+  const failure = new Error(`${describeCallError(error)} (stream failed after ${responses.length} responses, ${sent} requests sent)`);
+  return Object.assign(failure, {
+    details: {
+      stream: { sent, received: responses.length, grpcCode: error.code },
+      receivedRows: responses
+        .slice(0, RUNTIME_CONSTANTS.grpc.streamFailureRowLimit)
+        .map((value, seq) => ({ seq, value })),
+    },
+  });
+}
+
+function settleStream(state: StreamState, resolve: (result: StreamCallResult) => void, reject: (error: Error) => void): void {
+  if (state.settled) {
+    return;
+  }
+  state.settled = true;
+  if (state.failure !== undefined && !state.truncated) {
+    reject(streamFailureError(state.failure, state));
+  } else {
+    resolve({ responses: state.responses, truncated: state.truncated });
+  }
+}
+
+type StreamingCallInput = {
+  start: CallStart<StreamCallResult>;
+  options: GrpcCallOptions;
+  messages: Record<string, unknown>[];
+  onResponse: UnaryCallback;
+};
+
+type StreamContext = {
+  state: StreamState;
+  settle: () => void;
+};
+
+function startStreamingCall({ start, options, messages, onResponse }: StreamingCallInput): GrpcCall {
+  const { grpcMethod, deadline } = start;
+  const { method, metadata } = options;
+  if (!requestsStream(method)) {
+    return grpcMethod(messages[0], metadata, deadline);
+  }
+  return responsesStream(method) ? grpcMethod(metadata, deadline) : grpcMethod(metadata, deadline, onResponse);
+}
+
+function listenForStreamedResponses(call: GrpcCall, { state, settle }: StreamContext): void {
   const responseLimit = RUNTIME_CONSTANTS.grpc.streamMessageLimit;
-  return openCall(client, method.name, deadlineMs, signal, (grpcMethod, options, resolve, reject) => {
-    const responses: Record<string, unknown>[] = [];
-    let sent = 0;
-    let settled = false;
-    let truncated = false;
-    let failure: CallError | undefined;
+  call.on('data', (value) => {
+    if (state.settled) {
+      return;
+    }
+    state.responses.push(value ?? {});
+    if (state.responses.length < responseLimit) {
+      return;
+    }
+    state.truncated = true;
+    settle();
+    call.cancel();
+  });
+  call.on('error', (error) => {
+    state.failure ??= error;
+  });
+  call.on('end', settle);
+  call.on('close', settle);
+}
 
+function toCallError(error: unknown): CallError {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+async function writeAllMessages(call: GrpcCall, messages: Record<string, unknown>[], state: StreamState): Promise<void> {
+  for (const message of messages) {
+    if (state.settled || state.failure !== undefined) {
+      return;
+    }
+    state.sent += 1;
+    if (!call.write(message)) {
+      await waitForDrain(call);
+    }
+  }
+  if (!state.settled && state.failure === undefined) {
+    call.end();
+  }
+}
+
+async function writeMessages(call: GrpcCall, messages: Record<string, unknown>[], { state, settle }: StreamContext): Promise<void> {
+  try {
+    await writeAllMessages(call, messages, state);
+  } catch (error) {
+    state.failure ??= toCallError(error);
+    settle();
+  }
+}
+
+export async function callStreaming(options: GrpcCallOptions, messages: Record<string, unknown>[]): Promise<StreamCallResult> {
+  const { method } = options;
+  return openCall(options, (start) => {
+    const state: StreamState = { responses: [], sent: requestsStream(method) ? 0 : 1, settled: false, truncated: false, failure: undefined };
     const settle = (): void => {
-      if (settled) return;
-      settled = true;
-      if (failure && !truncated) reject(streamFailure(failure, sent, responses));
-      else resolve({ responses, truncated });
+      settleStream(state, start.resolve, start.reject);
     };
-
-    const onSingleResponse = (err: CallError | null, response: Record<string, unknown>): void => {
-      if (err) failure = err;
-      else if (!settled) responses.push(response || {});
+    const onResponse: UnaryCallback = (error, response) => {
+      if (error !== null && error !== undefined) {
+        state.failure = error;
+      } else if (!state.settled) {
+        state.responses.push(response ?? {});
+      }
       settle();
     };
-
-    let call: GrpcCall;
-    if (!method.requestStream) {
-      sent = 1;
-      call = grpcMethod(messages[0], metadata, options);
-    } else if (!method.responseStream) {
-      call = grpcMethod(metadata, options, onSingleResponse);
-    } else {
-      call = grpcMethod(metadata, options);
+    const call = startStreamingCall({ start, options, messages, onResponse });
+    if (responsesStream(method)) {
+      listenForStreamedResponses(call, { state, settle });
     }
-
-    if (method.responseStream) {
-      call.on('data', (value: Record<string, unknown> | undefined) => {
-        if (settled) return;
-        responses.push(value || {});
-        if (responses.length < responseLimit) return;
-        truncated = true;
-        settle();
-        call.cancel();
-      });
-      call.on('error', (err: CallError) => {
-        failure = failure || err;
-      });
-      call.on('end', settle);
-      call.on('close', settle);
+    if (requestsStream(method)) {
+      void writeMessages(call, messages, { state, settle });
     }
-
-    if (method.requestStream) {
-      const writeAll = async (): Promise<void> => {
-        for (const message of messages) {
-          if (settled || failure) return;
-          sent += 1;
-          if (!call.write(message)) await waitForDrain(call);
-        }
-        if (!settled && !failure) call.end();
-      };
-      writeAll().catch((err: CallError) => {
-        failure = failure || err;
-        settle();
-      });
-    }
-
     return call;
   });
 }

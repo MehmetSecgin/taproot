@@ -1,19 +1,57 @@
 import { RUNTIME_CONSTANTS } from '../../core/constants.js';
-import type { DoctorCheck, TapRootPlugin } from '../../types/core.js';
-import { str } from '../../core/strings.js';
-import { runShellCommand } from '../shell-command.js';
+import { DoctorStatus } from '../../types/plugin.js';
+import type { DoctorCheck, TapRootPlugin } from '../../types/plugin.js';
+import { connectorCheck } from '../_shared/connector-check.js';
+import { firstNonEmpty, isNonEmpty } from '../../core/text-presence.js';
+import { runShellCommand } from '../_shared/shell-command.js';
 
-const STATUS_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
-const LOGIN_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs;
+const DEFAULT_STATUS_COMMAND = 'tsh status';
+const STATUS_CHECK_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.statusCheckTimeoutMs;
+const CONNECT_CHECK_TIMEOUT_MS = RUNTIME_CONSTANTS.connector.connectCheckTimeoutMs;
+const TSH_STATUS_LINE = /^\s*(?:Cluster|Logged in as|Valid until|Profile URL):/u;
+const UNRECOGNIZED_STATUS_MAX_CHARS = 200;
 
-function summarizeTshStatus(detail: string, ok: boolean): string {
-  if (!ok) return str(detail).slice(0, 400);
-  const text = str(detail);
-  if (!text || text === 'ok') return 'ok';
-  const want = /^\s*(Cluster|Logged in as|Valid until|Profile URL):/;
-  const lines = text.split(/\r?\n/).filter((line) => want.test(line)).map((line) => line.trim());
-  if (!lines.length) return text.slice(0, 200);
-  return lines.join(' | ');
+type ConnectorInput = Parameters<NonNullable<TapRootPlugin['doctor']>>[0];
+
+function summarizeTshStatus(output: string): string {
+  if (output === '' || output === 'ok') {
+    return 'ok';
+  }
+  const statusLines = output.split(/\r?\n/u).filter((line) => TSH_STATUS_LINE.test(line)).map((line) => line.trim());
+  return statusLines.length === 0 ? output.slice(0, UNRECOGNIZED_STATUS_MAX_CHARS) : statusLines.join(' | ');
+}
+
+function statusCommandOf(input: ConnectorInput): string {
+  return firstNonEmpty(input.credentials.statusCommand) ?? DEFAULT_STATUS_COMMAND;
+}
+
+async function checkTshStatus(input: ConnectorInput): Promise<DoctorCheck[]> {
+  const outcome = await runShellCommand(statusCommandOf(input), STATUS_CHECK_TIMEOUT_MS);
+  const okDetail = summarizeTshStatus(outcome.detail);
+  return [connectorCheck({ check: 'teleport status', outcome, failureStatus: DoctorStatus.Fail, failureCode: 'connector_status_blocked', okDetail })];
+}
+
+async function checkSessionStillValid(input: ConnectorInput): Promise<DoctorCheck[]> {
+  const outcome = await runShellCommand(statusCommandOf(input), STATUS_CHECK_TIMEOUT_MS);
+  return [
+    connectorCheck({
+      check: 'teleport login',
+      outcome,
+      failureStatus: DoctorStatus.Warn,
+      failureCode: 'connector_login_command_missing',
+      okDetail: 'session already valid',
+      failureDetail: 'No loginCommand configured; tsh status failed',
+    }),
+  ];
+}
+
+async function runTshLogin(input: ConnectorInput): Promise<DoctorCheck[]> {
+  const { loginCommand } = input.credentials;
+  if (!isNonEmpty(loginCommand)) {
+    return checkSessionStillValid(input);
+  }
+  const outcome = await runShellCommand(loginCommand, CONNECT_CHECK_TIMEOUT_MS);
+  return [connectorCheck({ check: 'teleport login', outcome, failureStatus: DoctorStatus.Fail, failureCode: 'connector_connect_blocked' })];
 }
 
 export const teleportPlugin: TapRootPlugin = {
@@ -22,26 +60,7 @@ export const teleportPlugin: TapRootPlugin = {
     capabilities: ['doctor', 'resolveConnection'],
   },
 
-  async doctor(input): Promise<DoctorCheck[]> {
-    const statusCommand = input.credentials.statusCommand || 'tsh status';
-    const r = await runShellCommand(statusCommand, STATUS_TIMEOUT_MS);
-    return [{ check: 'teleport status', status: r.ok ? 'ok' : 'fail', detail: summarizeTshStatus(r.detail, r.ok), ...(r.ok ? {} : { code: 'connector_status_blocked' }) }];
-  },
+  doctor: checkTshStatus,
 
-  async connect(input): Promise<DoctorCheck[]> {
-    const loginCommand = input.credentials.loginCommand;
-    if (!loginCommand) {
-      const check = await runShellCommand(input.credentials.statusCommand || 'tsh status', STATUS_TIMEOUT_MS);
-      return [
-        {
-          check: 'teleport login',
-          status: check.ok ? 'ok' : 'warn',
-          detail: check.ok ? 'session already valid' : 'No loginCommand configured; tsh status failed',
-          ...(!check.ok ? { code: 'connector_login_command_missing' } : {}),
-        },
-      ];
-    }
-    const r = await runShellCommand(loginCommand, LOGIN_TIMEOUT_MS);
-    return [{ check: 'teleport login', status: r.ok ? 'ok' : 'fail', detail: r.detail, ...(r.ok ? {} : { code: 'connector_connect_blocked' }) }];
-  },
+  connect: runTshLogin,
 };

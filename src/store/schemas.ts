@@ -1,15 +1,18 @@
-import { z, type ZodError } from 'zod';
-import type { DatasourceProfile } from '../types/core.js';
+import { z } from 'zod';
+import type { ZodError } from 'zod';
+import type { Capability, DatasourceProfile } from '../types/datasource.js';
 
-export const DatasourcePolicySchema = z.object({
+const StoredCapabilitySchema = z.string().pipe(z.custom<Capability>(() => true));
+
+const DatasourcePolicySchema = z.object({
   allowRead: z.boolean().default(true),
   allowMutate: z.boolean().default(false),
-  allowedCapabilities: z.array(z.string()).default(['executeRead']),
+  allowedCapabilities: z.array(StoredCapabilitySchema).default(['executeRead']),
   requireDatabase: z.boolean().optional(),
   strictKeyspace: z.boolean().optional(),
 });
 
-export const DatasourceProfileSchema = z.object({
+const DatasourceProfileSchema = z.object({
   name: z.string().min(1),
   kind: z.string().min(1),
   env: z.string().optional(),
@@ -31,34 +34,39 @@ export const DatasourceProfileSchema = z.object({
 });
 
 function firstZodError(error: ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'invalid profile';
+  const [issue] = error.issues;
+  if (issue === undefined) {
+    return 'invalid profile';
+  }
   const path = issue.path.join('.');
-  return path ? `${path}: ${issue.message}` : issue.message;
+  return path === '' ? issue.message : `${path}: ${issue.message}`;
 }
 
 export function parseDatasourceProfile(raw: unknown): { ok: true; profile: DatasourceProfile } | { ok: false; error: string } {
   const parsed = DatasourceProfileSchema.safeParse(raw);
-  if (!parsed.success) return { ok: false, error: firstZodError(parsed.error) };
-  return { ok: true, profile: parsed.data as DatasourceProfile };
+  if (!parsed.success) {
+    return { ok: false, error: firstZodError(parsed.error) };
+  }
+  return { ok: true, profile: parsed.data };
 }
 
-export const EnvironmentPolicySchema = z.object({
+const EnvironmentPolicySchema = z.object({
   deterministicRequired: z.boolean().default(false),
   allowDiscoveryByDefault: z.boolean().default(false),
   preferredAccessMethods: z.array(z.string()).default([]),
   targetPreference: z.array(z.string()).default([]),
 });
 
-export const RuntimeConfigSchema = z.object({
-  kbDir: z.string().optional(),
-  defaults: z.object({
-    query: z.object({
-      timeoutMs: z.number().int().positive().optional(),
-      timeZone: z.string().optional(),
-    }).optional(),
-  }).optional(),
-  environmentPolicies: z.record(z.string(), EnvironmentPolicySchema.partial()).optional(),
-  serviceAliases: z.record(z.string(), z.string()).optional(),
+const QueryDefaultsSchema = z.object({
+  timeoutMs: z.number().int().positive().optional(),
+  timeZone: z.string().optional(),
 });
 
+const PartialEnvironmentPolicySchema = EnvironmentPolicySchema.partial();
+
+export const RuntimeConfigSchema = z.object({
+  kbDir: z.string().optional(),
+  defaults: z.object({ query: QueryDefaultsSchema.optional() }).optional(),
+  environmentPolicies: z.record(z.string(), PartialEnvironmentPolicySchema).optional(),
+  serviceAliases: z.record(z.string(), z.string()).optional(),
+});

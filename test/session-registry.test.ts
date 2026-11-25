@@ -1,21 +1,25 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_CONSTANTS } from '../src/core/constants.js';
-import { buildFingerprint, SessionRegistry } from '../src/daemon/session-registry.js';
+import { SessionRegistry, buildFingerprint } from '../src/daemon/session-registry.js';
 
 function tmpRunDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-sessions-'));
 }
 
 describe('session registry', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('reclaims stale leases on sweep', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     const reg = new SessionRegistry(tmpRunDir());
     const session = reg.open({ datasourceName: 'qa-sample', kind: 'mysql' });
-    const lease = reg.acquireLease(session.sessionId);
-    const leases = (reg as any).leaseHeartbeats.get(session.sessionId) as Map<string, number>;
-    leases.set(lease, Date.now() - RUNTIME_CONSTANTS.session.leaseStaleThresholdMs - 1000);
+    reg.acquireLease(session.sessionId);
+    vi.setSystemTime(Date.now() + RUNTIME_CONSTANTS.session.leaseStaleThresholdMs + 1000);
     const out = reg.onTick();
     expect(out.staleLeases).toBe(1);
     expect(reg.get(session.sessionId)?.leaseCount).toBe(0);
@@ -57,10 +61,11 @@ describe('session registry', () => {
     const file = path.join(runDir, 'sessions.json');
     fs.writeFileSync(file, '{not-valid-json');
     const reg = new SessionRegistry(runDir);
-    expect(reg.list()).toEqual([]);
-    const backups = fs.readdirSync(runDir).filter((f) => f.startsWith('sessions.json.corrupt.'));
-    expect(backups.length).toBe(1);
+    expect(reg.list()).toStrictEqual([]);
+    const backups = fs.readdirSync(runDir).filter((fileName) => fileName.startsWith('sessions.json.corrupt.'));
+    expect(backups).toHaveLength(1);
   });
+
   it('writes nothing on a tick with no change', () => {
     // arrange
     const reg = new SessionRegistry(tmpRunDir());

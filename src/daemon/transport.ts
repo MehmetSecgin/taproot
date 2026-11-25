@@ -3,22 +3,22 @@ import fs from 'node:fs';
 import net from 'node:net';
 import type tls from 'node:tls';
 
-export interface MutualTlsFiles {
+export type MutualTlsFiles = {
   caFile: string;
   certFile: string;
   keyFile: string;
-}
+};
 
-export interface HostPort {
+export type HostPort = {
   host: string;
   port: number;
-}
+};
 
-export interface TlsMaterial {
+type TlsMaterial = {
   ca: Buffer;
   cert: Buffer;
   key: Buffer;
-}
+};
 
 export function readTlsMaterial(files: MutualTlsFiles): TlsMaterial {
   return { ca: fs.readFileSync(files.caFile), cert: fs.readFileSync(files.certFile), key: fs.readFileSync(files.keyFile) };

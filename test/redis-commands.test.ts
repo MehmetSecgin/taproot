@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { redisPlugin, SCAN_COUNT_MAX } from '../src/plugins-builtins/redis/index.js';
-import type { DatasourceProfile, QueryRequest } from '../src/types/core.js';
+import { SCAN_COUNT_MAX } from '../src/plugins-builtins/redis/command-policy.js';
+import { redisPlugin } from '../src/plugins-builtins/redis/index.js';
+import type { DatasourceProfile } from '../src/types/datasource.js';
+import type { QueryRequest } from '../src/types/plugin.js';
 import { testDatasource } from './helpers/datasource.js';
 import { stubRedisCli } from './helpers/redis-cli-stub.js';
 
@@ -27,6 +29,14 @@ function read(datasource: DatasourceProfile, query: string, pluginParams?: Query
   return { datasource, query, capability: 'executeRead', timeoutMs: 5000, sessionTimeZone: '+00:00', signal: undefined, pluginParams };
 }
 
+async function executeRedis(request: QueryRequest, credentials: Record<string, string>): ReturnType<NonNullable<typeof redisPlugin.execute>> {
+  const { execute } = redisPlugin;
+  if (execute === undefined) {
+    throw new Error('redis plugin has no execute');
+  }
+  return execute.call(redisPlugin, request, credentials);
+}
+
 function strict(): DatasourceProfile {
   const datasource = testDatasource('redis', 6379, {});
   datasource.policy.strictKeyspace = true;
@@ -40,10 +50,10 @@ describe('redis commands', () => {
     const datasource = testDatasource('redis', 6379, { protoRoot: protoRoot(), protoMessage: 'taproot.test.Profile' });
 
     // act
-    const result = await redisPlugin.execute!(read(datasource, 'KEYS *'), {});
+    const result = await executeRedis(read(datasource, 'KEYS *'), {});
 
     // assert
-    expect(result.result.rows).toEqual([['user:1'], ['hi']]);
+    expect(result.result.rows).toStrictEqual([['user:1'], ['hi']]);
   });
 
   it('runs SORT_RO as a read', async () => {
@@ -51,10 +61,10 @@ describe('redis commands', () => {
     replyWith('3\n7\n', '1) "3"\n2) "7"\n');
 
     // act
-    const result = await redisPlugin.execute!(read(testDatasource('redis', 6379, {}), 'SORT_RO profile:ids'), {});
+    const result = await executeRedis(read(testDatasource('redis', 6379, {}), 'SORT_RO profile:ids'), {});
 
     // assert
-    expect(result.result.rows).toEqual([['3'], ['7']]);
+    expect(result.result.rows).toStrictEqual([['3'], ['7']]);
   });
 
   it('refuses KEYS without --allow-keys on a strict-keyspace datasource', async () => {
@@ -62,10 +72,10 @@ describe('redis commands', () => {
     replyWith('user:1\n', '1) "user:1"\n');
 
     // act
-    const run = redisPlugin.execute!(read(strict(), 'keys *'), {});
+    const run = executeRedis(read(strict(), 'keys *'), {});
 
     // assert
-    await expect(run).rejects.toThrow(/--allow-keys/);
+    await expect(run).rejects.toThrow(/--allow-keys/u);
   });
 
   it('refuses SCAN without COUNT', async () => {
@@ -73,10 +83,10 @@ describe('redis commands', () => {
     replyWith('0\n', '1) "0"\n');
 
     // act
-    const run = redisPlugin.execute!(read(strict(), 'SCAN 0 MATCH user:*'), {});
+    const run = executeRedis(read(strict(), 'SCAN 0 MATCH user:*'), {});
 
     // assert
-    await expect(run).rejects.toThrow(/explicit COUNT/);
+    await expect(run).rejects.toThrow(/explicit COUNT/u);
   });
 
   it('refuses SCAN with COUNT above the cap', async () => {
@@ -84,10 +94,10 @@ describe('redis commands', () => {
     replyWith('0\n', '1) "0"\n');
 
     // act
-    const run = redisPlugin.execute!(read(strict(), `SCAN 0 COUNT ${SCAN_COUNT_MAX + 1}`), {});
+    const run = executeRedis(read(strict(), `SCAN 0 COUNT ${SCAN_COUNT_MAX + 1}`), {});
 
     // assert
-    await expect(run).rejects.toThrow(/COUNT must be an integer/);
+    await expect(run).rejects.toThrow(/COUNT must be an integer/u);
   });
 
   it('refuses a query when requireDatabase is set and the database is missing', async () => {
@@ -97,10 +107,10 @@ describe('redis commands', () => {
     datasource.policy.requireDatabase = true;
 
     // act
-    const run = redisPlugin.execute!(read(datasource, 'GET user:1'), {});
+    const run = executeRedis(read(datasource, 'GET user:1'), {});
 
     // assert
-    await expect(run).rejects.toThrow(/MISCONFIGURED_DATASOURCE/);
+    await expect(run).rejects.toThrow(/MISCONFIGURED_DATASOURCE/u);
   });
 
   it('runs a query when requireDatabase is set and the database is given', async () => {
@@ -111,10 +121,10 @@ describe('redis commands', () => {
     datasource.connection.database = '3';
 
     // act
-    const result = await redisPlugin.execute!(read(datasource, 'GET user:1'), {});
+    const result = await executeRedis(read(datasource, 'GET user:1'), {});
 
     // assert
-    expect(result.result.rows).toEqual([['v']]);
+    expect(result.result.rows).toStrictEqual([['v']]);
   });
 
   it('runs KEYS on a strict-keyspace datasource with --allow-keys', async () => {
@@ -122,10 +132,10 @@ describe('redis commands', () => {
     replyWith('user:1\n', '1) "user:1"\n');
 
     // act
-    const result = await redisPlugin.execute!(read(strict(), 'KEYS *', { allowKeys: true }), {});
+    const result = await executeRedis(read(strict(), 'KEYS *', { allowKeys: true }), {});
 
     // assert
-    expect(result.result.rows).toEqual([['user:1']]);
+    expect(result.result.rows).toStrictEqual([['user:1']]);
   });
 
   it('runs SCAN without COUNT on a default datasource', async () => {
@@ -133,10 +143,10 @@ describe('redis commands', () => {
     replyWith('0\n', '1) "0"\n');
 
     // act
-    const result = await redisPlugin.execute!(read(testDatasource('redis', 6379, {}), 'SCAN 0'), {});
+    const result = await executeRedis(read(testDatasource('redis', 6379, {}), 'SCAN 0'), {});
 
     // assert
-    expect(result.result.rows).toEqual([['0']]);
+    expect(result.result.rows).toStrictEqual([['0']]);
   });
 
   it('checks the last COUNT, as Redis does', async () => {
@@ -144,10 +154,10 @@ describe('redis commands', () => {
     replyWith('0\n', '1) "0"\n');
 
     // act
-    const run = redisPlugin.execute!(read(strict(), `SCAN 0 COUNT 10 COUNT ${SCAN_COUNT_MAX + 1}`), {});
+    const run = executeRedis(read(strict(), `SCAN 0 COUNT 10 COUNT ${SCAN_COUNT_MAX + 1}`), {});
 
     // assert
-    await expect(run).rejects.toThrow(/COUNT must be an integer/);
+    await expect(run).rejects.toThrow(/COUNT must be an integer/u);
   });
 
   it('accepts a MATCH pattern that is literally COUNT', async () => {
@@ -155,9 +165,9 @@ describe('redis commands', () => {
     replyWith('0\n', '1) "0"\n');
 
     // act
-    const result = await redisPlugin.execute!(read(strict(), 'SCAN 0 MATCH COUNT COUNT 10'), {});
+    const result = await executeRedis(read(strict(), 'SCAN 0 MATCH COUNT COUNT 10'), {});
 
     // assert
-    expect(result.result.rows).toEqual([['0']]);
+    expect(result.result.rows).toStrictEqual([['0']]);
   });
 });

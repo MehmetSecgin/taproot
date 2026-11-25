@@ -1,25 +1,14 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { outputCheckNamed, outputDataRecord } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
-import { tempStateRoot } from './helpers/state-root.js';
-
-function setupState() {
-  const { stateRoot, configDir } = tempStateRoot();
-  fs.writeFileSync(path.join(configDir, 'datasources.json'), '[]');
-  fs.writeFileSync(path.join(configDir, 'templates.json'), '[]');
-  fs.writeFileSync(path.join(configDir, 'deterministic-config.json'), '{}');
-  const kbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-improve-kb-'));
-  fs.mkdirSync(kbDir, { recursive: true });
-  fs.writeFileSync(path.join(kbDir, 'services.json'), '[]');
-  return { stateRoot, env: { TAPROOT_STATE_ROOT: stateRoot, TAPROOT_MASTER_KEY: 'test-key', TAPROOT_KB_DIR: kbDir } };
-}
+import { setupEmptyState } from './helpers/datasource-crud-state.js';
 
 describe('--probe runs connector connect before the DB probe', () => {
   it('keeps the profile and reports the connector failure (not a DB error)', () => {
-    // arrange — a connector whose connect command fails
-    const { env } = setupState();
+    // arrange
+    const { env } = setupEmptyState();
     runCli(['creds', 'set', '--ref', 'kpf:test', '--status-command', 'false', '--connect-command', 'false'], env);
 
     // act
@@ -41,30 +30,26 @@ describe('--probe runs connector connect before the DB probe', () => {
 describe('init audits dangling credentialRefs', () => {
   it('warns when a datasource references a credential ref that is not set, and clears once set', () => {
     // arrange
-    const { env } = setupState();
+    const { env } = setupEmptyState();
     runCli(['datasource', 'add', '--name', 'svc-a', '--kind', 'mysql', '--credential-ref', 'missing-ref',
             '--host', '127.0.0.1', '--port', '3306', '--database', 'd'], env);
 
     // act
-    const before = JSON.parse(runCli(['init'], env).stdout).data;
-    const check = before.checks.find((c: { check: string }) => c.check === 'credential_refs');
+    const before = outputCheckNamed(runCli(['init'], env).stdout, 'credential_refs');
+    runCli(['creds', 'set', '--ref', 'missing-ref', '--user', 'reader', '--password', 'p'], env);
+    const after = outputCheckNamed(runCli(['init'], env).stdout, 'credential_refs');
 
     // assert
-    expect(check.status).toBe('warn');
-    expect(check.detail).toContain('missing-ref');
-
-    // act — set the ref, re-check
-    runCli(['creds', 'set', '--ref', 'missing-ref', '--user', 'reader', '--password', 'p'], env);
-    const after = JSON.parse(runCli(['init'], env).stdout).data;
-    const okCheck = after.checks.find((c: { check: string }) => c.check === 'credential_refs');
-    expect(okCheck.status).toBe('ok');
+    expect(before?.status).toBe('warn');
+    expect(before?.detail).toContain('missing-ref');
+    expect(after?.status).toBe('ok');
   });
 });
 
 describe('datasource import', () => {
   it('imports a profile read back from datasource show', () => {
     // arrange
-    const { stateRoot, env } = setupState();
+    const { stateRoot, env } = setupEmptyState();
     runCli(['datasource', 'add', '--name', 'svc-x', '--kind', 'mysql', '--credential-ref', 'db:x',
             '--env', 'qa', '--service', 'x', '--host', '127.0.0.1', '--port', '3306', '--database', 'xdb'], env);
     const shown = runCli(['datasource', 'show', 'svc-x', '--pluck', 'data'], env);
@@ -72,14 +57,13 @@ describe('datasource import', () => {
     const dumpFile = path.join(stateRoot, 'dump.json');
     fs.writeFileSync(dumpFile, `[${shown.stdout}]`);
 
-    // act — wipe and re-import
+    // act
     runCli(['datasource', 'remove', 'svc-x'], env);
     const imported = runCli(['datasource', 'import', '--file', dumpFile], env);
 
     // assert
     expect(imported.status).toBe(0);
-    const result = JSON.parse(imported.stdout).data;
-    expect(result.imported).toEqual(['svc-x']);
+    expect(outputDataRecord(imported.stdout).imported).toStrictEqual(['svc-x']);
     expect(runCli(['datasource', 'show', 'svc-x'], env).status).toBe(0);
   });
 });

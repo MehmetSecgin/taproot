@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { outputData } from './helpers/cli-contract-envelopes.js';
 import { runCli } from './helpers/cli.js';
 import { tempStateRoot } from './helpers/state-root.js';
 
-function setupState() {
+function setupState(): { env: Record<string, string> } {
   const { stateRoot, configDir } = tempStateRoot();
   fs.writeFileSync(
     path.join(configDir, 'deterministic-config.json'),
@@ -40,12 +42,14 @@ function setupState() {
   };
 }
 
+const serviceNamesSchema = z.array(z.string());
+
 describe('runtime policy and KB state', () => {
 
   it('lists KB services', () => {
     const { env } = setupState();
     const out = runCli(['kb', 'list-services'], env);
     expect(out.status).toBe(0);
-    expect(JSON.parse(out.stdout).data).toEqual(['orders', 'sample-service']);
+    expect(outputData(out.stdout, serviceNamesSchema)).toStrictEqual(['orders', 'sample-service']);
   });
 });

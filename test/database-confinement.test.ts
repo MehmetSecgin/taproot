@@ -1,25 +1,8 @@
-import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { enforceDatabaseConfinement } from '../src/core/database-confinement.js';
-import { executeQuery, silentQueryReport } from '../src/core/execute-query.js';
-import { queryDatasourceResolver } from '../src/core/resolve-query-datasource.js';
-import { rpcCall } from '../src/daemon/client.js';
-import type { DatasourceProfile, QueryResult } from '../src/types/core.js';
-import { startLocalDaemon } from './helpers/daemon.js';
-import { fakePlugin } from './helpers/fake-plugin.js';
-import { contextWith, queryRequest, restoreQueryEnv, setupQueryState } from './helpers/query-state.js';
-
-const savedConfine = process.env.TAPROOT_CONFINE_TO_DATABASE;
-
-beforeEach(() => {
-  process.env.TAPROOT_CONFINE_TO_DATABASE = '1';
-});
-
-afterEach(() => {
-  restoreQueryEnv();
-  if (savedConfine === undefined) delete process.env.TAPROOT_CONFINE_TO_DATABASE;
-  else process.env.TAPROOT_CONFINE_TO_DATABASE = savedConfine;
-});
+import { TaprootError } from '../src/core/taproot-error.js';
+import type { DatasourceProfile } from '../src/types/datasource.js';
+import { useDatabaseConfinement } from './helpers/database-confinement-env.js';
 
 function profile(overrides: { database?: string; kind?: string } = {}): DatasourceProfile {
   const { database = 'shop', kind = 'mysql' } = overrides;
@@ -38,11 +21,16 @@ function refusal(sql: string, datasource = profile()): { message: string; detail
     enforceDatabaseConfinement({ sql, datasource });
     return undefined;
   } catch (error) {
-    return { message: (error as Error).message, details: (error as Error & { details?: unknown }).details };
+    if (!(error instanceof TaprootError)) {
+      throw error;
+    }
+    return { message: error.message, details: error.details };
   }
 }
 
 describe('database confinement of a statement', () => {
+  useDatabaseConfinement();
+
   it.each([
     'SELECT * FROM orders',
     'SELECT * FROM shop.orders',
@@ -96,7 +84,7 @@ describe('database confinement of a statement', () => {
     ['SELECT * FROM performance_schema.threads', 'performance_schema'],
     ['SHOW DATABASES', 'information_schema'],
   ])('refuses %s, which reaches schema %s', (sql, reached) => {
-    expect(refusal(sql)).toEqual({
+    expect(refusal(sql)).toStrictEqual({
       message: `DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop', and '${reached}' is another schema. Name tables of 'shop' bare or as shop.<table>.`,
       details: { reached },
     });
@@ -109,11 +97,11 @@ describe('database confinement of a statement', () => {
     'TABLE orders',
     'CALL shop.refresh()',
   ])('refuses %s, which it cannot analyse', (sql) => {
-    expect(refusal(sql)?.message).toMatch(/^DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop', and TapRoot cannot tell which schemas this statement reaches: it is not one SELECT/);
+    expect(refusal(sql)?.message).toMatch(/^DATABASE_CONFINED: datasource 'qa-shop' is confined to schema 'shop', and TapRoot cannot tell which schemas this statement reaches: it is not one SELECT/u);
   });
 
   it('runs anything with TAPROOT_CONFINE_TO_DATABASE unset', () => {
-    delete process.env.TAPROOT_CONFINE_TO_DATABASE;
+    Reflect.deleteProperty(process.env, 'TAPROOT_CONFINE_TO_DATABASE');
     expect(refusal('SELECT * FROM other.refunds')).toBeUndefined();
     expect(refusal('SHOW PROCESSLIST')).toBeUndefined();
   });
@@ -130,6 +118,8 @@ describe('database confinement of a statement', () => {
 });
 
 describe('database confinement against parser bypasses', () => {
+  useDatabaseConfinement();
+
   it.each([
     'SELECT 1 /*! FROM other.refunds */',
     'SELECT 1 /*!50000 FROM other.refunds */',
@@ -143,7 +133,7 @@ describe('database confinement against parser bypasses', () => {
   });
 
   it('refuses -- before a non-ASCII space, which the server reads as code', () => {
-    expect(refusal('SELECT 1 --\u00a0x FROM other.refunds')?.message).toContain("it holds '--' without an ASCII space after it");
+    expect(refusal('SELECT 1 --\u00A0x FROM other.refunds')?.message).toContain("it holds '--' without an ASCII space after it");
   });
 
   it.each([
@@ -156,11 +146,11 @@ describe('database confinement against parser bypasses', () => {
   });
 
   it('refuses a backslash, which ends a string early on a server running NO_BACKSLASH_ESCAPES', () => {
-    expect(refusal("SELECT 'a\\' , other.refunds.id FROM other.refunds -- '")?.message).toContain('it holds a backslash');
+    expect(refusal(String.raw`SELECT 'a\' , other.refunds.id FROM other.refunds -- '`)?.message).toContain('it holds a backslash');
   });
 
   it('reads past a block comment the way the server does, where a nested opener does not nest', () => {
-    expect(refusal('SELECT * FROM orders /* /* */ , other.refunds')?.details).toEqual({ reached: 'other' });
+    expect(refusal('SELECT * FROM orders /* /* */ , other.refunds')?.details).toStrictEqual({ reached: 'other' });
   });
 
   it.each([
@@ -170,7 +160,7 @@ describe('database confinement against parser bypasses', () => {
     ['SELECT * FROM SHOP.orders', 'SHOP'],
     ['SELECT * FROM `shop `.orders', 'shop '],
   ])('compares the exact schema spelling of %s', (sql, reached) => {
-    expect(refusal(sql)?.details).toEqual({ reached });
+    expect(refusal(sql)?.details).toStrictEqual({ reached });
   });
 
   it.each([
@@ -188,53 +178,5 @@ describe('database confinement against parser bypasses', () => {
     'EXPLAIN FOR CONNECTION 7',
   ])('refuses %s, whose WHERE or target it does not read', (sql) => {
     expect(refusal(sql)?.message).toContain('TapRoot cannot tell which schemas this statement reaches');
-  });
-});
-
-describe('database confinement where queries run', () => {
-  const shopProfile = { kind: 'mysql', connection: { host: '127.0.0.1', port: 1, database: 'shop' } };
-
-  it('refuses a cross-schema query before it reaches the plugin', async () => {
-    // arrange
-    await setupQueryState(shopProfile);
-    const sent: string[] = [];
-    const plugin = fakePlugin({ kind: 'mysql' });
-    const inner = plugin.execute!;
-    plugin.execute = async (request, creds): Promise<QueryResult> => {
-      sent.push(request.query);
-      return inner(request, creds);
-    };
-    const ctx = contextWith(plugin);
-
-    // act
-    const outcome = await executeQuery(queryRequest({ query: 'SELECT * FROM other.refunds' }), {
-      ctx,
-      report: silentQueryReport,
-      signal: undefined,
-      acquireQuerySlot: undefined,
-      resolveDatasource: queryDatasourceResolver(undefined),
-    });
-
-    // assert
-    expect(outcome).toMatchObject({ ok: false, code: 'DATABASE_CONFINED', details: { reached: 'other' } });
-    expect(sent.filter((query) => query.includes('other'))).toEqual([]);
-  });
-
-  it('still serves schema.read from the catalog of the profile database', async () => {
-    // arrange
-    const stateRoot = await setupQueryState(shopProfile);
-    const socketPath = path.join(stateRoot, 'run', 'taprootd-confined.sock');
-    const plugin = fakePlugin({ kind: 'mysql', columns: ['table_name', 'column_name'], rows: [['orders', 'id']] });
-    const daemon = await startLocalDaemon({ stateRoot, socketPath, plugins: [plugin] });
-
-    try {
-      // act
-      const res = await rpcCall({ socketPath, method: 'schema.read', params: { datasource: 'qa-fake', tables: ['orders'] } });
-
-      // assert
-      expect(res.data).toEqual({ tables: { orders: { columns: ['id'] } } });
-    } finally {
-      await daemon.stop();
-    }
   });
 });

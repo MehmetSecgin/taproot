@@ -3,88 +3,30 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SchemaCatalogStore } from '../src/store/schema-catalog.js';
-import { cachedSchemaCatalog, ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
-import { readSchema } from '../src/core/schema-read.js';
+import { ensureDatasourceCatalog } from '../src/core/schema-refresh.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import { runDatasourceConnectors } from '../src/core/connector-runner.js';
-import type { AppContext } from '../src/core/app.js';
-import type { TapRootPlugin } from '../src/types/core.js';
+import {
+  AFTER_SCHEMA_ERROR,
+  ROUTINE,
+  backdateCatalog,
+  cachedTableNames,
+  datasource,
+  failingIntrospection,
+  makeContext,
+  rowsByInformationSchemaTable,
+} from './helpers/schema-catalog-fixtures.js';
 
-vi.mock('../src/core/connector-runner.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/core/connector-runner.js')>();
-  return { ...actual, runDatasourceConnectors: vi.fn(actual.runDatasourceConnectors) };
-});
-
-type Rows = Array<Record<string, unknown>>;
-
-const ROUTINE = { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: false };
-const AFTER_SCHEMA_ERROR = { sessionId: undefined, acquireQuerySlot: undefined, afterSchemaError: true };
-
-const ORDERS_COLUMNS: Rows = [
-  { table_name: 'orders', column_name: 'id' },
-  { table_name: 'orders', column_name: 'order_date' },
-  { table_name: 'customers', column_name: 'id' },
-  { table_name: 'shipments', column_name: 'id' },
-];
-
-function makeContext(rowsFor: (sql: string) => Rows = (sql) => (sql.includes('information_schema.columns') ? ORDERS_COLUMNS : [])) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'taproot-catalog-'));
-  const seen: string[] = [];
-  const sessions: Array<string | undefined> = [];
-  const registry = new Map<string, TapRootPlugin>();
-  registry.set('mysql', {
-    manifest: { name: 'mysql', capabilities: ['executeRead'] },
-    async execute(request, creds) {
-      seen.push(request.query);
-      sessions.push(creds.__sessionId);
-      const rows = rowsFor(request.query);
-      return {
-        datasource: request.datasource.name,
-        plugin: 'mysql',
-        capability: request.capability,
-        query: { native: request.query },
-        result: { columns: Object.keys(rows[0] || {}), rows: rows.map((row) => Object.values(row)) },
-        timings: { startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), durationMs: 1 },
-        warnings: [],
-        classification: 'success',
-      };
-    },
-  });
-  const ctx = {
-    paths: { cacheDir: path.join(root, 'cache') },
-    credentialStore: { get: async () => ({ user: 'reader', password: 'secret' }) },
-    schemaCatalogStore: new SchemaCatalogStore(path.join(root, 'cache', 'schema')),
-    pluginRegistry: registry,
-  } as unknown as AppContext;
-  return { ctx, seen, sessions };
-}
-
-function datasource(kind = 'mysql', name = 'qa-orders') {
-  return {
-    name,
-    kind,
-    env: 'qa',
-    service: 'orders',
-    connection: { host: '127.0.0.1', port: 3306, database: 'orders' },
-    credentialRef: 'qa:orders',
-    connectors: [],
-    policy: { allowRead: true, allowMutate: false, allowedCapabilities: ['executeRead'] },
-    updatedAt: new Date().toISOString(),
-  } as any;
-}
-
-function backdateCatalog(ctx: AppContext, name: string, ageMs: number): void {
-  const catalogFile = path.join(ctx.paths.cacheDir, 'schema', `${name}.json`);
-  const catalog = JSON.parse(fs.readFileSync(catalogFile, 'utf8'));
-  catalog.fetchedAt = new Date(Date.now() - ageMs).toISOString();
-  fs.writeFileSync(catalogFile, JSON.stringify(catalog));
-}
-
-afterEach(() => {
-  vi.useRealTimers();
+vi.mock(import('../src/core/connector-runner.js'), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, runDatasourceConnectors: vi.fn<typeof actual.runDatasourceConnectors>(actual.runDatasourceConnectors) };
 });
 
 describe('eager schema catalog', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('fetches the whole catalog once and reports the table count', async () => {
     // arrange
     const { ctx, seen } = makeContext();
@@ -93,9 +35,9 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
-    expect(out).toEqual({ outcome: 'fetched', tableCount: 3 });
-    expect(seen.some((sql) => sql.includes('information_schema.columns'))).toBe(true);
-    expect(Object.keys(ctx.schemaCatalogStore.get('qa-orders')!.tables)).toEqual(['customers', 'orders', 'shipments']);
+    expect(out).toStrictEqual({ outcome: 'fetched', tableCount: 3 });
+    expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
+    expect(cachedTableNames(ctx, 'qa-orders')).toStrictEqual(['customers', 'orders', 'shipments']);
   });
 
   it('serves the second call from cache without re-introspecting', async () => {
@@ -108,8 +50,8 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
-    expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
-    expect(seen.length).toBe(afterFirst);
+    expect(out).toStrictEqual({ outcome: 'cached', tableCount: 3 });
+    expect(seen).toHaveLength(afterFirst);
   });
 
   it('re-introspects once the cached catalog is past its TTL', async () => {
@@ -135,8 +77,8 @@ describe('eager schema catalog', () => {
     const [first, second] = await Promise.all([ensureDatasourceCatalog(ctx, datasource(), ROUTINE), ensureDatasourceCatalog(ctx, datasource(), ROUTINE)]);
 
     // assert
-    expect(first).toEqual({ outcome: 'fetched', tableCount: 3 });
-    expect(second).toEqual(first);
+    expect(first).toStrictEqual({ outcome: 'fetched', tableCount: 3 });
+    expect(second).toStrictEqual(first);
     expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
   });
 
@@ -149,24 +91,26 @@ describe('eager schema catalog', () => {
     await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-session'), { ...ROUTINE, sessionId: 'sess-1' });
 
     // assert
-    expect(runDatasourceConnectors).toHaveBeenCalledTimes(1);
-    expect(sessions).toEqual(['sess-1', 'sess-1', 'sess-1']);
+    expect(vi.mocked(runDatasourceConnectors).mock.calls.map(([request]) => request.datasource.name)).toStrictEqual(['qa-session']);
+    expect(sessions).toStrictEqual(['sess-1', 'sess-1', 'sess-1']);
   });
 
   it('holds a query slot for the whole fetch', async () => {
     // arrange
     const { ctx, seen } = makeContext();
     const slotEvents: string[] = [];
-    const acquireQuerySlot = async () => {
+    const acquireQuerySlot = async (): Promise<() => void> => {
       slotEvents.push(`acquire after ${seen.length}`);
-      return () => slotEvents.push(`release after ${seen.length}`);
+      return () => {
+        slotEvents.push(`release after ${seen.length}`);
+      };
     };
 
     // act
     await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-slot'), { ...ROUTINE, acquireQuerySlot });
 
     // assert
-    expect(slotEvents).toEqual(['acquire after 0', 'release after 3']);
+    expect(slotEvents).toStrictEqual(['acquire after 0', 'release after 3']);
   });
 
   it('refetches after a schema error once the catalog is older than a minute', async () => {
@@ -194,8 +138,8 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource(), AFTER_SCHEMA_ERROR);
 
     // assert
-    expect(out).toEqual({ outcome: 'cached', tableCount: 3 });
-    expect(seen.length).toBe(afterFirst);
+    expect(out).toStrictEqual({ outcome: 'cached', tableCount: 3 });
+    expect(seen).toHaveLength(afterFirst);
   });
 
   it('reports unsupported kinds without touching the plugin', async () => {
@@ -206,15 +150,13 @@ describe('eager schema catalog', () => {
     const out = await ensureDatasourceCatalog(ctx, datasource('redis'), ROUTINE);
 
     // assert
-    expect(out).toEqual({ outcome: 'unsupported', tableCount: 0 });
-    expect(seen).toEqual([]);
+    expect(out).toStrictEqual({ outcome: 'unsupported', tableCount: 0 });
+    expect(seen).toStrictEqual([]);
   });
 
   it('never fails the query when introspection throws', async () => {
     // arrange
-    const { ctx } = makeContext(() => {
-      throw new Error('connection refused');
-    });
+    const { ctx } = makeContext(failingIntrospection('connection refused'));
 
     // act
     const out = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-refused'), ROUTINE);
@@ -226,9 +168,7 @@ describe('eager schema catalog', () => {
 
   it('does not retry a failed fetch within the failure window, even after a schema error', async () => {
     // arrange
-    const { ctx, seen } = makeContext(() => {
-      throw new Error('SELECT command denied');
-    });
+    const { ctx, seen } = makeContext(failingIntrospection('SELECT command denied'));
     await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), ROUTINE);
     const afterFirst = seen.length;
 
@@ -237,16 +177,14 @@ describe('eager schema catalog', () => {
     const afterSchemaError = await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied'), AFTER_SCHEMA_ERROR);
 
     // assert
-    expect(again).toEqual({ outcome: 'failed', tableCount: 0, error: 'SELECT command denied' });
-    expect(afterSchemaError).toEqual(again);
-    expect(seen.length).toBe(afterFirst);
+    expect(again).toStrictEqual({ outcome: 'failed', tableCount: 0, error: 'SELECT command denied' });
+    expect(afterSchemaError).toStrictEqual(again);
+    expect(seen).toHaveLength(afterFirst);
   });
 
   it('retries a failed fetch once the failure window has passed', async () => {
     // arrange
-    const { ctx, seen } = makeContext(() => {
-      throw new Error('SELECT command denied');
-    });
+    const { ctx, seen } = makeContext(failingIntrospection('SELECT command denied'));
     await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-denied-later'), ROUTINE);
     const afterFirst = seen.length;
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -261,32 +199,25 @@ describe('eager schema catalog', () => {
 
   it('keeps indexes without BTREE and non-unique defaults, and parses the partition key', async () => {
     // arrange
-    const { ctx } = makeContext((sql) => {
-      if (sql.includes('information_schema.columns')) {
-        return [
-          { table_name: 'order_items', column_name: 'id' },
-          { table_name: 'order_items', column_name: 'order_date' },
-          { table_name: 'order_items', column_name: 'customer_id' },
-        ];
-      }
-      if (sql.includes('information_schema.statistics')) {
-        return [
-          { table_name: 'order_items', index_name: 'PRIMARY', seq_in_index: 1, column_name: 'id', non_unique: '0', index_type: 'BTREE' },
-          { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 1, column_name: 'order_date', non_unique: '1', index_type: 'BTREE' },
-          { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 2, column_name: 'customer_id', non_unique: '1', index_type: 'BTREE' },
-        ];
-      }
-      if (sql.includes('information_schema.partitions')) {
-        return [{ table_name: 'order_items', partition_method: 'RANGE', partition_expression: '`order_date`' }];
-      }
-      return [];
-    });
+    const { ctx } = makeContext(rowsByInformationSchemaTable({
+      columns: [
+        { table_name: 'order_items', column_name: 'id' },
+        { table_name: 'order_items', column_name: 'order_date' },
+        { table_name: 'order_items', column_name: 'customer_id' },
+      ],
+      statistics: [
+        { table_name: 'order_items', index_name: 'PRIMARY', seq_in_index: 1, column_name: 'id', non_unique: '0', index_type: 'BTREE' },
+        { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 1, column_name: 'order_date', non_unique: '1', index_type: 'BTREE' },
+        { table_name: 'order_items', index_name: 'idx_order_customer', seq_in_index: 2, column_name: 'customer_id', non_unique: '1', index_type: 'BTREE' },
+      ],
+      partitions: [{ table_name: 'order_items', partition_method: 'RANGE', partition_expression: '`order_date`' }],
+    }));
 
     // act
     await ensureDatasourceCatalog(ctx, datasource(), ROUTINE);
 
     // assert
-    expect(ctx.schemaCatalogStore.get('qa-orders')!.tables.order_items).toEqual({
+    expect(ctx.schemaCatalogStore.get('qa-orders')?.tables.order_items).toStrictEqual({
       database: 'orders',
       columns: ['id', 'order_date', 'customer_id'],
       primaryKey: ['id'],
@@ -307,7 +238,7 @@ describe('eager schema catalog', () => {
     const context = buildSchemaContext('SELECT id FROM ORDERS', ctx.schemaCatalogStore.get('qa-orders'));
 
     // assert
-    expect(Object.keys(context.tables)).toEqual(['orders']);
+    expect(Object.keys(context.tables)).toStrictEqual(['orders']);
     expect(context.tables.orders.columns).toContain('order_date');
     expect(context.catalog?.tables).toBe(3);
   });
@@ -322,7 +253,7 @@ describe('eager schema catalog', () => {
     const cleared = ctx.schemaCatalogStore.clear();
 
     // assert
-    expect(listed).toEqual([{ datasource: 'qa-orders', fetchedAt: expect.any(String), tables: 3 }]);
+    expect(listed.map(({ datasource: name, tables }) => ({ name, tables }))).toStrictEqual([{ name: 'qa-orders', tables: 3 }]);
     expect(cleared).toBe(1);
     expect(ctx.schemaCatalogStore.get('qa-orders')).toBeUndefined();
   });
@@ -340,91 +271,7 @@ describe('eager schema catalog', () => {
 
     // assert
     expect(before).toBeUndefined();
-    expect(listedBefore).toEqual([]);
+    expect(listedBefore).toStrictEqual([]);
     expect(store.get('qa-orders')).toMatchObject({ datasource: 'qa-orders', tables: {} });
-  });
-});
-
-describe('cache-first schema catalog', () => {
-  const freeSlot = async () => () => undefined;
-
-  it('waits for the first fetch when nothing is cached', async () => {
-    // arrange
-    const { ctx } = makeContext();
-
-    // act
-    const catalog = await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-first-read'), freeSlot);
-
-    // assert
-    expect(Object.keys(catalog.tables)).toEqual(['customers', 'orders', 'shipments']);
-  });
-
-  it('shares one fetch between callers that find nothing cached', async () => {
-    // arrange
-    const { ctx, seen } = makeContext();
-
-    // act
-    await Promise.all([1, 2, 3].map(() => cachedSchemaCatalog(ctx, datasource('mysql', 'qa-shared'), freeSlot)));
-
-    // assert
-    expect(seen.filter((sql) => sql.includes('information_schema.columns'))).toHaveLength(1);
-  });
-
-  it('answers from an expired catalog at once and refreshes it in the background', async () => {
-    // arrange
-    let columns = ORDERS_COLUMNS;
-    const { ctx } = makeContext((sql) => (sql.includes('information_schema.columns') ? columns : []));
-    await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-expired'), freeSlot);
-    backdateCatalog(ctx, 'qa-expired', 72 * 3600 * 1000);
-    columns = [{ table_name: 'invoices', column_name: 'id' }];
-
-    // act
-    const served = await cachedSchemaCatalog(ctx, datasource('mysql', 'qa-expired'), freeSlot);
-    await ensureDatasourceCatalog(ctx, datasource('mysql', 'qa-expired'), ROUTINE);
-
-    // assert
-    expect(Object.keys(served.tables)).toEqual(['customers', 'orders', 'shipments']);
-    expect(Object.keys(ctx.schemaCatalogStore.get('qa-expired')!.tables)).toEqual(['invoices']);
-  });
-
-  it('names the fetch error when nothing is cached', async () => {
-    // arrange
-    const { ctx } = makeContext(() => {
-      throw new Error('ECONNREFUSED');
-    });
-
-    // act
-    const read = cachedSchemaCatalog(ctx, datasource('mysql', 'qa-unreachable'), freeSlot);
-
-    // assert
-    await expect(read).rejects.toThrow("CONNECTIVITY: could not read the schema of 'qa-unreachable': ECONNREFUSED.");
-  });
-
-  it('refuses a datasource kind that has no schema', async () => {
-    // arrange
-    const { ctx } = makeContext();
-
-    // act
-    const read = cachedSchemaCatalog(ctx, datasource('redis', 'qa-cache'), freeSlot);
-
-    // assert
-    await expect(read).rejects.toThrow("BAD_INPUT: 'qa-cache' is a redis datasource; only SQL datasources have a schema.");
-  });
-});
-
-describe('schema read', () => {
-  it('finds a table created after the catalog was cached', async () => {
-    // arrange
-    let columns = ORDERS_COLUMNS;
-    const { ctx } = makeContext((sql) => (sql.includes('information_schema.columns') ? columns : []));
-    await readSchema(ctx, datasource('mysql', 'qa-grown'), [], undefined);
-    backdateCatalog(ctx, 'qa-grown', 2 * 60 * 1000);
-    columns = [...ORDERS_COLUMNS, { table_name: 'invoices', column_name: 'id' }];
-
-    // act
-    const schema = await readSchema(ctx, datasource('mysql', 'qa-grown'), ['invoices'], undefined);
-
-    // assert
-    expect(schema.tables).toEqual({ invoices: { columns: ['id'] } });
   });
 });

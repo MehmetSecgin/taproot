@@ -1,13 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { runCli } from './helpers/cli.js';
-import { tempStateRoot } from './helpers/state-root.js';
-
-function writeRuntimeConfig(stateRoot: string, config: Record<string, unknown>) {
-  fs.writeFileSync(path.join(stateRoot, 'config', 'deterministic-config.json'), JSON.stringify(config));
-}
+import { tempStateRoot, writeRuntimeConfig } from './helpers/state-root.js';
 
 const envelopeMetaSchema = z.object({
   requestId: z.string().min(1),
@@ -32,6 +26,8 @@ const errorEnvelopeSchema = z.object({
   meta: envelopeMetaSchema.optional(),
 });
 
+const daemonStatusDataSchema = z.object({ pid: z.number() });
+
 describe('agent JSON contract', () => {
   it('daemon status JSON uses envelope with requestId after a query starts the daemon', async () => {
     const { stateRoot } = tempStateRoot();
@@ -41,7 +37,7 @@ describe('agent JSON contract', () => {
       const out = runCli(['daemon', 'status'], env);
       expect(out.status).toBe(0);
       const parsed = successEnvelopeSchema.parse(JSON.parse(out.stdout));
-      expect((parsed.data as any).pid).toBeTypeOf('number');
+      expect(daemonStatusDataSchema.parse(parsed.data).pid).toBeTypeOf('number');
     } finally {
       runCli(['daemon', 'stop'], env);
     }
@@ -63,7 +59,7 @@ describe('agent JSON contract', () => {
       expect(out.status).not.toBe(0);
       const parsed = errorEnvelopeSchema.parse(JSON.parse(out.stdout));
       expect(parsed.error.code).toBe('DETERMINISTIC_REQUIRED');
-      expect(parsed.meta?.requestId).toBeTruthy();
+      expect(parsed.meta?.requestId).toBeDefined();
     } finally {
       runCli(['daemon', 'stop'], env);
     }

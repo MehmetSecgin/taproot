@@ -5,18 +5,24 @@ import { queryRequest } from './helpers/query-state.js';
 const savedForceDirect = process.env.TAPROOT_FORCE_DIRECT;
 const savedStateRoot = process.env.TAPROOT_STATE_ROOT;
 
-beforeEach(() => {
-  delete process.env.TAPROOT_FORCE_DIRECT;
-});
+describe('routing a query through the daemon or directly', () => {
+  beforeEach(() => {
+    delete process.env.TAPROOT_FORCE_DIRECT;
+  });
 
-afterEach(() => {
-  if (savedForceDirect === undefined) delete process.env.TAPROOT_FORCE_DIRECT;
-  else process.env.TAPROOT_FORCE_DIRECT = savedForceDirect;
-  if (savedStateRoot === undefined) delete process.env.TAPROOT_STATE_ROOT;
-  else process.env.TAPROOT_STATE_ROOT = savedStateRoot;
-});
+  afterEach(() => {
+    if (savedForceDirect === undefined) {
+      delete process.env.TAPROOT_FORCE_DIRECT;
+    } else {
+      process.env.TAPROOT_FORCE_DIRECT = savedForceDirect;
+    }
+    if (savedStateRoot === undefined) {
+      delete process.env.TAPROOT_STATE_ROOT;
+    } else {
+      process.env.TAPROOT_STATE_ROOT = savedStateRoot;
+    }
+  });
 
-describe('queryRoute', () => {
   it('routes an ordinary query to the daemon', () => {
     expect(queryRoute(queryRequest())).toBe('daemon');
   });
