@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enforceMutationPolicy } from '../src/core/safety.js';
+import { enforceMutationPolicy } from '../src/core/query-policy.js';
 import { classifySql } from '../src/core/sql-statement-effect.js';
 
 describe('sql safety classification', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectRangeWarnings } from '../src/core/safety.js';
+import { collectRangeWarnings } from '../src/core/query-policy.js';
 import type { SchemaContext } from '../src/types/schema-context.js';
 
 function context(partition?: SchemaContext['tables'][string]['partition']): SchemaContext {
