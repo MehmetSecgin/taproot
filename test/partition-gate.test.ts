@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enforcePartitionPredicate } from '../src/core/safety.js';
+import { enforcePartitionPredicate } from '../src/core/query-policy.js';
 import { buildSchemaContext } from '../src/core/schema-context.js';
 import type { SchemaCatalog } from '../src/store/schema-catalog.js';
 import type { DatasourceKind, DatasourceProfile } from '../src/types/datasource.js';
